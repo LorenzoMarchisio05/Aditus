@@ -393,7 +393,7 @@ fn tab_menu(app: AppHandle, window: tauri::Window, id: u32) -> Result<(), String
         let Some(t) = g.tabs.iter().find(|t| t.id == id) else { return Ok(()) };
         let url = t.url();
         let host = if tabs::internal_view(&url).is_some() { false } else { url::Url::parse(&url).ok().is_some_and(|u| u.host_str().is_some()) };
-        let tab = (t.pinned, t.group.clone(), t.profile.clone(), host);
+        let tab = (t.pinned, t.group.clone(), t.profile.clone(), host, host); // pin only real sites, not new-tab or aditus:// pages
         let mut groups: Vec<String> = g.tabs.iter().filter_map(|t| t.group.clone()).collect();
         groups.sort();
         groups.dedup();
@@ -405,7 +405,7 @@ fn tab_menu(app: AppHandle, window: tauri::Window, id: u32) -> Result<(), String
     let plain = |act: &str, text: &str| MenuItem::with_id(&app, format!("tabm:{act}:{id}"), text, true, None::<&str>);
 
     let reload = e(plain("reload", "Reload"))?;
-    let pin = e(plain("pin", if tab.0 { "Unpin Tab" } else { "Pin Tab" }))?;
+    let pin = e(MenuItem::with_id(&app, format!("tabm:pin:{id}"), if tab.0 { "Unpin Tab" } else { "Pin Tab" }, tab.0 || tab.4, None::<&str>))?;
     let mut group_items: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = vec![];
     for n in &groups {
         group_items.push(Box::new(e(CheckMenuItem::with_id(&app, format!("tabm:group:{id}:{n}"), n, true, tab.1.as_deref() == Some(n), None::<&str>))?));
