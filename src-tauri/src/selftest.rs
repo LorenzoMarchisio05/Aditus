@@ -52,7 +52,27 @@ pub fn run(app: &AppHandle, port: u16) {
         wait(4);
         tabs::address_bar(app, t, &format!("http://localhost:{port}/report?step=u2"));
         wait(4);
+        if let (Some(w), Some(win)) = (app.get_webview("ui"), app.get_window("main")) {
+            let _ = w.with_webview(|pw| unsafe {
+                let v = &*(pw.inner() as *const objc2_web_kit::WKWebView);
+                let sv = v.superview();
+                eprintln!("[selftest] frame={:?} super={:?} insets={:?}", v.frame(), sv.map(|s| s.frame()), v.safeAreaInsets());
+            });
+            eprintln!("[selftest] ui webview size={:?} window inner={:?} scale={:?}", w.size(), win.inner_size(), win.scale_factor());
+        }
+        if let Some(w) = app.get_webview("ui") {
+            let _ = w.eval(format!("window.__TAURI_INTERNALS__.invoke('new_tab',{{url:'http://127.0.0.1:{port}/report?step=vp_'+innerWidth+'x'+innerHeight+'_'+document.querySelector('.side').getBoundingClientRect().height}})"));
+        }
+        wait(2);
         snapshot(app, "ui", "/tmp/aditus-snap-prompt.tiff");
+        wait(2);
+        let _ = tauri::Emitter::emit(app, "menu", "search-tabs");
+        wait(1);
+        if let Some(w) = app.get_webview("ui") {
+            let _ = w.eval("const i=document.querySelector('.tabsearch'); if(i){i.value='new';i.dispatchEvent(new Event('input',{bubbles:true}))}");
+        }
+        wait(1);
+        snapshot(app, "ui", "/tmp/aditus-snap-search.tiff");
         wait(2);
         {
             let mut g = app.state::<Shared>().inner().app.lock().unwrap();

@@ -38,7 +38,7 @@ pub fn attach(_app: &AppHandle, wv: &Webview) {
 pub fn apply_all(app: &AppHandle) {
     for (label, wv) in app.webviews() {
         if label.starts_with("tab-") {
-            let host = wv.url().ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
+            let host = crate::tabs::host_of(app, &label);
             set_enabled(&wv, super::enabled_for(app, &host));
         }
     }

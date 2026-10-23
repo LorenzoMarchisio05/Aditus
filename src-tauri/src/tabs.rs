@@ -127,6 +127,17 @@ fn shared(app: &AppHandle) -> &Shared {
     app.state::<Shared>().inner()
 }
 
+/// Host of the tab's current entry. Never ask the engine: wry panics (and aborts) when a fresh webview has no URL yet.
+pub fn host_of(app: &AppHandle, wlabel: &str) -> String {
+    let g = shared(app).app.lock().unwrap();
+    g.tabs
+        .iter()
+        .find(|t| label(t.id, t.gen) == wlabel)
+        .and_then(|t| Url::parse(&t.url()).ok())
+        .and_then(|u| u.host_str().map(String::from))
+        .unwrap_or_default()
+}
+
 pub fn label(id: u32, gen: u32) -> String {
     format!("tab-{id}-{gen}")
 }

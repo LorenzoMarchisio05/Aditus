@@ -42,7 +42,7 @@ pub fn apply_all(app: &AppHandle) {
         if !label.starts_with("tab-") {
             continue;
         }
-        let host = wv.url().ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
+        let host = crate::tabs::host_of(app, &label);
         set_enabled(&wv, super::enabled_for(app, &host));
     }
 }
