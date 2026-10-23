@@ -138,7 +138,7 @@ pub fn refresh(app: &AppHandle) {
     native::apply_all(app);
     let (id, url) = {
         let g = app.state::<Shared>().inner().app.lock().unwrap();
-        let id = g.active;
+        let id = g.focused_active();
         (id, g.tabs.iter().find(|t| t.id == id).map(|t| t.url()).unwrap_or_default())
     };
     // Internal pages (settings, history...) have nothing to re-filter; reloading would reset them.

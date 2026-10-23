@@ -2,14 +2,8 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "ui",
   "description": "Browser chrome (sidebar, top bar, palette). Full app command access.",
-  "windows": [
-    "main"
-  ],
-  "webviews": [
-    "ui",
-    "palette",
-    "panel"
-  ],
+  "windows": ["main", "w*"],
+  "webviews": ["ui", "ui-*", "palette", "palette-*", "panel", "panel-*"],
   "permissions": [
     "core:default", "core:window:allow-start-dragging",
     "allow-get-state",

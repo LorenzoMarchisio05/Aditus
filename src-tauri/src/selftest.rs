@@ -16,11 +16,11 @@ fn profile_of(app: &AppHandle, id: u32) -> String {
 }
 
 fn active_id(app: &AppHandle) -> u32 {
-    app.state::<Shared>().inner().app.lock().unwrap().active
+    app.state::<Shared>().inner().app.lock().unwrap().focused_active()
 }
 
 fn snap_active(app: &AppHandle, path: &str) {
-    let active = app.state::<Shared>().inner().app.lock().unwrap().active;
+    let active = app.state::<Shared>().inner().app.lock().unwrap().focused_active();
     if let Some(wv) = tabs::active_webview(app, active) {
         snapshot(app, wv.label(), path);
     }
@@ -57,7 +57,7 @@ pub fn run(app: &AppHandle, port: u16) {
     if std::env::var("ADITUS_SELFTEST_ONLY").as_deref() == Ok("panel") {
         wait(3);
         eprintln!("[selftest] opening settings");
-        crate::show_panel(app.clone(), "settings".into());
+        crate::show_panel(app.clone(), app.get_window("main").unwrap(), "settings".into());
         wait(4);
         eprintln!("[selftest] opened url={}", url_of(app, active_id(app)));
         snap_active(app, "/tmp/aditus-snap-settings.tiff");
@@ -114,7 +114,7 @@ pub fn run(app: &AppHandle, port: u16) {
         }
         wait(1);
         snapshot(app, "ui", "/tmp/aditus-snap-picker.tiff");
-        crate::hide_panel(app.clone());
+        crate::hide_panel(app.clone(), app.get_window("main").unwrap());
         wait(1);
         let _ = tauri::Emitter::emit(app, "menu", "search-tabs");
         wait(1);
@@ -141,7 +141,7 @@ pub fn run(app: &AppHandle, port: u16) {
         for t in &g.tabs {
             eprintln!("[selftest] restored tab {} profile={} pinned={} group={:?} discarded={} url={}", t.id, t.profile, t.pinned, t.group, t.discarded, t.entries.get(t.idx).map(|e| e.url.as_str()).unwrap_or(""));
         }
-        let active = g.active;
+        let active = g.focused_active();
         drop(g);
         eprintln!("[selftest] restored active={active}");
         snapshot(app, "ui", "/tmp/aditus-snap-restored-ui.tiff");
@@ -265,39 +265,39 @@ pub fn run(app: &AppHandle, port: u16) {
     eprintln!("[selftest] reorder first={} (want {t10}) ", order[0]);
 
     // 12. overlay webviews + devtools + find do not error
-    crate::show_palette(app.clone());
+    crate::show_palette(app.clone(), app.get_window("main").unwrap());
     wait(3);
     eprintln!("[selftest] palette webview exists={}", app.get_webview("palette").is_some());
     snapshot(app, "palette", "/tmp/aditus-snap-palette.tiff");
     wait(2);
-    crate::hide_palette(app.clone());
-    crate::show_panel(app.clone(), "settings".into());
+    crate::hide_palette(app.clone(), app.get_window("main").unwrap());
+    crate::show_panel(app.clone(), app.get_window("main").unwrap(), "settings".into());
     wait(3);
     eprintln!("[selftest] panel webview exists={}", url_of(app, active_id(app)).starts_with("aditus://"));
     snap_active(app, "/tmp/aditus-snap-settings.tiff");
-    crate::show_panel(app.clone(), "history".into());
+    crate::show_panel(app.clone(), app.get_window("main").unwrap(), "history".into());
     wait(3);
     snap_active(app, "/tmp/aditus-snap-history.tiff");
     wait(2);
-    crate::show_panel(app.clone(), "downloads".into());
+    crate::show_panel(app.clone(), app.get_window("main").unwrap(), "downloads".into());
     wait(3);
     snap_active(app, "/tmp/aditus-snap-downloads.tiff");
     wait(2);
     snapshot(app, "ui", "/tmp/aditus-snap-ui.tiff");
-    let active = app.state::<Shared>().inner().app.lock().unwrap().active;
+    let active = app.state::<Shared>().inner().app.lock().unwrap().focused_active();
     if let Some(wv) = tabs::active_webview(app, active) {
         snapshot(app, wv.label(), "/tmp/aditus-snap-page.tiff");
     }
     wait(4);
     eprintln!("[selftest] panels cycled");
-    crate::find(app.clone(), "report".into(), true);
+    crate::find(app.clone(), app.get_window("main").unwrap(), "report".into(), true);
     eprintln!("[selftest] find ok");
     eprintln!("[selftest] done");
     if std::env::var_os("ADITUS_SELFTEST_EXIT").is_some() {
         app.exit(0);
         return;
     }
-    crate::open_devtools(app.clone());
+    crate::open_devtools(app.clone(), app.get_window("main").unwrap());
     wait(2);
 }
 

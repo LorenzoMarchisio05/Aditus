@@ -13,14 +13,14 @@ use std::{sync::Mutex, time::Duration};
 use tabs::{App, Shared};
 use tauri::{
     menu::{CheckMenuItem, ContextMenu, Menu, MenuItem, PredefinedMenuItem, Submenu},
-    window::WindowBuilder,
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Webview, WebviewBuilder, WebviewUrl,
     WindowEvent,
 };
 use url::Url;
 
-fn active_id(app: &AppHandle) -> u32 {
-    app.state::<Shared>().app.lock().unwrap().active
+/// Selected tab of the window that issued the command.
+fn active_id(app: &AppHandle, win: &tauri::Window) -> u32 {
+    app.state::<Shared>().app.lock().unwrap().active(win.label())
 }
 
 fn mutate_cfg(app: &AppHandle, f: impl FnOnce(&mut Config)) {
@@ -41,8 +41,8 @@ fn get_state(app: AppHandle) {
 }
 
 #[tauri::command(async)]
-fn new_tab(app: AppHandle, url: Option<String>) {
-    tabs::open_tab(&app, url.and_then(|u| Url::parse(&u).ok()), None, true);
+fn new_tab(app: AppHandle, window: tauri::Window, url: Option<String>) {
+    tabs::open_tab_in(&app, window.label(), url.and_then(|u| Url::parse(&u).ok()), None, true);
 }
 
 #[tauri::command(async)]
@@ -56,31 +56,32 @@ fn activate_tab(app: AppHandle, id: u32) {
 }
 
 #[tauri::command(async)]
-fn address(app: AppHandle, input: String) {
-    tabs::address_bar(&app, active_id(&app), &input);
+fn address(app: AppHandle, window: tauri::Window, input: String) {
+    tabs::address_bar(&app, active_id(&app, &window), &input);
 }
 
 #[tauri::command(async)]
-fn back(app: AppHandle) {
-    tabs::go_history(&app, active_id(&app), -1);
+fn back(app: AppHandle, window: tauri::Window) {
+    tabs::go_history(&app, active_id(&app, &window), -1);
 }
 
 #[tauri::command(async)]
-fn forward(app: AppHandle) {
-    tabs::go_history(&app, active_id(&app), 1);
+fn forward(app: AppHandle, window: tauri::Window) {
+    tabs::go_history(&app, active_id(&app, &window), 1);
 }
 
 #[tauri::command(async)]
-fn reload(app: AppHandle) {
-    tabs::reload(&app, active_id(&app));
+fn reload(app: AppHandle, window: tauri::Window) {
+    tabs::reload(&app, active_id(&app, &window));
 }
 
 #[tauri::command(async)]
-fn set_layout(app: AppHandle, sidebar: f64, top: f64) {
+fn set_layout(app: AppHandle, window: tauri::Window, sidebar: f64, top: f64) {
     {
         let mut g = app.state::<Shared>().inner().app.lock().unwrap();
-        g.sidebar = sidebar;
-        g.top = top;
+        let w = g.win(window.label());
+        w.sidebar = sidebar;
+        w.top = top;
     }
     tabs::apply_layout(&app);
 }
@@ -213,8 +214,8 @@ fn reorder_tab(app: AppHandle, id: u32, to: usize) {
 }
 
 #[tauri::command(async)]
-fn find(app: AppHandle, text: String, forward: bool) {
-    let id = active_id(&app);
+fn find(app: AppHandle, window: tauri::Window, text: String, forward: bool) {
+    let id = active_id(&app, &window);
     if let Some(wv) = tabs::active_webview(&app, id) {
         let t = serde_json::to_string(&text).unwrap();
         let _ = wv.eval(format!("window.find({t}, false, {}, true)", !forward));
@@ -222,15 +223,15 @@ fn find(app: AppHandle, text: String, forward: bool) {
 }
 
 #[tauri::command(async)]
-fn find_clear(app: AppHandle) {
-    if let Some(wv) = tabs::active_webview(&app, active_id(&app)) {
+fn find_clear(app: AppHandle, window: tauri::Window) {
+    if let Some(wv) = tabs::active_webview(&app, active_id(&app, &window)) {
         let _ = wv.eval("getSelection()&&getSelection().removeAllRanges()");
     }
 }
 
 #[tauri::command(async)]
-fn open_devtools(app: AppHandle) {
-    if let Some(wv) = tabs::active_webview(&app, active_id(&app)) {
+fn open_devtools(app: AppHandle, window: tauri::Window) {
+    if let Some(wv) = tabs::active_webview(&app, active_id(&app, &window)) {
         tabs::open_inspector(&wv);
     }
 }
@@ -263,25 +264,27 @@ fn reveal_path(path: String) {
 }
 
 #[tauri::command(async)]
-fn show_palette(app: AppHandle) {
-    let Some(window) = app.get_window("main") else { return };
+fn show_palette(app: AppHandle, window: tauri::Window) {
+    let win = window.label().to_string();
     let (sidebar, top) = {
         let mut g = app.state::<Shared>().inner().app.lock().unwrap();
-        g.overlay_open = true;
-        (g.sidebar, g.top)
+        let w = g.win(&win);
+        w.overlay_open = true;
+        (w.sidebar, w.top)
     };
     let sf = window.scale_factor().unwrap_or(1.0);
     let w = window.inner_size().map(|s| s.width as f64 / sf).unwrap_or(1200.0);
     let pw = 640.0_f64.min(w - 40.0);
     let pos = LogicalPosition::new(sidebar + ((w - sidebar - pw) / 2.0).max(0.0), top + 24.0);
     let size = LogicalSize::new(pw, 72.0);
-    let wv = match app.get_webview("palette") {
+    let label = tabs::wv_label("palette", &win);
+    let wv = match app.get_webview(&label) {
         Some(wv) => {
             let _ = wv.set_bounds(tauri::Rect { position: pos.into(), size: size.into() });
             wv
         }
         None => match window.add_child(
-            WebviewBuilder::new("palette", WebviewUrl::App("index.html?view=palette".into())),
+            WebviewBuilder::new(&label, WebviewUrl::App("index.html?view=palette".into())),
             pos,
             size,
         ) {
@@ -294,21 +297,22 @@ fn show_palette(app: AppHandle) {
     };
     let _ = wv.show();
     let _ = wv.set_focus();
-    let _ = app.emit_to("palette", "palette-open", ());
+    let _ = app.emit_to(label, "palette-open", ());
 }
 
 #[tauri::command(async)]
-fn show_panel(app: AppHandle, view: String) {
+fn show_panel(app: AppHandle, window: tauri::Window, view: String) {
+    let win = window.label().to_string();
     if view != "newtab" {
-        return tabs::open_internal(&app, &view);
+        return tabs::open_internal(&app, &win, &view);
     }
-    let Some(window) = app.get_window("main") else { return };
-    if let Some(wv) = app.get_webview("panel") {
+    let label = tabs::wv_label("panel", &win);
+    if let Some(wv) = app.get_webview(&label) {
         let _ = wv.close();
     }
-    let (pos, size) = tabs::content_rect(&app);
+    let (pos, size) = tabs::content_rect(&app, &win);
     let url = WebviewUrl::App(format!("index.html?view={view}").into());
-    match window.add_child(WebviewBuilder::new("panel", url), pos, size) {
+    match window.add_child(WebviewBuilder::new(&label, url), pos, size) {
         Ok(wv) => {
             tabs::no_inset(&wv);
             let _ = wv.set_focus();
@@ -318,19 +322,20 @@ fn show_panel(app: AppHandle, view: String) {
 }
 
 #[tauri::command(async)]
-fn hide_panel(app: AppHandle) {
-    if let Some(wv) = app.get_webview("panel") {
+fn hide_panel(app: AppHandle, window: tauri::Window) {
+    if let Some(wv) = app.get_webview(&tabs::wv_label("panel", window.label())) {
         let _ = wv.close();
     }
 }
 
 /// Native popup (draws above the page webviews, unlike an HTML menu); picks arrive as `menu` events `profile:<name>`.
 #[tauri::command(async)]
-fn profile_menu(app: AppHandle) -> Result<(), String> {
+fn profile_menu(app: AppHandle, window: tauri::Window) -> Result<(), String> {
     let (names, cur) = {
         let state = app.state::<Shared>();
         let g = state.app.lock().unwrap();
-        let cur = g.tabs.iter().find(|t| t.id == g.active).map(|t| t.profile.clone()).unwrap_or_default();
+        let active = g.active(window.label());
+        let cur = g.tabs.iter().find(|t| t.id == active).map(|t| t.profile.clone()).unwrap_or_default();
         (g.cfg.profiles.iter().map(|p| p.name.clone()).collect::<Vec<_>>(), cur)
     };
     let items = names
@@ -340,7 +345,6 @@ fn profile_menu(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items.iter().map(|i| i as _).collect();
     let menu = Menu::with_items(&app, &refs).map_err(|e| e.to_string())?;
-    let window = app.get_window("main").ok_or("no window")?;
     app.run_on_main_thread(move || {
         eprintln!("[profile_menu] popup -> {:?}", menu.popup(window));
     })
@@ -348,14 +352,14 @@ fn profile_menu(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command(async)]
-fn switch_profile(app: AppHandle, profile: String) {
-    tabs::switch_profile(&app, active_id(&app), &profile);
+fn switch_profile(app: AppHandle, window: tauri::Window, profile: String) {
+    tabs::switch_profile(&app, active_id(&app, &window), &profile);
 }
 
 #[tauri::command(async)]
-fn hide_palette(app: AppHandle) {
-    app.state::<Shared>().app.lock().unwrap().overlay_open = false;
-    if let Some(wv) = app.get_webview("palette") {
+fn hide_palette(app: AppHandle, window: tauri::Window) {
+    app.state::<Shared>().app.lock().unwrap().win(window.label()).overlay_open = false;
+    if let Some(wv) = app.get_webview(&tabs::wv_label("palette", window.label())) {
         let _ = wv.hide();
     }
 }
@@ -393,6 +397,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         &[
             &item("new-tab", "New Tab", "CmdOrCtrl+T")?,
+            &item("new-window", "New Window", "CmdOrCtrl+N")?,
             &item("close-tab", "Close Tab", "CmdOrCtrl+W")?,
             &item("reopen-tab", "Reopen Closed Tab", "CmdOrCtrl+Shift+T")?,
             &item("focus-address", "Open Location", "CmdOrCtrl+L")?,
@@ -439,12 +444,14 @@ fn on_menu(app: &AppHandle, id: &str) {
     let app = app.clone();
     let id = id.to_string();
     tauri::async_runtime::spawn(async move {
-        let cur = active_id(&app);
+        let (win, cur) = app.state::<Shared>().app.lock().unwrap().focused_active_with_win();
+        let ui = tabs::wv_label("ui", &win);
         match id.as_str() {
             "new-tab" => {
-                tabs::open_tab(&app, None, None, true);
-                let _ = app.emit("menu", "focus-address");
+                tabs::open_tab_in(&app, &win, None, None, true);
+                let _ = app.emit_to(ui, "menu", "focus-address");
             }
+            "new-window" => tabs::new_window(&app),
             "close-tab" => tabs::close_tab(&app, cur),
             "reopen-tab" => tabs::reopen_closed(&app),
             "reload" => tabs::reload(&app, cur),
@@ -458,7 +465,7 @@ fn on_menu(app: &AppHandle, id: &str) {
                 }
             }
             other => {
-                let _ = app.emit("menu", other);
+                let _ = app.emit_to(ui, "menu", other);
             }
         }
     });
@@ -478,10 +485,18 @@ pub fn run() {
             adblock_info, check_update
         ])
         .on_menu_event(|app, ev| on_menu(app, ev.id().as_ref()))
-        .on_window_event(|win, ev| {
-            if let WindowEvent::Resized(_) = ev {
-                tabs::apply_layout(win.app_handle());
+        .on_window_event(|win, ev| match ev {
+            WindowEvent::Resized(_) => tabs::apply_layout(win.app_handle()),
+            WindowEvent::Focused(true) => {
+                if let Some(s) = win.app_handle().try_state::<Shared>() {
+                    let mut g = s.app.lock().unwrap();
+                    if g.wins.contains_key(win.label()) {
+                        g.focused = win.label().to_string();
+                    }
+                }
             }
+            WindowEvent::Destroyed => tabs::window_closed(win.app_handle(), win.label()),
+            _ => {}
         })
         .setup(|app| {
             let dir = std::env::var_os("ADITUS_DATA_DIR")
@@ -495,23 +510,7 @@ pub fn run() {
             app.manage(Shared { app: Mutex::new(App::new(cfg)), db, cfg_path, data_dir: dir });
 
             let handle = app.handle().clone();
-            let wb = WindowBuilder::new(app, "main")
-                .title("Aditus")
-                .inner_size(1280.0, 820.0)
-                .min_inner_size(640.0, 400.0);
-            // The native title bar would swallow clicks on the top ~28px of the top bar; the UI
-            // draws its own drag regions instead.
-            #[cfg(target_os = "macos")]
-            let wb = wb.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
-            let window = wb.build()?;
-            let sf = window.scale_factor()?;
-            let size = window.inner_size()?.to_logical::<f64>(sf);
-            let ui = window.add_child(
-                WebviewBuilder::new("ui", WebviewUrl::App("index.html".into())).auto_resize(),
-                LogicalPosition::new(0.0, 0.0),
-                size,
-            )?;
-            tabs::no_inset(&ui);
+            tabs::create_window(&handle, "main")?;
             app.set_menu(build_menu(&handle)?)?;
 
             adblock::init(&handle);

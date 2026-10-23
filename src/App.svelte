@@ -2,7 +2,7 @@
   // A site on a real host is remembered (mapping); blank tabs just switch.
   const setProfile = (t, profile) => (t.host ? call('assign_mapping', { host: t.host, profile }) : call('switch_profile', { profile }));
   import { onMount, tick } from 'svelte';
-  import { call, on, color } from './lib/api.js';
+  import { call, on, onState, color } from './lib/api.js';
 
   const COLLAPSED = 52;
   const TOP = 44;
@@ -124,7 +124,7 @@
   onMount(() => {
     const offs = [];
     (async () => {
-      offs.push(await on('state', (s) => (st = s)));
+      offs.push(await onState((s) => (st = s)));
       offs.push(
         await on('menu', (id) => {
           if (id === 'focus-address') focusAddress();

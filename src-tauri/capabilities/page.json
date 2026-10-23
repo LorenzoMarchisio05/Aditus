@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "page",
   "description": "Untrusted web pages. May only call page_ping and cosmetic_css.",
-  "windows": ["main"],
+  "windows": ["main", "w*"],
   "webviews": ["tab-*"],
   "remote": { "urls": ["http://*", "https://*", "http://*:*", "https://*:*"] },
   "local": true,

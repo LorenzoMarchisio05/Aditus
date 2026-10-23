@@ -50,6 +50,7 @@ enum Mode {
 
 pub struct Tab {
     pub id: u32,
+    pub win: String,
     pub profile: String,
     pub entries: Vec<Entry>,
     pub idx: usize,
@@ -77,13 +78,22 @@ struct Undo {
     url: String,
 }
 
+/// Per-window layout and selection. Tabs belong to a window via `Tab::win`.
+pub struct Win {
+    pub active: u32,
+    pub sidebar: f64,
+    pub top: f64,
+    pub overlay_open: bool,
+}
+
 pub struct App {
     pub cfg: Config,
     pub tabs: Vec<Tab>,
-    pub active: u32,
+    pub wins: HashMap<String, Win>,
+    /// Window that last had focus: menu actions and window-less callers act on it.
+    pub focused: String,
     next_id: u32,
-    pub sidebar: f64,
-    pub top: f64,
+    next_win: u32,
     prompt: Option<String>,
     skipped: HashSet<String>,
     toast: Option<Toast>,
@@ -91,7 +101,6 @@ pub struct App {
     gestures: HashMap<u32, Instant>,
     /// Navigation that would have swapped had the gesture ping arrived first (WebView2 orders them the other way).
     late: HashMap<u32, (String, String, Instant)>,
-    pub overlay_open: bool,
     /// Recently closed tabs (url, profile), newest last.
     closed: Vec<(String, String)>,
 }
@@ -101,17 +110,16 @@ impl App {
         Self {
             cfg,
             tabs: vec![],
-            active: 0,
+            wins: HashMap::new(),
+            focused: "main".into(),
             next_id: 1,
-            sidebar: 240.0,
-            top: 44.0,
+            next_win: 2,
             prompt: None,
             skipped: HashSet::new(),
             toast: None,
             undo: None,
             gestures: HashMap::new(),
             late: HashMap::new(),
-            overlay_open: false,
             closed: vec![],
         }
     }
@@ -124,6 +132,32 @@ impl App {
     fn tab(&mut self, id: u32) -> Option<&mut Tab> {
         self.tabs.iter_mut().find(|t| t.id == id)
     }
+
+    pub fn win(&mut self, w: &str) -> &mut Win {
+        self.wins.entry(w.to_string()).or_insert(Win { active: 0, sidebar: 240.0, top: 44.0, overlay_open: false })
+    }
+
+    /// Selected tab of window `w`.
+    pub fn active(&self, w: &str) -> u32 {
+        self.wins.get(w).map_or(0, |x| x.active)
+    }
+
+    pub fn focused_active_with_win(&self) -> (String, u32) {
+        (self.focused.clone(), self.focused_active())
+    }
+
+    pub fn focused_active(&self) -> u32 {
+        self.active(&self.focused)
+    }
+
+    fn win_of(&self, id: u32) -> String {
+        self.tabs.iter().find(|t| t.id == id).map_or_else(|| self.focused.clone(), |t| t.win.clone())
+    }
+}
+
+/// Per-window webview label: the first window keeps the bare names.
+pub fn wv_label(kind: &str, win: &str) -> String {
+    if win == "main" { kind.to_string() } else { format!("{kind}-{win}") }
 }
 
 impl Tab {
@@ -178,30 +212,46 @@ pub fn open_inspector(wv: &tauri::Webview) {
 }
 
 /// macOS: WebKit docks the inspector across its superview and resizes the page to match. Page
-/// webviews therefore live in their own container view covering just the content area.
+/// webviews therefore live in a container view per window, covering just the content area.
 #[cfg(target_os = "macos")]
-static CONTAINER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+unsafe fn is_container(view: *mut objc2::runtime::AnyObject) -> bool {
+    use objc2::msg_send;
+    let id: *mut objc2::runtime::AnyObject = msg_send![&*view, identifier];
+    !id.is_null() && {
+        let want = objc2_foundation::NSString::from_str("aditus-pages");
+        msg_send![&*id, isEqual: &*want]
+    }
+}
 
-/// Place the container over the content area and the page webview filling it. Idempotent.
+/// Place the window's container over the content area and the page webview filling it. Idempotent.
 #[cfg(target_os = "macos")]
 unsafe fn mount(page: *mut std::ffi::c_void, pos: LogicalPosition<f64>, size: LogicalSize<f64>) {
     use objc2::{class, msg_send, runtime::AnyObject};
     use objc2_foundation::{NSPoint, NSRect, NSSize};
-    use std::sync::atomic::Ordering;
     let v = &*(page as *const AnyObject);
-    let mut c = CONTAINER.load(Ordering::Relaxed) as *mut AnyObject;
     let sv: *mut AnyObject = msg_send![v, superview];
     if sv.is_null() {
         return;
     }
-    let content: *mut AnyObject = if sv == c { msg_send![&*sv, superview] } else { sv };
+    let content: *mut AnyObject = if is_container(sv) { msg_send![&*sv, superview] } else { sv };
     let cf: NSRect = msg_send![&*content, frame];
     let frame = NSRect::new(NSPoint::new(pos.x, cf.size.height - pos.y - size.height), NSSize::new(size.width, size.height));
+    let mut c: *mut AnyObject = std::ptr::null_mut();
+    let subs: *mut AnyObject = msg_send![&*content, subviews];
+    let n: usize = msg_send![&*subs, count];
+    for i in 0..n {
+        let sub: *mut AnyObject = msg_send![&*subs, objectAtIndex: i];
+        if is_container(sub) {
+            c = sub;
+            break;
+        }
+    }
     if c.is_null() {
         let a: *mut AnyObject = msg_send![class!(NSView), alloc];
         c = msg_send![a, initWithFrame: frame];
+        let ident = objc2_foundation::NSString::from_str("aditus-pages");
+        let _: () = msg_send![&*c, setIdentifier: &*ident];
         let _: () = msg_send![&*content, addSubview: &*c];
-        CONTAINER.store(c as usize, Ordering::Relaxed);
     } else {
         let _: () = msg_send![&*c, setFrame: frame];
     }
@@ -214,7 +264,7 @@ unsafe fn mount(page: *mut std::ffi::c_void, pos: LogicalPosition<f64>, size: Lo
 
 /// Size a page webview to the content area.
 fn fit_page(app: &AppHandle, wv: &tauri::Webview) {
-    let (pos, size) = content_rect(app);
+    let (pos, size) = content_rect(app, wv.window().label());
     #[cfg(target_os = "macos")]
     let _ = wv.with_webview(move |pw| unsafe { mount(pw.inner(), pos, size) });
     #[cfg(not(target_os = "macos"))]
@@ -253,13 +303,13 @@ fn normalize(url: String) -> String {
     internal_view(&url).map(|v| format!("aditus://{v}")).unwrap_or(url)
 }
 
-pub fn open_internal(app: &AppHandle, view: &str) {
+pub fn open_internal(app: &AppHandle, win: &str, view: &str) {
     let url = format!("aditus://{view}");
-    let existing = shared(app).app.lock().unwrap().tabs.iter().find(|t| t.url() == url).map(|t| t.id);
+    let existing = shared(app).app.lock().unwrap().tabs.iter().find(|t| t.win == win && t.url() == url).map(|t| t.id);
     match existing {
         Some(id) => activate(app, id),
         None => {
-            open_tab(app, Url::parse(&url).ok(), None, true);
+            open_tab_in(app, win, Url::parse(&url).ok(), None, true);
         }
     }
 }
@@ -287,6 +337,7 @@ struct TabView {
 
 #[derive(Serialize)]
 struct Snapshot<'a> {
+    win: &'a str,
     tabs: Vec<TabView>,
     active: u32,
     cfg: &'a Config,
@@ -296,46 +347,57 @@ struct Snapshot<'a> {
 }
 
 pub fn emit_state(app: &AppHandle) {
+    emit(app, true);
+}
+
+/// One snapshot per window, tagged with its label; each frontend keeps only its own.
+fn emit(app: &AppHandle, save: bool) {
     let s = shared(app);
     let g = s.app.lock().unwrap();
-    let active_host = g
-        .tabs
-        .iter()
-        .find(|t| t.id == g.active)
-        .and_then(|t| Url::parse(&t.url()).ok())
-        .and_then(|u| u.host_str().map(String::from))
-        .unwrap_or_default();
-    let snap = Snapshot {
-        tabs: g
+    for (win, w) in &g.wins {
+        let active_host = g
             .tabs
             .iter()
-            .map(|t| {
-                let url = t.url();
-                let parsed = Url::parse(&url).ok();
-                TabView {
-                    id: t.id,
-                    title: if t.title.is_empty() { if is_blank(&url) { "New Tab".into() } else { url.clone() } } else { t.title.clone() },
-                    host: if internal_view(&url).is_some() { String::new() } else { parsed.as_ref().and_then(|u| u.host_str().map(String::from)).unwrap_or_default() },
-                    url: if is_blank(&url) { String::new() } else { url },
-                    profile: t.profile.clone(),
-                    pinned: t.pinned,
-                    group: t.group.clone(),
-                    discarded: t.discarded,
-                    loading: t.loading,
-                    can_back: t.idx > 0,
-                    can_forward: t.idx + 1 < t.entries.len(),
-                }
-            })
-            .collect(),
-        active: g.active,
-        cfg: &g.cfg,
-        prompt: g.prompt.clone(),
-        toast: g.toast.clone(),
-        adblock_site: !g.cfg.allowlist.contains(&active_host),
-    };
-    let _ = app.emit("state", &snap);
+            .find(|t| t.id == w.active)
+            .and_then(|t| Url::parse(&t.url()).ok())
+            .and_then(|u| u.host_str().map(String::from))
+            .unwrap_or_default();
+        let snap = Snapshot {
+            win,
+            tabs: g
+                .tabs
+                .iter()
+                .filter(|t| &t.win == win)
+                .map(|t| {
+                    let url = t.url();
+                    let parsed = Url::parse(&url).ok();
+                    TabView {
+                        id: t.id,
+                        title: if t.title.is_empty() { if is_blank(&url) { "New Tab".into() } else { url.clone() } } else { t.title.clone() },
+                        host: if internal_view(&url).is_some() { String::new() } else { parsed.as_ref().and_then(|u| u.host_str().map(String::from)).unwrap_or_default() },
+                        url: if is_blank(&url) { String::new() } else { url },
+                        profile: t.profile.clone(),
+                        pinned: t.pinned,
+                        group: t.group.clone(),
+                        discarded: t.discarded,
+                        loading: t.loading,
+                        can_back: t.idx > 0,
+                        can_forward: t.idx + 1 < t.entries.len(),
+                    }
+                })
+                .collect(),
+            active: w.active,
+            cfg: &g.cfg,
+            prompt: g.prompt.clone(),
+            toast: g.toast.clone(),
+            adblock_site: !g.cfg.allowlist.contains(&active_host),
+        };
+        let _ = app.emit("state", &snap);
+    }
     drop(g);
-    save_session(app);
+    if save {
+        save_session(app);
+    }
 }
 
 fn save_cfg(app: &AppHandle) {
@@ -346,13 +408,14 @@ fn save_cfg(app: &AppHandle) {
 
 // ---------- layout ----------
 
-pub fn content_rect(app: &AppHandle) -> (LogicalPosition<f64>, LogicalSize<f64>) {
+pub fn content_rect(app: &AppHandle, win: &str) -> (LogicalPosition<f64>, LogicalSize<f64>) {
     let (sidebar, top) = {
-        let g = shared(app).app.lock().unwrap();
-        (g.sidebar, g.top)
+        let mut g = shared(app).app.lock().unwrap();
+        let w = g.win(win);
+        (w.sidebar, w.top)
     };
     let (w, h) = app
-        .get_window("main")
+        .get_window(win)
         .and_then(|win| {
             let sf = win.scale_factor().ok()?;
             let s = win.inner_size().ok()?;
@@ -367,19 +430,23 @@ pub fn content_rect(app: &AppHandle) -> (LogicalPosition<f64>, LogicalSize<f64>)
 
 pub fn apply_layout(app: &AppHandle) {
     no_inset_all(app);
-    let (pos, size) = content_rect(app);
-    let (id, gen) = {
+    let wins: Vec<(String, Option<(u32, u32)>)> = {
         let g = shared(app).app.lock().unwrap();
-        match g.tabs.iter().find(|t| t.id == g.active) {
-            Some(t) => (t.id, t.gen),
-            None => return,
-        }
+        g.wins
+            .iter()
+            .map(|(name, w)| (name.clone(), g.tabs.iter().find(|t| t.id == w.active).map(|t| (t.id, t.gen))))
+            .collect()
     };
-    if let Some(wv) = app.get_webview(&label(id, gen)) {
-        fit_page(app, &wv);
-    }
-    if let Some(wv) = app.get_webview("panel") {
-        let _ = wv.set_bounds(tauri::Rect { position: pos.into(), size: size.into() });
+    for (win, tab) in wins {
+        let (pos, size) = content_rect(app, &win);
+        if let Some((id, gen)) = tab {
+            if let Some(wv) = app.get_webview(&label(id, gen)) {
+                fit_page(app, &wv);
+            }
+        }
+        if let Some(wv) = app.get_webview(&wv_label("panel", &win)) {
+            let _ = wv.set_bounds(tauri::Rect { position: pos.into(), size: size.into() });
+        }
     }
 }
 
@@ -395,7 +462,7 @@ pub fn switch_profile(app: &AppHandle, tab_id: u32, profile: &str) {
     if is_blank(&url) {
         let old = {
             let mut g = shared(app).app.lock().unwrap();
-            let active = g.active;
+            let active = g.active(&g.win_of(tab_id));
             let t = g.tab(tab_id).unwrap();
             let old = label(t.id, t.gen);
             t.gen += 1;
@@ -449,13 +516,13 @@ new MutationObserver(skip).observe(document,{subtree:true,attributes:true,attrib
 })();"#;
 
 fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String> {
-    let window = app.get_window("main").ok_or("no main window")?;
-    let (profile_name, gen, url, cfg_profile) = {
+    let (profile_name, gen, url, cfg_profile, win) = {
         let g = shared(app).app.lock().unwrap();
         let t = g.tabs.iter().find(|t| t.id == tab_id).ok_or("no tab")?;
         let p = g.cfg.profile(&t.profile).or(g.cfg.profiles.first()).ok_or("no profile")?.clone();
-        (t.profile.clone(), t.gen, t.url(), p)
+        (t.profile.clone(), t.gen, t.url(), p, t.win.clone())
     };
+    let window = app.get_window(&win).ok_or("no window")?;
     let adblock_on = shared(app).app.lock().unwrap().cfg.settings.adblock;
     let data_dir = config::Config::data_dir(&shared(app).data_dir, &cfg_profile);
     let _ = std::fs::create_dir_all(&data_dir);
@@ -505,13 +572,16 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
             on_page_load(&a_load, tab_id, gen, url, started);
         })
         .on_new_window(move |u, _| {
-            let profile = {
+            let (profile, win) = {
                 let g = shared(&a_new).app.lock().unwrap();
-                g.tabs.iter().find(|t| t.id == tab_id).map(|t| t.profile.clone())
+                match g.tabs.iter().find(|t| t.id == tab_id) {
+                    Some(t) => (Some(t.profile.clone()), t.win.clone()),
+                    None => (None, g.focused.clone()),
+                }
             };
             let app = a_new.clone();
             tauri::async_runtime::spawn(async move {
-                open_tab(&app, Some(u), profile, true);
+                open_tab_in(&app, &win, Some(u), profile, true);
             });
             NewWindowResponse::Deny
         })
@@ -541,7 +611,7 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
         builder = builder.devtools(true);
     }
 
-    let (pos, size) = content_rect(app);
+    let (pos, size) = content_rect(app, &win);
     let wv = window.add_child(builder, pos, size).map_err(|e| e.to_string())?;
     no_inset(&wv);
     fit_page(app, &wv);
@@ -692,10 +762,10 @@ fn parse_label(l: &str) -> Option<(u32, u32)> {
 
 // ---------- tab operations ----------
 
-fn hide_all_except(app: &AppHandle, keep: Option<(u32, u32)>) {
+fn hide_all_except(app: &AppHandle, win: &str, keep: Option<(u32, u32)>) {
     let labels: Vec<String> = {
         let g = shared(app).app.lock().unwrap();
-        g.tabs.iter().map(|t| label(t.id, t.gen)).collect()
+        g.tabs.iter().filter(|t| t.win == win).map(|t| label(t.id, t.gen)).collect()
     };
     for l in labels {
         if let Some(wv) = app.get_webview(&l) {
@@ -708,9 +778,16 @@ fn hide_all_except(app: &AppHandle, keep: Option<(u32, u32)>) {
     }
 }
 
+/// New tab in the window that last had focus.
 pub fn open_tab(app: &AppHandle, url: Option<Url>, profile: Option<String>, activate_it: bool) -> u32 {
+    let win = shared(app).app.lock().unwrap().focused.clone();
+    open_tab_in(app, &win, url, profile, activate_it)
+}
+
+pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option<String>, activate_it: bool) -> u32 {
     let id = {
         let mut g = shared(app).app.lock().unwrap();
+        g.win(win);
         let profile = profile
             .filter(|p| g.cfg.profile(p).is_some())
             .unwrap_or_else(|| g.cfg.profiles[0].name.clone()); // new tabs start in the default profile
@@ -721,6 +798,7 @@ pub fn open_tab(app: &AppHandle, url: Option<Url>, profile: Option<String>, acti
             .unwrap_or_default();
         g.tabs.push(Tab {
             id,
+            win: win.to_string(),
             profile,
             entries,
             idx: 0,
@@ -745,12 +823,10 @@ pub fn open_tab(app: &AppHandle, url: Option<Url>, profile: Option<String>, acti
 }
 
 pub fn activate(app: &AppHandle, id: u32) {
-    let (need_build, gen) = {
+    let (need_build, gen, win) = {
         let mut g = shared(app).app.lock().unwrap();
-        if g.tabs.iter().all(|t| t.id != id) {
-            return;
-        }
-        g.active = id;
+        let Some(win) = g.tabs.iter().find(|t| t.id == id).map(|t| t.win.clone()) else { return };
+        g.win(&win).active = id;
         let t = g.tab(id).unwrap();
         t.last_active = Instant::now();
         let nb = t.discarded;
@@ -758,9 +834,9 @@ pub fn activate(app: &AppHandle, id: u32) {
         if nb {
             t.loading = true;
         }
-        (nb, t.gen)
+        (nb, t.gen, win)
     };
-    hide_all_except(app, Some((id, gen)));
+    hide_all_except(app, &win, Some((id, gen)));
     if need_build {
         // The recreated tab starts at its current history entry.
         if let Err(e) = build_webview(app, id, true) {
@@ -773,7 +849,7 @@ pub fn activate(app: &AppHandle, id: u32) {
 }
 
 pub fn close_tab(app: &AppHandle, id: u32) {
-    let (lbl, next) = {
+    let (lbl, next, win, left) = {
         let mut g = shared(app).app.lock().unwrap();
         let Some(pos) = g.tabs.iter().position(|t| t.id == id) else { return };
         let t = g.tabs.remove(pos);
@@ -785,26 +861,33 @@ pub fn close_tab(app: &AppHandle, id: u32) {
                 g.closed.remove(0);
             }
         }
-        let next = if g.active == id {
-            g.tabs.get(pos.min(g.tabs.len().saturating_sub(1))).map(|t| t.id)
+        let same: Vec<u32> = g.tabs.iter().filter(|x| x.win == t.win).map(|x| x.id).collect();
+        let next = if g.active(&t.win) == id {
+            // the neighbour that slid into the closed tab's place, within this window
+            let before = g.tabs.iter().take(pos).filter(|x| x.win == t.win).count();
+            same.get(before.min(same.len().saturating_sub(1))).copied()
         } else {
             None
         };
-        (label(t.id, t.gen), next)
+        (label(t.id, t.gen), next, t.win.clone(), same.len())
     };
     if let Some(wv) = app.get_webview(&lbl) {
         let _ = wv.close();
     }
     match next {
         Some(n) => activate(app, n),
-        None => {
-            let empty = shared(app).app.lock().unwrap().tabs.is_empty();
-            if empty {
-                open_tab(app, None, None, true);
+        None if left == 0 => {
+            // Last tab of a secondary window closes the window; the only window gets a blank tab.
+            let others = shared(app).app.lock().unwrap().wins.len() > 1;
+            if others && win != "main" {
+                if let Some(w) = app.get_window(&win) {
+                    let _ = w.close();
+                }
             } else {
-                emit_state(app);
+                open_tab_in(app, &win, None, None, true);
             }
         }
+        None => emit_state(app),
     }
 }
 
@@ -820,7 +903,7 @@ pub fn reopen_closed(app: &AppHandle) {
 pub fn swap(app: &AppHandle, tab_id: u32, profile: &str, url: &str, announce: bool) {
     let (old_label, is_active) = {
         let mut g = shared(app).app.lock().unwrap();
-        let active = g.active;
+        let active = g.active(&g.win_of(tab_id));
         let Some(t) = g.tab(tab_id) else { return };
         let previous = Undo { tab: tab_id, profile: t.profile.clone(), url: t.url() };
         let old = label(t.id, t.gen);
@@ -962,16 +1045,16 @@ pub fn reload_with(app: &AppHandle, tab_id: u32, pre: &str) {
 }
 
 pub fn address_bar(app: &AppHandle, tab_id: u32, input: &str) {
-    if let Some(view) = internal_view(input.trim()).filter(|v| matches!(v.as_str(), "settings" | "history" | "downloads")) {
-        return open_internal(app, &view);
-    }
-    let (template, internal) = {
+    let (template, internal, win) = {
         let g = shared(app).app.lock().unwrap();
-        (g.cfg.settings.search_template.clone(), g.tabs.iter().find(|t| t.id == tab_id).is_some_and(|t| internal_view(&t.url()).is_some()))
+        (g.cfg.settings.search_template.clone(), g.tabs.iter().find(|t| t.id == tab_id).is_some_and(|t| internal_view(&t.url()).is_some()), g.win_of(tab_id))
     };
+    if let Some(view) = internal_view(input.trim()).filter(|v| matches!(v.as_str(), "settings" | "history" | "downloads")) {
+        return open_internal(app, &win, &view);
+    }
     let url = search::resolve(input, &template);
     if internal {
-        open_tab(app, Some(url), None, true);
+        open_tab_in(app, &win, Some(url), None, true);
     } else {
         navigate(app, tab_id, url, true);
     }
@@ -983,7 +1066,7 @@ pub fn assign_mapping(app: &AppHandle, host: &str, profile: &str) {
         g.prompt = None;
         g.cfg.mappings.retain(|m| m.pattern != host);
         g.cfg.mappings.push(nav::Mapping { pattern: host.into(), profile: profile.into() });
-        let active = g.active;
+        let active = g.focused_active();
         g.tab(active)
             .filter(|t| t.profile != profile && Url::parse(&t.url()).ok().and_then(|u| u.host_str().map(|h| nav::matches(host, h))).unwrap_or(false))
             .map(|t| (t.id, t.url()))
@@ -1011,10 +1094,10 @@ pub fn discard_idle(app: &AppHandle) {
     let victims: Vec<String> = {
         let mut g = shared(app).app.lock().unwrap();
         let limit = Duration::from_secs(g.cfg.settings.idle_minutes * 60);
-        let active = g.active;
+        let actives: Vec<u32> = g.wins.values().map(|w| w.active).collect();
         g.tabs
             .iter_mut()
-            .filter(|t| t.id != active && !t.pinned && !t.audible && !t.discarded && t.last_active.elapsed() > limit)
+            .filter(|t| !actives.contains(&t.id) && !t.pinned && !t.audible && !t.discarded && t.last_active.elapsed() > limit)
             .map(|t| {
                 t.discarded = true;
                 t.loading = false;
@@ -1043,8 +1126,14 @@ pub fn reorder(app: &AppHandle, id: u32, to: usize) {
     {
         let mut g = shared(app).app.lock().unwrap();
         let Some(from) = g.tabs.iter().position(|t| t.id == id) else { return };
+        let win = g.tabs[from].win.clone();
         let t = g.tabs.remove(from);
-        let to = to.min(g.tabs.len());
+        // `to` indexes the window's own tab list; translate it to a position in the global list
+        let ids: Vec<u32> = g.tabs.iter().filter(|x| x.win == win).map(|x| x.id).collect();
+        let to = match ids.get(to) {
+            Some(&tid) => g.tabs.iter().position(|x| x.id == tid).unwrap_or(g.tabs.len()),
+            None => ids.last().and_then(|&tid| g.tabs.iter().position(|x| x.id == tid)).map_or(g.tabs.len(), |p| p + 1),
+        };
         g.tabs.insert(to, t);
     }
     emit_state(app);
@@ -1053,9 +1142,9 @@ pub fn reorder(app: &AppHandle, id: u32, to: usize) {
 pub fn cycle(app: &AppHandle, delta: i32) {
     let next = {
         let g = shared(app).app.lock().unwrap();
-        let Some(pos) = g.tabs.iter().position(|t| t.id == g.active) else { return };
-        let n = g.tabs.len() as i32;
-        g.tabs[((pos as i32 + delta).rem_euclid(n)) as usize].id
+        let ids: Vec<u32> = g.tabs.iter().filter(|t| t.win == g.focused).map(|t| t.id).collect();
+        let Some(pos) = ids.iter().position(|&i| i == g.focused_active()) else { return };
+        ids[((pos as i32 + delta).rem_euclid(ids.len() as i32)) as usize]
     };
     activate(app, next);
 }
@@ -1069,7 +1158,84 @@ pub fn active_webview(app: &AppHandle, id: u32) -> Option<tauri::Webview> {
     app.get_webview(&l)
 }
 
+// ---------- windows ----------
+
+/// Window + its UI webview. Window state is created lazily by `Shared::win`.
+pub fn create_window(app: &AppHandle, label: &str) -> tauri::Result<()> {
+    let wb = tauri::window::WindowBuilder::new(app, label)
+        .title("Aditus")
+        .inner_size(1280.0, 820.0)
+        .min_inner_size(640.0, 400.0);
+    // The native title bar would swallow clicks on the top ~28px of the top bar; the UI
+    // draws its own drag regions instead.
+    #[cfg(target_os = "macos")]
+    let wb = wb.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
+    let window = wb.build()?;
+    let sf = window.scale_factor()?;
+    let size = window.inner_size()?.to_logical::<f64>(sf);
+    let ui = window.add_child(
+        WebviewBuilder::new(wv_label("ui", label), WebviewUrl::App("index.html".into())).auto_resize(),
+        LogicalPosition::new(0.0, 0.0),
+        size,
+    )?;
+    no_inset(&ui);
+    shared(app).app.lock().unwrap().win(label);
+    Ok(())
+}
+
+/// New window with one blank tab; it takes focus.
+pub fn new_window(app: &AppHandle) {
+    let label = {
+        let mut g = shared(app).app.lock().unwrap();
+        let n = g.next_win;
+        g.next_win += 1;
+        format!("w{n}")
+    };
+    if let Err(e) = create_window(app, &label) {
+        return eprintln!("new window: {e}");
+    }
+    shared(app).app.lock().unwrap().focused = label.clone();
+    open_tab_in(app, &label, None, None, true);
+}
+
+/// A window went away: drop its tabs (remembered for "reopen closed tab") and its state.
+pub fn window_closed(app: &AppHandle, label: &str) {
+    let victims: Vec<String> = {
+        let mut g = shared(app).app.lock().unwrap();
+        if g.wins.len() <= 1 {
+            return; // last window: the app is quitting, keep the saved session intact
+        }
+        let (gone, kept): (Vec<Tab>, Vec<Tab>) = std::mem::take(&mut g.tabs).into_iter().partition(|t| t.win == label);
+        g.tabs = kept;
+        g.wins.remove(label);
+        if g.focused == label {
+            g.focused = g.wins.keys().next().cloned().unwrap_or_else(|| "main".into());
+        }
+        for t in &gone {
+            let url = t.url();
+            if !is_blank(&url) && internal_view(&url).is_none() {
+                g.closed.push((url, t.profile.clone()));
+            }
+        }
+        gone.iter().map(|t| label_of(t)).collect()
+    };
+    for l in victims {
+        if let Some(wv) = app.get_webview(&l) {
+            let _ = wv.close();
+        }
+    }
+    emit(app, false);
+}
+
+fn label_of(t: &Tab) -> String {
+    label(t.id, t.gen)
+}
+
 // ---------- session ----------
+
+fn main_win() -> String {
+    "main".into()
+}
 
 #[derive(Serialize, serde::Deserialize)]
 struct Saved {
@@ -1078,12 +1244,16 @@ struct Saved {
     pinned: bool,
     group: Option<String>,
     title: String,
+    #[serde(default = "main_win")]
+    win: String,
+    /// Selected tab of its window.
+    #[serde(default)]
+    active: bool,
 }
 
 #[derive(Serialize, serde::Deserialize, Default)]
 struct Session {
     tabs: Vec<Saved>,
-    active: usize,
 }
 
 fn session_path(app: &AppHandle) -> PathBuf {
@@ -1094,7 +1264,6 @@ pub fn save_session(app: &AppHandle) {
     let session = {
         let g = shared(app).app.lock().unwrap();
         Session {
-            active: g.tabs.iter().position(|t| t.id == g.active).unwrap_or(0),
             tabs: g
                 .tabs
                 .iter()
@@ -1104,6 +1273,8 @@ pub fn save_session(app: &AppHandle) {
                     pinned: t.pinned,
                     group: t.group.clone(),
                     title: t.title.clone(),
+                    win: t.win.clone(),
+                    active: g.active(&t.win) == t.id,
                 })
                 .collect(),
         }
@@ -1119,18 +1290,33 @@ pub fn restore_session(app: &AppHandle) {
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
     if session.tabs.is_empty() {
-        open_tab(app, None, None, true);
+        open_tab_in(app, "main", None, None, true);
         return;
     }
-    let mut ids = vec![];
+    let mut to_activate: HashMap<String, u32> = HashMap::new();
+    let mut first_of: HashMap<String, u32> = HashMap::new();
     for s in session.tabs {
-        let id = open_tab(app, Url::parse(&s.url).ok(), Some(s.profile), false);
+        if s.win != "main" && app.get_window(&s.win).is_none() {
+            if let Some(n) = s.win.strip_prefix('w').and_then(|n| n.parse::<u32>().ok()) {
+                let mut g = shared(app).app.lock().unwrap();
+                g.next_win = g.next_win.max(n + 1);
+            }
+            if create_window(app, &s.win).is_err() {
+                continue;
+            }
+        }
+        let id = open_tab_in(app, &s.win, Url::parse(&s.url).ok(), Some(s.profile), false);
         with_tab(app, id, |t| {
             t.pinned = s.pinned;
             t.group = s.group;
             t.title = s.title;
         });
-        ids.push(id);
+        first_of.entry(s.win.clone()).or_insert(id);
+        if s.active {
+            to_activate.insert(s.win, id);
+        }
     }
-    activate(app, ids[session.active.min(ids.len() - 1)]);
+    for (win, first) in first_of {
+        activate(app, to_activate.get(&win).copied().unwrap_or(first));
+    }
 }

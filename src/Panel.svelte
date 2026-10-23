@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { call, on, color } from './lib/api.js';
+  import { call, on, onState, color } from './lib/api.js';
 
   let { view } = $props();
   let st = $state(null);
@@ -36,7 +36,7 @@
     const offs = [];
     (async () => {
       offs.push(
-        await on('state', (s) => {
+        await onState((s) => {
           st = s;
           newHostProfile ||= s.cfg.profiles[0].name;
         })
