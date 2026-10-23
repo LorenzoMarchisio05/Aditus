@@ -124,7 +124,7 @@ impl App {
 }
 
 impl Tab {
-    fn url(&self) -> String {
+    pub fn url(&self) -> String {
         self.entries.get(self.idx).map(|e| e.url.clone()).unwrap_or_default()
     }
 }
@@ -167,7 +167,7 @@ pub fn label(id: u32, gen: u32) -> String {
 }
 
 /// Browser pages (settings, history, downloads) live in ordinary tabs as `aditus://<view>`.
-fn internal_view(url: &str) -> Option<String> {
+pub fn internal_view(url: &str) -> Option<String> {
     let u = Url::parse(url).ok()?;
     if u.scheme() == "aditus" {
         return u.host_str().map(String::from);

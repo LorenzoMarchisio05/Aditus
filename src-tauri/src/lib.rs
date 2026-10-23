@@ -107,12 +107,20 @@ fn dismiss_toast(app: AppHandle) {
 
 #[tauri::command(async)]
 fn save_settings(app: AppHandle, settings: Settings) {
-    let lists_changed = app.state::<Shared>().app.lock().unwrap().cfg.settings.disabled_lists != settings.disabled_lists;
+    let (lists_changed, blocking_changed) = {
+        let state = app.state::<Shared>();
+        let g = state.app.lock().unwrap();
+        let old = &g.cfg.settings;
+        (old.disabled_lists != settings.disabled_lists, old.adblock != settings.adblock || old.disabled_lists != settings.disabled_lists)
+    };
     mutate_cfg(&app, |c| c.settings = settings);
     if lists_changed {
         adblock::rebuild(&app);
     }
-    adblock::refresh(&app);
+    // Only blocking changes need a page reload; theme, width etc. must not reload the tab.
+    if blocking_changed {
+        adblock::refresh(&app);
+    }
 }
 
 #[tauri::command(async)]
