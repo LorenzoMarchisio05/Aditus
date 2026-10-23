@@ -944,6 +944,9 @@ pub fn reload_with(app: &AppHandle, tab_id: u32, pre: &str) {
 }
 
 pub fn address_bar(app: &AppHandle, tab_id: u32, input: &str) {
+    if let Some(view) = internal_view(input.trim()).filter(|v| matches!(v.as_str(), "settings" | "history" | "downloads")) {
+        return open_internal(app, &view);
+    }
     let (template, internal) = {
         let g = shared(app).app.lock().unwrap();
         (g.cfg.settings.search_template.clone(), g.tabs.iter().find(|t| t.id == tab_id).is_some_and(|t| internal_view(&t.url()).is_some()))
