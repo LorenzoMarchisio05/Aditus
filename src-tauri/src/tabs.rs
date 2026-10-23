@@ -151,18 +151,53 @@ pub fn no_inset_all(app: &AppHandle) {
 #[cfg(not(target_os = "macos"))]
 pub fn no_inset(_: &tauri::Webview) {}
 
-/// Docked, the inspector resizes the page webview over the sidebar; open it detached on macOS.
+/// Opens the inspector; it docks inside the page container (see `mount`), not across the window.
 pub fn open_inspector(wv: &tauri::Webview) {
     wv.open_devtools();
+}
+
+/// macOS: WebKit docks the inspector across its superview and resizes the page to match. Page
+/// webviews therefore live in their own container view covering just the content area.
+#[cfg(target_os = "macos")]
+static CONTAINER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Place the container over the content area and the page webview filling it. Idempotent.
+#[cfg(target_os = "macos")]
+unsafe fn mount(page: *mut std::ffi::c_void, pos: LogicalPosition<f64>, size: LogicalSize<f64>) {
+    use objc2::{class, msg_send, runtime::AnyObject};
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+    use std::sync::atomic::Ordering;
+    let v = &*(page as *const AnyObject);
+    let mut c = CONTAINER.load(Ordering::Relaxed) as *mut AnyObject;
+    let sv: *mut AnyObject = msg_send![v, superview];
+    if sv.is_null() {
+        return;
+    }
+    let content: *mut AnyObject = if sv == c { msg_send![&*sv, superview] } else { sv };
+    let cf: NSRect = msg_send![&*content, frame];
+    let frame = NSRect::new(NSPoint::new(pos.x, cf.size.height - pos.y - size.height), NSSize::new(size.width, size.height));
+    if c.is_null() {
+        let a: *mut AnyObject = msg_send![class!(NSView), alloc];
+        c = msg_send![a, initWithFrame: frame];
+        let _: () = msg_send![&*content, addSubview: &*c];
+        CONTAINER.store(c as usize, Ordering::Relaxed);
+    } else {
+        let _: () = msg_send![&*c, setFrame: frame];
+    }
+    if sv != c {
+        let _: () = msg_send![v, removeFromSuperview];
+        let _: () = msg_send![&*c, addSubview: v];
+    }
+    let _: () = msg_send![v, setFrame: NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(size.width, size.height))];
+}
+
+/// Size a page webview to the content area.
+fn fit_page(app: &AppHandle, wv: &tauri::Webview) {
+    let (pos, size) = content_rect(app);
     #[cfg(target_os = "macos")]
-    let _ = wv.with_webview(|pw| unsafe {
-        use objc2::{msg_send, runtime::AnyObject, sel};
-        let v = &*(pw.inner() as *const objc2_web_kit::WKWebView);
-        let insp: *mut AnyObject = msg_send![v, _inspector];
-        if !insp.is_null() && msg_send![&*insp, respondsToSelector: sel!(detach)] {
-            let _: () = msg_send![&*insp, detach];
-        }
-    });
+    let _ = wv.with_webview(move |pw| unsafe { mount(pw.inner(), pos, size) });
+    #[cfg(not(target_os = "macos"))]
+    let _ = wv.set_bounds(tauri::Rect { position: pos.into(), size: size.into() });
 }
 
 /// Host of the tab's current entry. Never ask the engine: wry panics (and aborts) when a fresh webview has no URL yet.
@@ -320,7 +355,7 @@ pub fn apply_layout(app: &AppHandle) {
         }
     };
     if let Some(wv) = app.get_webview(&label(id, gen)) {
-        let _ = wv.set_bounds(tauri::Rect { position: pos.into(), size: size.into() });
+        fit_page(app, &wv);
     }
     if let Some(wv) = app.get_webview("panel") {
         let _ = wv.set_bounds(tauri::Rect { position: pos.into(), size: size.into() });
@@ -488,6 +523,7 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
     let (pos, size) = content_rect(app);
     let wv = window.add_child(builder, pos, size).map_err(|e| e.to_string())?;
     no_inset(&wv);
+    fit_page(app, &wv);
     crate::adblock::attach(app, &wv, &profile_name);
     if !show {
         let _ = wv.hide();
