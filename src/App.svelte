@@ -17,7 +17,6 @@
   let editing = $state(false);
   let findOpen = $state(false);
   let findText = $state('');
-  let menu = $state(null);
   let newtabOpen = false;
   let tabQuery = $state(null); // null = closed
   let tabSearchEl = $state();
@@ -137,6 +136,7 @@
           if (id === 'focus-address') focusAddress();
           else if (id === 'find') openFind();
           else if (id.startsWith('profile:')) setProfile(tab, id.slice(8));
+          else if (id.startsWith('tabm:')) tabAction(id);
           else if (id === 'search-tabs') openTabSearch();
           else if (id === 'toggle-sidebar') settings({ sidebar_collapsed: !collapsed });
           else if (id === 'toggle-topbar') settings({ topbar_visible: !cfg.settings.topbar_visible });
@@ -193,14 +193,27 @@
     return t.host ? `https://${t.host}/favicon.ico` : '';
   }
 
-  function ctx(e, t) {
-    e.preventDefault();
-    menu = { x: Math.min(e.clientX, sidebarW - 150), y: e.clientY, tab: t };
-  }
+  const ctx = (e, t) => { e.preventDefault(); call('tab_menu', { id: t.id }); };
 
-  function groupTab(e, t) {
+  let groupPrompt = $state(null); // tab id awaiting a new group name
+  async function tabAction(raw) {
+    const [, act, tid, ...rest] = raw.split(':');
+    const id = +tid, arg = rest.join(':'), t = st.tabs.find((x) => x.id === id);
+    if (!t) return;
+    if (act === 'reload') { await call('activate_tab', { id }); call('reload'); }
+    else if (act === 'pin') call('pin_tab', { id, pinned: !t.pinned });
+    else if (act === 'group') call('group_tab', { id, group: arg });
+    else if (act === 'ungroup') call('group_tab', { id, group: null });
+    else if (act === 'newgroup') { groupPrompt = id; await tick(); document.getElementById('gp')?.focus(); }
+    else if (act === 'profile') { await call('activate_tab', { id }); setProfile(t, arg); }
+    else if (act === 'close') call('close_tab', { id });
+    else if (act === 'closeothers') st.tabs.filter((x) => x.id !== id && !x.pinned).forEach((x) => call('close_tab', { id: x.id }));
+  }
+  function submitGroup(e) {
     e.preventDefault();
-    call('group_tab', { id: t.id, group: e.currentTarget.elements.g.value || null });
+    const name = e.currentTarget.elements.g.value.trim();
+    if (name) call('group_tab', { id: groupPrompt, group: name });
+    groupPrompt = null;
   }
 
   const parts = $derived.by(() => {
@@ -215,8 +228,6 @@
   const mac = navigator.platform.includes('Mac'); // traffic lights overlay the sidebar top
 
 </script>
-
-<svelte:window onclick={() => { menu = null; }} />
 
 {#snippet pin(t)}
   <button class="pin" class:active={t.id === st.active} title={t.title} onclick={() => call('activate_tab', { id: t.id })} oncontextmenu={(e) => ctx(e, t)}>
@@ -288,6 +299,12 @@
       {/each}
     {/each}
   </div>
+
+  {#if groupPrompt !== null}
+    <form class="card" onsubmit={submitGroup}>
+      <input id="gp" name="g" placeholder="Group name" onkeydown={(e) => e.key === 'Escape' && (groupPrompt = null)} onblur={() => (groupPrompt = null)} />
+    </form>
+  {/if}
 
   {#if newer && !collapsed}
     <div class="card toast">
@@ -379,28 +396,6 @@
   </header>
 {/if}
 
-{#if menu}
-  <div class="ctx" style="left:{menu.x}px; top:{menu.y}px">
-    <button onclick={() => call('reload')}>Reload</button>
-    <button onclick={() => call('pin_tab', { id: menu.tab.id, pinned: !menu.tab.pinned })}>{menu.tab.pinned ? 'Unpin tab' : 'Pin tab'}</button>
-    <h6>Add to group</h6>
-    {#each groupNames as g}
-      <button class:sel={menu.tab.group === g} onclick={() => call('group_tab', { id: menu.tab.id, group: g })}>{g}</button>
-    {/each}
-    <form onsubmit={(e) => groupTab(e, menu.tab)} onclick={(e) => e.stopPropagation()}>
-      <input name="g" placeholder="New group name…" value={menu.tab.group ?? ''} />
-    </form>
-    <h6>Always open this site in</h6>
-    {#each cfg.profiles as p}
-      <button class:sel={menu.tab.profile === p.name} onclick={async () => { await call('activate_tab', { id: menu.tab.id }); setProfile(menu.tab, p.name); }}>
-        <i style="background:{color(p.name)}"></i>{p.name}
-      </button>
-    {/each}
-    <hr />
-    <button onclick={() => call('close_tab', { id: menu.tab.id })}>Close tab</button>
-    <button onclick={() => st.tabs.filter((t) => t.id !== menu.tab.id && !t.pinned).forEach((t) => call('close_tab', { id: t.id }))}>Close other tabs</button>
-  </div>
-{/if}
 
 <style>
   .side { position: fixed; inset: 0 auto 0 0; background: var(--sb); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding-bottom: 4px; }
@@ -468,12 +463,4 @@
   .find { height: 40px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 0 14px; border-top: 1px solid var(--line); }
   .find input { width: 260px; height: 30px; background: var(--bg2); border-radius: 9px; }
   .find button { width: 30px; height: 30px; padding: 0; background: var(--bg2); border-radius: 9px; }
-  .ctx { position: fixed; z-index: 10; background: var(--bg2); border: 1px solid var(--line); border-radius: 16px; padding: 8px; display: flex; flex-direction: column; width: 232px; box-shadow: 0 24px 60px rgba(0,0,0,.5); }
-  .ctx button { text-align: left; height: 36px; border-radius: 10px; display: flex; align-items: center; gap: 10px; padding: 0 12px; font-weight: 500; }
-  .ctx .sel { background: var(--bg3); }
-  .ctx i { width: 9px; height: 9px; border-radius: 50%; display: block; }
-  .ctx h6 { margin: 8px 12px 4px; font: 500 10.5px ui-monospace, 'SF Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
-  .ctx hr { margin: 6px 4px; }
-  .ctx form { padding: 2px; }
-  .ctx input { width: 100%; }
 </style>

@@ -382,6 +382,57 @@ fn profile_menu(app: AppHandle, window: tauri::Window) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+/// Native tab context menu (an HTML one would be clipped by the page webview). Picks arrive as
+/// `menu` events `tabm:<action>:<tab id>[:<arg>]`, which the UI webview carries out.
+#[tauri::command(async)]
+fn tab_menu(app: AppHandle, window: tauri::Window, id: u32) -> Result<(), String> {
+    use tauri::menu::{IsMenuItem, Submenu};
+    let (tab, groups, profiles) = {
+        let state = app.state::<Shared>();
+        let g = state.app.lock().unwrap();
+        let Some(t) = g.tabs.iter().find(|t| t.id == id) else { return Ok(()) };
+        let url = t.url();
+        let host = if tabs::internal_view(&url).is_some() { false } else { url::Url::parse(&url).ok().is_some_and(|u| u.host_str().is_some()) };
+        let tab = (t.pinned, t.group.clone(), t.profile.clone(), host);
+        let mut groups: Vec<String> = g.tabs.iter().filter_map(|t| t.group.clone()).collect();
+        groups.sort();
+        groups.dedup();
+        (tab, groups, g.cfg.profiles.iter().map(|p| p.name.clone()).collect::<Vec<_>>())
+    };
+    fn e<T>(r: tauri::Result<T>) -> Result<T, String> {
+        r.map_err(|e| e.to_string())
+    }
+    let plain = |act: &str, text: &str| MenuItem::with_id(&app, format!("tabm:{act}:{id}"), text, true, None::<&str>);
+
+    let reload = e(plain("reload", "Reload"))?;
+    let pin = e(plain("pin", if tab.0 { "Unpin Tab" } else { "Pin Tab" }))?;
+    let mut group_items: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = vec![];
+    for n in &groups {
+        group_items.push(Box::new(e(CheckMenuItem::with_id(&app, format!("tabm:group:{id}:{n}"), n, true, tab.1.as_deref() == Some(n), None::<&str>))?));
+    }
+    group_items.push(Box::new(e(plain("newgroup", "New Group…"))?));
+    if tab.1.is_some() {
+        group_items.push(Box::new(e(plain("ungroup", "Remove from Group"))?));
+    }
+    let grefs: Vec<&dyn IsMenuItem<tauri::Wry>> = group_items.iter().map(|i| i.as_ref()).collect();
+    let group_menu = e(Submenu::with_items(&app, "Add to Group", true, &grefs))?;
+    let pitems = profiles
+        .iter()
+        .map(|n| e(CheckMenuItem::with_id(&app, format!("tabm:profile:{id}:{n}"), n, true, *n == tab.2, None::<&str>)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let prefs: Vec<&dyn IsMenuItem<tauri::Wry>> = pitems.iter().map(|i| i as _).collect();
+    let profile_menu = e(Submenu::with_items(&app, "Always Open This Site In", tab.3, &prefs))?;
+    let sep1 = e(PredefinedMenuItem::separator(&app))?;
+    let sep2 = e(PredefinedMenuItem::separator(&app))?;
+    let close = e(plain("close", "Close Tab"))?;
+    let others = e(plain("closeothers", "Close Other Tabs"))?;
+    let menu = e(Menu::with_items(&app, &[&reload, &pin, &sep1, &group_menu, &profile_menu, &sep2, &close, &others]))?;
+    app.run_on_main_thread(move || {
+        let _ = menu.popup(window);
+    })
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command(async)]
 fn switch_profile(app: AppHandle, window: tauri::Window, profile: String) {
     tabs::switch_profile(&app, active_id(&app, &window), &profile);
@@ -512,7 +563,7 @@ pub fn run() {
             assign_mapping, skip_prompt, undo_swap, dismiss_toast, save_settings, add_profile,
             delete_profile, delete_mapping, toggle_allowlist, pin_tab, group_tab, find, find_clear,
             open_devtools, history_search, history_clear, downloads_list, show_palette, hide_palette,
-            reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile, profile_menu,
+            reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile, profile_menu, tab_menu,
             adblock_info, check_update, default_browser_settings, set_profile_color
         ])
         .on_menu_event(|app, ev| on_menu(app, ev.id().as_ref()))
