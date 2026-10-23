@@ -43,6 +43,17 @@ pub fn run(app: &AppHandle, port: u16) {
         eprintln!("[selftest] back: after forward profile={} (want Work) url={}", profile_of(app, t), url_of(app, t));
         return;
     }
+    if let Ok(n) = std::env::var("ADITUS_SELFTEST_MEM").map(|n| n.parse::<usize>().unwrap_or(10)) {
+        let sites = ["https://en.wikipedia.org/wiki/Rust_(programming_language)", "https://en.wikipedia.org/wiki/WebKit", "https://news.ycombinator.com", "https://example.com", "https://en.wikipedia.org/wiki/Tauri", "https://en.wikipedia.org/wiki/Browser", "https://www.rust-lang.org", "https://en.wikipedia.org/wiki/SQLite", "https://en.wikipedia.org/wiki/Svelte", "https://en.wikipedia.org/wiki/Linux"];
+        for i in 0..n {
+            tabs::open_tab(app, Some(Url::parse(sites[i % sites.len()]).unwrap()), Some("Default".into()), true);
+            wait(2);
+        }
+        wait(20);
+        eprintln!("[selftest] mem ready tabs={n} pid={}", std::process::id());
+        wait(40);
+        return;
+    }
     if std::env::var("ADITUS_SELFTEST_ONLY").as_deref() == Ok("ui2") {
         {
             let mut g = app.state::<Shared>().inner().app.lock().unwrap();

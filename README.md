@@ -46,6 +46,18 @@ macOS 14+, Windows, Linux. macOS 14 is required for per-profile storage on WebKi
 
 Rust, Tauri 2 (multi-webview, `unstable` feature, version pinned), Svelte, SQLite for history and downloads, TOML for config.
 
+## Memory (macOS, debug build, measured once)
+
+Summed RSS of the app plus its WebKit helper processes, tabs loaded with Wikipedia, Hacker News, example.com and similar, no idle discard:
+
+| tabs | total |
+|------|-------|
+| 1    | ~0.8 GB |
+| 10   | ~1.6 GB |
+| 30   | ~2.8 GB |
+
+About 55 MB per extra tab, with WebKit's own per-tab content process dominating. The main process is a debug build (~540 MB at 1 tab, 163 MB at 30 after the allocator settled), so expect lower in release. Not compared against Safari or Chrome yet.
+
 ## Known limits
 
 - Ad blocking is good, not uBlock Origin parity, especially on WebKit.

@@ -28,7 +28,19 @@
   const matches = (t) =>
     tabQuery === null || `${t.title} ${t.url} ${t.group ?? ''} ${t.profile}`.toLowerCase().includes(tabQuery.toLowerCase());
   const pinned = $derived(st.tabs.filter((t) => t.pinned && matches(t)));
-  const rest = $derived(st.tabs.filter((t) => !t.pinned && matches(t)));
+  let folded = $state(new Set());
+  const loose = $derived(st.tabs.filter((t) => !t.pinned && !t.group && matches(t)));
+  const groups = $derived(
+    [...new Set(st.tabs.filter((t) => !t.pinned && t.group && matches(t)).map((t) => t.group))].map((g) => ({
+      name: g,
+      tabs: st.tabs.filter((t) => !t.pinned && t.group === g && matches(t)),
+    })),
+  );
+  const rest = $derived([...loose, ...groups.flatMap((g) => g.tabs)]);
+  function fold(g) {
+    folded.has(g) ? folded.delete(g) : folded.add(g);
+    folded = new Set(folded);
+  }
 
   $effect(() => {
     call('set_layout', { sidebar: sidebarW, top });
@@ -193,9 +205,14 @@
   <div class="tabs">
     {#each pinned as t (t.id)}{@render row(t)}{/each}
     {#if pinned.length}<hr />{/if}
-    {#each rest as t, i (t.id)}
-      {#if !collapsed && t.group && t.group !== rest[i - 1]?.group}<div class="group">{t.group}</div>{/if}
-      {@render row(t)}
+    {#each loose as t (t.id)}{@render row(t)}{/each}
+    {#each groups as g (g.name)}
+      {#if !collapsed}
+        <button class="group" onclick={() => fold(g.name)}>{folded.has(g.name) ? '▸' : '▾'} {g.name} <span>{g.tabs.length}</span></button>
+      {/if}
+      {#each g.tabs as t (t.id)}
+        {#if collapsed || !folded.has(g.name) || t.id === st.active}{@render row(t)}{/if}
+      {/each}
     {/each}
   </div>
 
@@ -309,7 +326,7 @@
   .spin { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s .7s linear infinite; }
   @keyframes s { to { transform: rotate(360deg); } }
   hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
-  .group { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); padding: 8px 8px 2px; }
+  .group { background: none; border: 0; width: 100%; text-align: left; cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); padding: 8px 8px 2px; }
   .card { margin: 6px; padding: 8px; background: var(--bg3); border-radius: 8px; display: flex; flex-direction: column; gap: 6px; }
   .card.toast { flex-direction: row; align-items: center; justify-content: space-between; }
   .choices { display: flex; flex-wrap: wrap; gap: 4px; }
