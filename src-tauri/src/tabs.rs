@@ -874,9 +874,16 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
     let id = {
         let mut g = shared(app).app.lock().unwrap();
         g.win(win);
+        // No explicit profile: a mapped site opens in its profile, anything else in the default one.
+        let mapped = url
+            .as_ref()
+            .and_then(|u| u.host_str())
+            .and_then(|h| nav::lookup(&g.cfg.mappings, h))
+            .map(|m| m.profile.clone());
         let profile = profile
+            .or(mapped)
             .filter(|p| g.cfg.profile(p).is_some())
-            .unwrap_or_else(|| g.cfg.profiles[0].name.clone()); // new tabs start in the default profile
+            .unwrap_or_else(|| g.cfg.profiles[0].name.clone());
         let id = g.next_id;
         g.next_id += 1;
         let private = g.wins.get(win).is_some_and(|w| w.incognito);
