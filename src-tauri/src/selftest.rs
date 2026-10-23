@@ -15,6 +15,10 @@ fn profile_of(app: &AppHandle, id: u32) -> String {
     g.tabs.iter().find(|t| t.id == id).map(|t| t.profile.clone()).unwrap_or_default()
 }
 
+fn active_id(app: &AppHandle) -> u32 {
+    app.state::<Shared>().inner().app.lock().unwrap().active
+}
+
 fn snap_active(app: &AppHandle, path: &str) {
     let active = app.state::<Shared>().inner().app.lock().unwrap().active;
     if let Some(wv) = tabs::active_webview(app, active) {
@@ -55,7 +59,7 @@ pub fn run(app: &AppHandle, port: u16) {
         eprintln!("[selftest] opening settings");
         crate::show_panel(app.clone(), "settings".into());
         wait(4);
-        eprintln!("[selftest] opened url={}", url_of(app, app.state::<Shared>().inner().app.lock().unwrap().active));
+        eprintln!("[selftest] opened url={}", url_of(app, active_id(app)));
         snap_active(app, "/tmp/aditus-snap-settings.tiff");
         wait(2);
         return;
@@ -269,7 +273,7 @@ pub fn run(app: &AppHandle, port: u16) {
     crate::hide_palette(app.clone());
     crate::show_panel(app.clone(), "settings".into());
     wait(3);
-    eprintln!("[selftest] panel webview exists={}", url_of(app, app.state::<Shared>().inner().app.lock().unwrap().active).starts_with("aditus://"));
+    eprintln!("[selftest] panel webview exists={}", url_of(app, active_id(app)).starts_with("aditus://"));
     snap_active(app, "/tmp/aditus-snap-settings.tiff");
     crate::show_panel(app.clone(), "history".into());
     wait(3);
