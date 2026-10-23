@@ -619,19 +619,57 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &item("zoom-in", "Zoom In", "CmdOrCtrl+=")?,
             &item("zoom-out", "Zoom Out", "CmdOrCtrl+-")?,
             &item("zoom-reset", "Actual Size", "CmdOrCtrl+0")?,
-            &item("back", "Back", "CmdOrCtrl+[")?,
-            &item("forward", "Forward", "CmdOrCtrl+]")?,
+            &PredefinedMenuItem::separator(app)?,
             &item("toggle-sidebar", "Toggle Sidebar", "CmdOrCtrl+\\")?,
             &item("toggle-topbar", "Toggle Top Bar", "CmdOrCtrl+Shift+L")?,
-            &item("next-tab", "Next Tab", "Ctrl+Tab")?,
-            &item("prev-tab", "Previous Tab", "Ctrl+Shift+Tab")?,
+            &PredefinedMenuItem::separator(app)?,
             &item("devtools", "Developer Tools", "CmdOrCtrl+Alt+I")?,
+            &PredefinedMenuItem::fullscreen(app, None)?,
+        ],
+    )?;
+    let go = Submenu::with_items(
+        app,
+        "Go",
+        true,
+        &[
+            &item("back", "Back", "CmdOrCtrl+[")?,
+            &item("forward", "Forward", "CmdOrCtrl+]")?,
+            &PredefinedMenuItem::separator(app)?,
             &item("history", "History", "CmdOrCtrl+Y")?,
             &item("downloads", "Downloads", "CmdOrCtrl+Shift+J")?,
             &item("settings", "Settings", "CmdOrCtrl+,")?,
         ],
     )?;
-    Menu::with_items(app, &[&aditus, &file, &edit, &view])
+    let digits: Vec<MenuItem<tauri::Wry>> = (1..=9)
+        .map(|n| item(&format!("select-tab:{n}"), &if n == 9 { "Last Tab".to_string() } else { format!("Tab {n}") }, &format!("CmdOrCtrl+{n}")))
+        .collect::<Result<_, _>>()?;
+    let (next, prev, search) = (item("next-tab", "Next Tab", "Ctrl+Tab")?, item("prev-tab", "Previous Tab", "Ctrl+Shift+Tab")?, item("search-tabs", "Search Tabs", "CmdOrCtrl+Shift+A")?);
+    let (pin, others, sep) = (item("pin-active", "Pin or Unpin Tab", "CmdOrCtrl+Alt+P")?, item("close-others", "Close Other Tabs", "CmdOrCtrl+Alt+W")?, PredefinedMenuItem::separator(app)?);
+    let mut tab_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![&next, &prev, &search, &sep, &pin, &others, &sep];
+    tab_items.extend(digits.iter().map(|d| d as &dyn tauri::menu::IsMenuItem<tauri::Wry>));
+    let tabs_menu = Submenu::with_items(app, "Tabs", true, &tab_items)?;
+    let window = Submenu::with_items(
+        app,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, None)?,
+            &PredefinedMenuItem::maximize(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::close_window(app, None)?,
+        ],
+    )?;
+    #[cfg(target_os = "macos")]
+    let _ = window.set_as_windows_menu_for_nsapp();
+    let help = Submenu::with_items(
+        app,
+        "Help",
+        true,
+        &[&item("help-site", "Aditus on GitHub", "")?, &item("help-issue", "Report an Issue", "")?],
+    )?;
+    #[cfg(target_os = "macos")]
+    let _ = help.set_as_help_menu_for_nsapp();
+    Menu::with_items(app, &[&aditus, &file, &edit, &view, &go, &tabs_menu, &window, &help])
 }
 
 fn on_menu(app: &AppHandle, id: &str) {
@@ -669,6 +707,9 @@ fn on_menu(app: &AppHandle, id: &str) {
                     tabs::open_inspector(&wv);
                 }
             }
+            "help-site" => tabs::open_external("https://github.com/LorenzoMarchisio05/Aditus"),
+            "help-issue" => tabs::open_external("https://github.com/LorenzoMarchisio05/Aditus/issues/new"),
+            other if other.starts_with("select-tab:") => tabs::select(&app, other[11..].parse().unwrap_or(1)),
             other if other.starts_with("ctx:") => page_ctx_action(&app, &other[4..]),
             other => {
                 let _ = app.emit_to(ui, "menu", other);
@@ -679,7 +720,6 @@ fn on_menu(app: &AppHandle, id: &str) {
 
 // ---------- entry ----------
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// A dev run is a bare binary, so macOS names the app menu after it ("aditus").
 #[cfg(target_os = "macos")]
 fn brand_name() {
@@ -693,6 +733,7 @@ fn brand_name() {
     }
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "macos")]
     brand_name();

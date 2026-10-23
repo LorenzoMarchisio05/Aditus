@@ -138,6 +138,8 @@
           else if (id.startsWith('profile:')) setProfile(tab, id.slice(8));
           else if (id.startsWith('tabm:')) tabAction(id);
           else if (id === 'search-tabs') openTabSearch();
+          else if (id === 'pin-active' && tab && (tab.pinned || tab.host)) call('pin_tab', { id: tab.id, pinned: !tab.pinned });
+          else if (id === 'close-others') st.tabs.filter((x) => x.id !== tab?.id && !x.pinned).forEach((x) => call('close_tab', { id: x.id }));
           else if (id === 'toggle-sidebar') settings({ sidebar_collapsed: !collapsed });
           else if (id === 'toggle-topbar') settings({ topbar_visible: !cfg.settings.topbar_visible });
           else if (['history', 'downloads', 'settings'].includes(id)) call('show_panel', { view: id });

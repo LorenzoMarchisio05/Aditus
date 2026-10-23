@@ -1309,6 +1309,18 @@ pub fn cycle(app: &AppHandle, delta: i32) {
     activate(app, next);
 }
 
+/// Cmd/Ctrl+1..9: the n-th tab of the focused window (1-based); 9 is always the last one.
+pub fn select(app: &AppHandle, n: usize) {
+    let id = {
+        let g = shared(app).app.lock().unwrap();
+        let ids: Vec<u32> = g.tabs.iter().filter(|t| t.win == g.focused).map(|t| t.id).collect();
+        if n >= 9 { ids.last().copied() } else { ids.get(n - 1).copied() }
+    };
+    if let Some(id) = id {
+        activate(app, id);
+    }
+}
+
 pub fn active_webview(app: &AppHandle, id: u32) -> Option<tauri::Webview> {
     let l = {
         let g = shared(app).app.lock().unwrap();
