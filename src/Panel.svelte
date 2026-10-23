@@ -210,17 +210,13 @@
         {/if}
       </div>
       {#if !st.incognito && topSites.length}
-        <div class="frequent">
-          <span class="lbl">FREQUENT</span>
-          <div class="sites">
-            {#each topSites as s}
-              <button class="site" onclick={() => { call('new_tab', { url: s.url }); call('hide_panel'); }}>
-                <span class="ico"><b>{s.host[0].toUpperCase()}</b><img src="https://{s.host}/favicon.ico" alt="" onerror={(e) => (e.currentTarget.style.display = 'none')} /></span>
-                <span class="hn">{s.host}</span>
-                <i style="background:{color(s.profile)}"></i>
-              </button>
-            {/each}
-          </div>
+        <div class="sites">
+          {#each topSites as s}
+            <button class="site" onclick={() => { call('new_tab', { url: s.url }); call('hide_panel'); }}>
+              <span class="ico"><b>{s.host[0].toUpperCase()}</b><img src="https://{s.host}/favicon.ico" alt="" onerror={(e) => (e.currentTarget.style.display = 'none')} /><i style="background:{color(s.profile)}"></i></span>
+              <span class="hn">{s.host}</span>
+            </button>
+          {/each}
         </div>
       {/if}
       <div class="keys">
@@ -511,14 +507,15 @@
   .when, .lbl { font: 500 11px/1 'JetBrains Mono Variable', ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
   .sub { max-width: 440px; color: var(--dim); font-size: 15px; line-height: 1.5; margin-top: 6px; }
   kbd { font: 11px ui-monospace, 'SF Mono', monospace; color: var(--dim); background: var(--bg3); border-radius: 6px; padding: 2px 6px; }
-  .frequent { width: 100%; max-width: 760px; display: flex; flex-direction: column; gap: 14px; }
-  .sites { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; }
-  .site { display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 10px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); font-size: 14px; font-weight: 500; text-align: left; position: relative; }
-  .site:hover { border-color: var(--dim); background: var(--card); }
-  .site .hn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .site > i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-  .ico { width: 34px; height: 34px; border-radius: 10px; background: var(--bg3); display: grid; place-items: center; position: relative; flex: none; overflow: hidden; font: 800 15px 'Bricolage Grotesque Variable', system-ui, sans-serif; color: var(--fg); }
-  .ico img { position: absolute; inset: 0; width: 100%; height: 100%; padding: 7px; box-sizing: border-box; background: var(--bg3); object-fit: contain; }
+  .hero svg { filter: drop-shadow(0 0 22px rgba(255, 176, 32, .35)); }
+  .sites { display: flex; flex-wrap: wrap; justify-content: center; gap: 22px 18px; max-width: 760px; }
+  .site { width: 96px; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0; font-size: 12.5px; color: var(--dim); }
+  .site:hover { color: var(--fg); background: none; }
+  .site .hn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ico { width: 64px; height: 64px; border-radius: 18px; background: var(--card); border: 1px solid var(--line); display: grid; place-items: center; position: relative; font: 800 24px 'Bricolage Grotesque Variable', system-ui, sans-serif; color: var(--fg); transition: transform .12s, border-color .12s; }
+  .site:hover .ico { transform: translateY(-3px); border-color: var(--accent); }
+  .ico img { position: absolute; inset: 0; width: 100%; height: 100%; padding: 16px; box-sizing: border-box; border-radius: 18px; background: var(--card); object-fit: contain; }
+  .ico i { position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; border: 3px solid var(--bg); }
   .keys { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 22px; color: var(--dim); font-size: 13px; }
   .keys span { display: inline-flex; align-items: center; gap: 8px; }
   .lib { display: flex; height: 100%; }
