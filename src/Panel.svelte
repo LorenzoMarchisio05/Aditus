@@ -5,13 +5,17 @@
   let { view } = $props();
   let st = $state(null);
   let q = $state('');
+  let only = $state(null); // history profile filter
   let rows = $state([]);
   let downloads = $state([]);
+  let nav = $state('General');
   let newProfile = $state('');
   let newHost = $state('');
   let newHostProfile = $state('');
+  let hostQuery = $state('');
 
-  const titles = { history: 'History', downloads: 'Downloads', settings: 'Settings' };
+  const NAV = ['General', 'Profiles and sites', 'Ad blocker', 'Search', 'About'];
+  const library = $derived(view === 'history' || view === 'downloads');
 
   async function loadHistory() {
     rows = await call('history_search', { q });
@@ -32,132 +36,301 @@
       offs.push(await on('downloads-changed', loadDownloads));
       call('get_state'); // after listeners exist, or the reply is lost
     })();
-    if (view === 'history') loadHistory();
-    if (view === 'downloads') loadDownloads();
+    if (library) {
+      loadHistory();
+      loadDownloads();
+    }
     return () => offs.forEach((f) => f());
+  });
+
+  // Same tint as the main chrome: active tab's profile color.
+  const accent = $derived.by(() => {
+    const t = st?.tabs.find((x) => x.id === st.active);
+    return t ? color(t.profile) : '#b79cff';
   });
 
   const set = (patch) => call('save_settings', { settings: { ...st.cfg.settings, ...patch } });
   const engine = $derived(
     !st ? 'ddg' : st.cfg.settings.search_template.includes('duckduckgo') ? 'ddg' : st.cfg.settings.search_template.includes('google.com/search') ? 'google' : 'custom'
   );
-  const when = (t) => new Date(t * 1000).toLocaleString();
+  const pick = (v) => {
+    if (v === 'ddg') set({ search_template: 'https://duckduckgo.com/?q=%s' });
+    if (v === 'google') set({ search_template: 'https://www.google.com/search?q=%s' });
+    if (v === 'custom') set({ search_template: 'https://example.com/search?q=%s' });
+  };
+  const ENGINES = [['ddg', 'DuckDuckGo', 'default'], ['google', 'Google', 'built in'], ['custom', 'Custom', 'your own URL']];
+
+  const shown = $derived(only ? rows.filter((r) => r.profile === only) : rows);
+  const hm = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const dayOf = (t) => {
+    const d = new Date(t * 1000).toDateString();
+    const today = new Date();
+    if (d === today.toDateString()) return 'Today';
+    if (d === new Date(today - 864e5).toDateString()) return 'Yesterday';
+    return d;
+  };
+  const days = $derived(
+    shown.reduce((acc, r) => {
+      const d = dayOf(r.visited_at);
+      (acc.at(-1)?.day === d ? acc.at(-1) : acc[acc.push({ day: d, rows: [] }) - 1]).rows.push(r);
+      return acc;
+    }, [])
+  );
+  const host = (u) => { try { return new URL(u).host; } catch { return ''; } };
+  const fname = (d) => d.path.split(/[\\/]/).pop() || d.url;
+  const ext = (d) => (fname(d).split('.').pop() || '').slice(0, 4).toUpperCase();
+  const tint = { done: '#5dffb8', failed: '#ff7a8a' };
+  const mapped = $derived(
+    (st?.cfg.mappings ?? []).filter((m) => m.pattern.includes(hostQuery.trim().toLowerCase()))
+  );
+  const count = (name) => st.tabs.filter((t) => t.profile === name).length;
+  const sites = (name) => st.cfg.mappings.filter((m) => m.profile === name).length;
 </script>
 
-<div class="panel">
-  <header>
-    <h1>{titles[view]}</h1>
-    <button onclick={() => call('hide_panel')} aria-label="Close">✕</button>
-  </header>
-
-  {#if view === 'history'}
-    <div class="row">
-      <input placeholder="Search history" bind:value={q} oninput={loadHistory} />
-      <button onclick={async () => { await call('history_clear'); loadHistory(); }}>Clear all</button>
-    </div>
-    <ul>
-      {#each rows as r}
-        <li>
-          <button class="link" onclick={() => { call('new_tab', { url: r.url }); call('hide_panel'); }}>
-            <span class="t">{r.title || r.url}</span><span class="u">{r.url}</span>
-          </button>
-          <span class="meta" style="color:{color(r.profile)}">{r.profile} · {when(r.visited_at)}</span>
-        </li>
-      {/each}
-    </ul>
-  {:else if view === 'downloads'}
-    <ul>
-      {#each downloads as d}
-        <li>
-          <span class="t">{d.path.split('/').pop() || d.url}</span>
-          <span class="meta">{d.status} · {when(d.started_at)}</span>
-          {#if d.path}<button onclick={() => call('reveal_path', { path: d.path })}>Show</button>{/if}
-        </li>
-      {:else}
-        <li class="meta">No downloads yet.</li>
-      {/each}
-    </ul>
-  {:else if view === 'settings' && st}
-    <section>
-      <h2>Search engine</h2>
-      <div class="row">
-        <select value={engine} onchange={(e) => {
-          const v = e.currentTarget.value;
-          if (v === 'ddg') set({ search_template: 'https://duckduckgo.com/?q=%s' });
-          if (v === 'google') set({ search_template: 'https://www.google.com/search?q=%s' });
-          if (v === 'custom') set({ search_template: 'https://example.com/search?q=%s' });
-        }}>
-          <option value="ddg">DuckDuckGo</option>
-          <option value="google">Google</option>
-          <option value="custom">Custom</option>
-        </select>
-        {#if engine === 'custom'}
-          <input class="grow" value={st.cfg.settings.search_template} onchange={(e) => set({ search_template: e.currentTarget.value })} />
+<div class="panel" style="--accent:{accent}">
+  {#if library}
+    <div class="lib">
+      <section class="hist">
+        <header>
+          <h1>History</h1>
+          <span class="grow"></span>
+          <button class="ghost" onclick={async () => { await call('history_clear'); loadHistory(); }}>Clear…</button>
+          <button class="x" onclick={() => call('hide_panel')} aria-label="Close">✕</button>
+        </header>
+        <input class="search" placeholder="Search history" bind:value={q} oninput={loadHistory} />
+        {#if st}
+          <div class="chips">
+            <button class:on={!only} onclick={() => (only = null)}>All profiles</button>
+            {#each st.cfg.profiles as p}
+              <button class:on={only === p.name} onclick={() => (only = p.name)}><i style="background:{color(p.name)}"></i>{p.name}</button>
+            {/each}
+          </div>
         {/if}
-      </div>
-    </section>
-
-    <section>
-      <h2>Memory</h2>
-      <label>Discard idle background tabs after
-        <input type="number" min="1" max="1440" value={st.cfg.settings.idle_minutes} onchange={(e) => set({ idle_minutes: Math.max(1, +e.currentTarget.value) })} /> minutes
-      </label>
-      <label><input type="checkbox" checked={st.cfg.settings.adblock} onchange={(e) => set({ adblock: e.currentTarget.checked })} /> Ad blocker enabled</label>
-    </section>
-
-    <section>
-      <h2>Profiles</h2>
-      <ul>
-        {#each st.cfg.profiles as p}
-          <li><span class="badge" style="background:{color(p.name)}"></span> {p.name}
-            <button onclick={() => call('delete_profile', { name: p.name })} disabled={st.cfg.profiles.length < 2 || st.tabs.some((t) => t.profile === p.name)}>Delete</button></li>
+        <div class="list">
+          {#each days as d}
+            <div class="day">{d.day}</div>
+            {#each d.rows as r}
+              <button class="hrow" onclick={() => { call('new_tab', { url: r.url }); call('hide_panel'); }}>
+                <span class="time">{hm(r.visited_at)}</span>
+                <span class="pb" style="background:{color(r.profile)}"></span>
+                <span class="t">{r.title || r.url}</span>
+                <span class="meta">{host(r.url)}</span>
+              </button>
+            {/each}
+          {:else}
+            <div class="meta empty">Nothing here.</div>
+          {/each}
+        </div>
+      </section>
+      <section class="dl">
+        <header>
+          <h1>Downloads</h1>
+          <span class="grow"></span>
+        </header>
+        {#each downloads as d}
+          <div class="card dcard">
+            <span class="ext">{ext(d)}</span>
+            <span class="grow">
+              <span class="name">{fname(d)}</span>
+              <span class="meta">{new Date(d.started_at * 1000).toLocaleString()}</span>
+            </span>
+            <span class="state" style="color:{tint[d.status] ?? accent}">{d.status}</span>
+            {#if d.path}<button class="ghost" onclick={() => call('reveal_path', { path: d.path })}>Show</button>{/if}
+          </div>
+        {:else}
+          <div class="meta">No downloads yet.</div>
         {/each}
-      </ul>
-      <form class="row" onsubmit={(e) => { e.preventDefault(); call('add_profile', { name: newProfile }); newProfile = ''; }}>
-        <input placeholder="New profile name" bind:value={newProfile} /><button>Add</button>
-      </form>
-    </section>
+      </section>
+    </div>
+  {:else if st}
+    <div class="settings">
+      <aside>
+        <div class="title"><span class="logo">S</span><span><b>Settings</b><small>Aditus 0.1</small></span></div>
+        {#each NAV as n}
+          <button class="nav" class:on={nav === n} onclick={() => (nav = n)}>{n}</button>
+        {/each}
+        <span class="grow"></span>
+        <button class="nav" onclick={() => call('hide_panel')}>Close</button>
+      </aside>
 
-    <section>
-      <h2>Site → profile</h2>
-      <ul>
-        {#each st.cfg.mappings as m}
-          <li><span class="t">{m.pattern}</span> <span class="meta" style="color:{color(m.profile)}">{m.profile}</span>
-            <button onclick={() => call('delete_mapping', { pattern: m.pattern })}>Remove</button></li>
-        {:else}<li class="meta">None yet. You'll be asked the first time you visit a site.</li>{/each}
-      </ul>
-      <form class="row" onsubmit={(e) => { e.preventDefault(); if (newHost.trim()) call('assign_mapping', { host: newHost.trim(), profile: newHostProfile }); newHost = ''; }}>
-        <input class="grow" placeholder="youtube.com or *.google.com" bind:value={newHost} />
-        <select bind:value={newHostProfile}>{#each st.cfg.profiles as p}<option>{p.name}</option>{/each}</select>
-        <button>Add</button>
-      </form>
-    </section>
+      <main>
+        {#if nav === 'General'}
+          <h1>General</h1>
+          <div class="card list2">
+            <label class="item">
+              <span class="grow"><b>Show top bar</b><small>Back, forward, address and profile. Cmd+L opens the palette when hidden.</small></span>
+              <input type="checkbox" class="sw" checked={st.cfg.settings.topbar_visible} onchange={(e) => set({ topbar_visible: e.currentTarget.checked })} />
+            </label>
+            <label class="item">
+              <span class="grow"><b>Collapse sidebar to icons</b><small>Toggle any time from the View menu.</small></span>
+              <input type="checkbox" class="sw" checked={st.cfg.settings.sidebar_collapsed} onchange={(e) => set({ sidebar_collapsed: e.currentTarget.checked })} />
+            </label>
+            <label class="item">
+              <span class="grow"><b>Sleep idle tabs after</b><small>Pinned and playing tabs stay awake.</small></span>
+              <span><input type="number" min="1" max="1440" value={st.cfg.settings.idle_minutes} onchange={(e) => set({ idle_minutes: Math.max(1, +e.currentTarget.value) })} /> min</span>
+            </label>
+          </div>
+        {:else if nav === 'Profiles and sites'}
+          <h1>Profiles <small>Separate cookies and logins. Each tab runs in one profile.</small></h1>
+          <div class="pgrid">
+            {#each st.cfg.profiles as p}
+              <div class="card pcard" style="border-top-color:{color(p.name)}">
+                <div class="phead"><span class="pi" style="background:{color(p.name)}">{p.name[0].toUpperCase()}</span><b class="grow">{p.name}</b></div>
+                <div class="stats"><span><b>{sites(p.name)}</b>sites</span><span><b>{count(p.name)}</b>tabs</span></div>
+                <button class="ghost" onclick={() => call('delete_profile', { name: p.name })} disabled={st.cfg.profiles.length < 2 || count(p.name) > 0}>Delete</button>
+              </div>
+            {/each}
+            <form class="card add" onsubmit={(e) => { e.preventDefault(); if (newProfile.trim()) call('add_profile', { name: newProfile.trim() }); newProfile = ''; }}>
+              <input placeholder="＋ Add profile" bind:value={newProfile} />
+            </form>
+          </div>
 
-    <section>
-      <h2>Ad blocker paused on</h2>
-      <ul>
-        {#each st.cfg.allowlist as h}
-          <li><span class="t">{h}</span><button onclick={() => call('toggle_allowlist', { host: h })}>Resume</button></li>
-        {:else}<li class="meta">No sites.</li>{/each}
-      </ul>
-    </section>
+          <h1>Sites <small>A mapped site opens in its profile. Login pages never switch.</small></h1>
+          <div class="row">
+            <input class="grow" placeholder="Filter sites" bind:value={hostQuery} />
+          </div>
+          <div class="table">
+            {#each mapped as m}
+              <div class="trow">
+                <span class="mono grow">{m.pattern}</span>
+                <span class="who"><i style="background:{color(m.profile)}"></i>{m.profile}</span>
+                <span class="meta w">{m.pattern.startsWith('*.') ? 'subdomains' : 'exact'}</span>
+                <button class="ghost" onclick={() => call('delete_mapping', { pattern: m.pattern })}>Remove</button>
+              </div>
+            {:else}
+              <div class="trow meta">None yet. You'll be asked the first time you visit a site.</div>
+            {/each}
+          </div>
+          <form class="row" onsubmit={(e) => { e.preventDefault(); if (newHost.trim()) call('assign_mapping', { host: newHost.trim(), profile: newHostProfile }); newHost = ''; }}>
+            <input class="grow" placeholder="youtube.com or *.google.com" bind:value={newHost} />
+            <select bind:value={newHostProfile}>{#each st.cfg.profiles as p}<option>{p.name}</option>{/each}</select>
+            <button class="solid">＋ Add site</button>
+          </form>
+          <p class="meta">Login and OAuth hosts (accounts.*, auth.*, sso.*) are exempt automatically, so sign-in flows are never interrupted.</p>
+        {:else if nav === 'Ad blocker'}
+          <h1>Ad blocker</h1>
+          <div class="card list2">
+            <label class="item">
+              <span class="grow"><b>Block ads and trackers</b><small>Lists refresh daily.</small></span>
+              <input type="checkbox" class="sw" checked={st.cfg.settings.adblock} onchange={(e) => set({ adblock: e.currentTarget.checked })} />
+            </label>
+          </div>
+          <h2>Paused on</h2>
+          <div class="chips">
+            {#each st.cfg.allowlist as h}
+              <button class="mono" onclick={() => call('toggle_allowlist', { host: h })}>{h} <span class="meta">×</span></button>
+            {:else}<span class="meta">No sites.</span>{/each}
+          </div>
+        {:else if nav === 'Search'}
+          <h1>Search</h1>
+          <div class="engines">
+            {#each ENGINES as [id, name, sub]}
+              <button class="engine" class:on={engine === id} onclick={() => pick(id)}>{name}<small>{sub}</small></button>
+            {/each}
+          </div>
+          <div class="card tpl">
+            <h2>Template</h2>
+            <input class="mono" value={st.cfg.settings.search_template} disabled={engine !== 'custom'} onchange={(e) => set({ search_template: e.currentTarget.value })} />
+          </div>
+          <p class="meta">Searches follow the same site rules: if the search site is mapped to a profile, it opens there.</p>
+        {:else}
+          <h1>About</h1>
+          <div class="card about"><span class="logo big">A</span><span><b>Aditus 0.1.0</b><small>Open source, GPL-3.0</small></span></div>
+          <div class="card list2">
+            <div class="kv"><span class="meta">Engine</span><span class="mono">System webview</span></div>
+            <div class="kv"><span class="meta">Interface</span><span class="mono">Tauri 2 + Svelte</span></div>
+            <div class="kv"><span class="meta">Data</span><span class="mono">config.toml · aditus.db</span></div>
+          </div>
+        {/if}
+      </main>
+    </div>
   {/if}
 </div>
 
 <style>
-  .panel { height: 100vh; overflow-y: auto; padding: 16px 24px 40px; background: var(--bg); }
-  header { display: flex; justify-content: space-between; align-items: center; }
-  h1 { font-size: 20px; margin: 0 0 12px; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 24px 0 8px; }
-  section label { display: block; margin: 6px 0; }
-  .row { display: flex; gap: 8px; margin: 8px 0; }
-  .grow { flex: 1; }
-  ul { list-style: none; margin: 0; padding: 0; }
-  li { display: flex; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); }
-  .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .u { color: var(--dim); margin-left: 10px; }
-  .meta { color: var(--dim); font-size: 12px; white-space: nowrap; }
-  .link { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .badge { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-  input[type='number'] { width: 70px; }
+  .panel {
+    --bg: color-mix(in srgb, var(--accent) 8%, #0e0d14);
+    --card: color-mix(in srgb, var(--accent) 12%, #16141d);
+    --hi: color-mix(in srgb, var(--accent) 22%, #1d1a28);
+    --line: color-mix(in srgb, var(--accent) 16%, #23212c);
+    --dim: #9d92b8;
+    height: 100vh; overflow: hidden; background: var(--bg); color: #f1eefb;
+  }
+  .grow { flex: 1; min-width: 0; }
+  small { display: block; color: var(--dim); font-size: 12px; font-weight: 400; margin-top: 2px; }
+  .meta { color: var(--dim); font-size: 12px; }
+  .mono { font-family: ui-monospace, 'JetBrains Mono', monospace; font-size: 12px; }
+  h1 { font-size: 24px; letter-spacing: -.01em; margin: 0; display: flex; align-items: baseline; gap: 12px; }
+  h1 small { display: inline; margin: 0; font-size: 12.5px; }
+  h2 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); margin: 18px 0 8px; font-weight: 600; }
+  .card { background: var(--card); border-radius: 14px; }
+  .ghost { border: 1px solid var(--line); color: #c9bfe6; font-weight: 500; height: 28px; }
+  .solid { background: #f1eefb; color: #120d1d; font-weight: 700; height: 34px; border-radius: 10px; padding: 0 14px; }
+  .solid:hover:not(:disabled) { background: #fff; }
+  .x { color: var(--dim); }
+  input.search, .row input, .add input { height: 36px; background: var(--card); border: 0; border-radius: 10px; padding: 0 14px; }
+
+  .lib { display: flex; height: 100%; }
+  .hist { flex: 1; min-width: 0; padding: 28px 36px; display: flex; flex-direction: column; gap: 14px; border-right: 1px solid var(--line); }
+  .dl { width: 430px; flex: none; padding: 28px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+  header { display: flex; align-items: center; gap: 12px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chips button { height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 7px; background: var(--card); font-size: 12px; }
+  .chips button.on { background: #f1eefb; color: #120d1d; font-weight: 600; }
+  .chips i, .who i { width: 8px; height: 8px; border-radius: 2px; display: block; }
+  .list { flex: 1; overflow-y: auto; }
+  .day { padding: 14px 0 6px; color: var(--dim); font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; font-weight: 600; }
+  .hrow { display: flex; align-items: center; gap: 12px; width: 100%; height: 34px; border-radius: 0; border-bottom: 1px solid var(--card); text-align: left; padding: 0 2px; }
+  .time { font-family: ui-monospace, monospace; font-size: 11px; color: var(--dim); width: 70px; flex: none; white-space: nowrap; }
+  .pb { width: 4px; height: 16px; border-radius: 2px; flex: none; }
+  .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .empty { padding: 16px 0; }
+  .dcard { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
+  .ext { width: 32px; height: 32px; border-radius: 9px; background: var(--hi); display: grid; place-items: center; font-family: ui-monospace, monospace; font-size: 9.5px; color: var(--accent); flex: none; }
+  .name { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .state { font-size: 12px; font-weight: 600; }
+
+  .settings { display: flex; height: 100%; }
+  aside { width: 236px; flex: none; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
+  .title { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--accent); color: #120d1d; margin-bottom: 10px; }
+  .title b { display: block; font-size: 13.5px; }
+  .title small { color: inherit; opacity: .7; font-size: 11px; margin: 0; }
+  .logo { width: 28px; height: 28px; border-radius: 9px; background: #120d1d; color: var(--accent); display: grid; place-items: center; font-weight: 700; }
+  .logo.big { width: 56px; height: 56px; border-radius: 16px; background: var(--accent); color: #120d1d; font-size: 28px; font-weight: 800; }
+  .nav { height: 32px; text-align: left; padding: 0 12px; border-radius: 8px; color: #c9bfe6; font-weight: 500; }
+  .nav.on { background: var(--hi); color: #fff; font-weight: 600; }
+  main { flex: 1; min-width: 0; margin: 8px 8px 8px 0; border-radius: 12px; background: color-mix(in srgb, var(--accent) 6%, #131119); padding: 32px 44px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; align-content: start; }
+  .list2 { display: flex; flex-direction: column; }
+  .item, .kv { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-top: 1px solid var(--line); }
+  .item:first-child, .kv:first-child { border-top: 0; }
+  .item b { display: block; font-weight: 600; }
+  .sw { appearance: none; width: 38px; height: 22px; border-radius: 11px; background: var(--hi); border: 0; position: relative; padding: 0; flex: none; cursor: pointer; }
+  .sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .12s; }
+  .sw:checked { background: var(--accent); }
+  .sw:checked::after { left: 19px; }
+  .item input[type='number'] { width: 64px; height: 30px; background: var(--hi); border: 0; }
+  .kv { justify-content: space-between; padding: 11px 16px; }
+  .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+  .pcard { padding: 14px; display: flex; flex-direction: column; gap: 12px; border-top: 3px solid; align-items: flex-start; }
+  .phead { display: flex; align-items: center; gap: 10px; width: 100%; }
+  .pi { width: 28px; height: 28px; border-radius: 9px; color: #120d1d; display: grid; place-items: center; font-weight: 700; }
+  .stats { display: flex; gap: 18px; color: var(--dim); font-size: 12px; }
+  .stats b { display: block; color: #f1eefb; font-size: 16px; }
+  .add { border: 1.5px dashed var(--hi); background: none; display: grid; place-items: center; min-height: 120px; padding: 12px; }
+  .row { display: flex; gap: 8px; }
+  .table { border-radius: 14px; background: var(--card); overflow: hidden; }
+  .trow { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 16px; border-top: 1px solid var(--line); }
+  .trow:first-child { border-top: 0; }
+  .who { width: 150px; display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .w { width: 90px; }
+  .engines { display: flex; gap: 8px; }
+  .engine { flex: 1; border-radius: 14px; background: var(--card); padding: 14px; text-align: left; font-weight: 600; }
+  .engine small { font-weight: 500; opacity: .7; }
+  .engine.on { background: var(--accent); color: #120d1d; }
+  .tpl { padding: 12px 14px; }
+  .tpl h2 { margin-top: 0; }
+  .tpl input { width: 100%; background: none; border: 0; padding: 0; }
+  .about { display: flex; gap: 16px; align-items: center; padding: 18px; }
+  .about b { font-size: 18px; display: block; }
+  p.meta { line-height: 1.5; margin: 0; }
 </style>

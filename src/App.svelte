@@ -36,6 +36,7 @@
       tabs: st.tabs.filter((t) => !t.pinned && t.group === g && matches(t)),
     })),
   );
+  const groupNames = $derived([...new Set(st.tabs.map((t) => t.group).filter(Boolean))]);
   const rest = $derived([...loose, ...groups.flatMap((g) => g.tabs)]);
   function fold(g) {
     folded.has(g) ? folded.delete(g) : folded.add(g);
@@ -318,11 +319,24 @@
 
 {#if menu}
   <div class="ctx" style="left:{menu.x}px; top:{menu.y}px">
-    <button onclick={() => call('pin_tab', { id: menu.tab.id, pinned: !menu.tab.pinned })}>{menu.tab.pinned ? 'Unpin' : 'Pin'}</button>
+    <button onclick={() => call('reload')}>Reload</button>
+    <button onclick={() => call('pin_tab', { id: menu.tab.id, pinned: !menu.tab.pinned })}>{menu.tab.pinned ? 'Unpin tab' : 'Pin tab'}</button>
+    <h6>Add to group</h6>
+    {#each groupNames as g}
+      <button class:sel={menu.tab.group === g} onclick={() => call('group_tab', { id: menu.tab.id, group: g })}>{g}</button>
+    {/each}
     <form onsubmit={(e) => groupTab(e, menu.tab)} onclick={(e) => e.stopPropagation()}>
-      <input name="g" placeholder="Group name" value={menu.tab.group ?? ''} />
+      <input name="g" placeholder="New group name…" value={menu.tab.group ?? ''} />
     </form>
-    <button onclick={() => call('close_tab', { id: menu.tab.id })}>Close</button>
+    <h6>Move to profile</h6>
+    {#each cfg.profiles as p}
+      <button class:sel={menu.tab.profile === p.name} onclick={async () => { await call('activate_tab', { id: menu.tab.id }); call('switch_profile', { profile: p.name }); }}>
+        <i style="background:{color(p.name)}"></i>{p.name}
+      </button>
+    {/each}
+    <hr />
+    <button onclick={() => call('close_tab', { id: menu.tab.id })}>Close tab</button>
+    <button onclick={() => st.tabs.filter((t) => t.id !== menu.tab.id && !t.pinned).forEach((t) => call('close_tab', { id: t.id }))}>Close other tabs</button>
   </div>
 {/if}
 
@@ -367,10 +381,15 @@
   form { flex: 1; }
   form input { width: 100%; }
   .off { color: var(--danger); }
-  .find { height: 36px; display: flex; align-items: center; gap: 4px; padding: 0 8px; border-top: 1px solid var(--line); }
-  .find input { flex: 1; }
-  .ctx { position: fixed; z-index: 10; background: var(--bg3); border: 1px solid var(--line); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; min-width: 130px; }
-  .ctx button { text-align: left; }
+  .find { height: 36px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 0 12px; }
+  .find input { width: 260px; height: 28px; background: var(--bg3); border: 0; border-radius: 8px; }
+  .find button { width: 28px; height: 28px; padding: 0; background: var(--bg3); border-radius: 8px; }
+  .ctx { position: fixed; z-index: 10; background: #1c1530; border-radius: 12px; padding: 6px; display: flex; flex-direction: column; width: 220px; box-shadow: 0 18px 50px rgba(0,0,0,.45); }
+  .ctx button { text-align: left; height: 30px; border-radius: 7px; display: flex; align-items: center; gap: 8px; }
+  .ctx .sel { background: var(--bg3); font-weight: 600; }
+  .ctx i { width: 10px; height: 10px; border-radius: 3px; display: block; }
+  .ctx h6 { margin: 6px 10px 2px; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
+  .ctx hr { margin: 5px 4px; }
   .ctx form { padding: 2px; }
   .ctx input { width: 100%; }
 </style>
