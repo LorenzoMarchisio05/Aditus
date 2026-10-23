@@ -238,8 +238,8 @@
   {/if}
 
   {#if tab && !collapsed}
-    <button class="pcard" style="background:{color(tab.profile)}" onclick={(e) => { e.stopPropagation(); picker = !picker; }} aria-label="Switch profile">
-      <span class="pinit" style="color:{color(tab.profile)}">{initial(tab.profile)}</span>
+    <button class="pcard" onclick={(e) => { e.stopPropagation(); picker = !picker; }} aria-label="Switch profile">
+      <span class="pinit" style="background:{color(tab.profile)}">{initial(tab.profile)}</span>
       <span class="pname">{tab.profile}<small>{cfg.mappings.filter((m) => m.profile === tab.profile).length} sites · {st.tabs.filter((x) => x.profile === tab.profile).length} tabs</small></span>
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
     </button>
@@ -412,8 +412,8 @@
   .tab.active .pbar { opacity: 1; }
   .host { color: var(--dim); font-weight: 400; margin-left: 6px; }
   .tag { font-size: 9.5px; font-weight: 700; letter-spacing: .03em; flex: none; }
-  .pcard { width: calc(100% - 16px); text-align: left; display: flex; align-items: center; gap: 10px; margin: 0 8px 6px; padding: 7px 10px; border-radius: 12px; color: #120d1d; }
-  .pinit { width: 26px; height: 26px; border-radius: 8px; background: #120d1d; display: grid; place-items: center; font-weight: 700;}
+  .pcard { width: calc(100% - 16px); text-align: left; display: flex; align-items: center; gap: 10px; margin: 0 8px 6px; padding: 7px 10px; border-radius: 12px; background: var(--bg3); color: var(--fg); }
+  .pinit { width: 26px; height: 26px; border-radius: 8px; color: #120d1d; display: grid; place-items: center; font-weight: 700; }
   .pname { display: flex; flex-direction: column; font-weight: 700; line-height: 1.15; }
   .pname small { font-weight: 500; opacity: .7; font-size: 11px; }
   .seg { font-size: 12px; font-weight: 700; color: #120d1d; padding: 0 12px; height: 100%; border: 0; border-radius: 0; }
