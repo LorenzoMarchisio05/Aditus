@@ -62,6 +62,8 @@ pub struct Tab {
     pub audible: bool,
     /// Private-window tab: no history, no saved session, no profile swaps, throwaway storage.
     pub private: bool,
+    /// Page zoom in percent set with Cmd/Ctrl +/-/0; `None` follows the setting.
+    pub zoom: Option<u32>,
     pub gen: u32,
     pub last_active: Instant,
     mode: Mode,
@@ -522,11 +524,11 @@ new MutationObserver(skip).observe(document,{subtree:true,attributes:true,attrib
 })();"#;
 
 fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String> {
-    let (profile_name, gen, url, cfg_profile, win, private) = {
+    let (profile_name, gen, url, cfg_profile, win, private, zoom) = {
         let g = shared(app).app.lock().unwrap();
         let t = g.tabs.iter().find(|t| t.id == tab_id).ok_or("no tab")?;
         let p = g.cfg.profile(&t.profile).or(g.cfg.profiles.first()).ok_or("no profile")?.clone();
-        (t.profile.clone(), t.gen, t.url(), p, t.win.clone(), t.private)
+        (t.profile.clone(), t.gen, t.url(), p, t.win.clone(), t.private, t.zoom.unwrap_or(g.cfg.settings.page_zoom))
     };
     let window = app.get_window(&win).ok_or("no window")?;
     let adblock_on = shared(app).app.lock().unwrap().cfg.settings.adblock;
@@ -630,7 +632,6 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
     let wv = window.add_child(builder, pos, size).map_err(|e| e.to_string())?;
     no_inset(&wv);
     fit_page(app, &wv);
-    let zoom = shared(app).app.lock().unwrap().cfg.settings.page_zoom;
     if zoom != 100 {
         let _ = wv.set_zoom(zoom as f64 / 100.0);
     }
@@ -642,6 +643,14 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
 }
 
 fn on_navigation(app: &AppHandle, tab_id: u32, gen: u32, u: &Url) -> bool {
+    if matches!(u.scheme(), "mailto" | "tel" | "sms") {
+        // Hand to the OS, but only for a click: a page must not open the mail app by itself.
+        let user = shared(app).app.lock().unwrap().gestures.get(&tab_id).is_some_and(|t| t.elapsed() < GESTURE_WINDOW);
+        if user {
+            open_external(u.as_str());
+        }
+        return false;
+    }
     if !matches!(u.scheme(), "http" | "https") || internal_view(u.as_str()).is_some() {
         return true;
     }
@@ -829,6 +838,7 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
             loading: false,
             audible: false,
             private,
+            zoom: None,
             gen: 0,
             last_active: Instant::now(),
             mode: Mode::Push,
@@ -1049,6 +1059,40 @@ pub fn go_history(app: &AppHandle, tab_id: u32, delta: i32) {
     } else {
         navigate(app, tab_id, url, false);
     }
+}
+
+/// Opens `url` with the OS handler. Callers pass only allow-listed schemes.
+pub fn open_external(url: &str) {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn();
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+}
+
+/// Cmd/Ctrl +, -, 0: `step` is +1, -1, or 0 to reset. Remembered per tab so a rebuilt webview keeps it.
+pub fn zoom(app: &AppHandle, tab_id: u32, step: i32) {
+    let pct = {
+        let mut g = shared(app).app.lock().unwrap();
+        let base = g.cfg.settings.page_zoom;
+        let Some(t) = g.tab(tab_id) else { return };
+        let pct = if step == 0 { base } else { (t.zoom.unwrap_or(base) as i32 + step * 10).clamp(30, 300) as u32 };
+        t.zoom = (step != 0).then_some(pct);
+        pct
+    };
+    if let Some(wv) = active_webview(app, tab_id) {
+        let _ = wv.set_zoom(pct as f64 / 100.0);
+    }
+}
+
+/// File > Print / Save Page: run in the page, since only macOS has a native print call.
+pub fn page_action(app: &AppHandle, tab_id: u32, act: &str) {
+    let Some(wv) = active_webview(app, tab_id) else { return };
+    let _ = match act {
+        "print" => wv.eval("window.print()"),
+        _ => wv.eval("(()=>{const a=document.createElement('a');a.href=location.href;a.download=(document.title||'page')+'.html';document.body.appendChild(a);a.click();a.remove()})()"),
+    };
 }
 
 pub fn reload(app: &AppHandle, tab_id: u32) {

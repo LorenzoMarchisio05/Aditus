@@ -339,6 +339,7 @@
 
 {#if topbar}
   <header class="top" style="left:{sidebarW}px">
+    {#if tab?.loading}<div class="load"></div>{/if}
     <div class="bar" data-tauri-drag-region>
       <button disabled={!tab?.can_back} onclick={() => call('back')} aria-label="Back"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
       <button disabled={!tab?.can_forward} onclick={() => call('forward')} aria-label="Forward"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
@@ -442,6 +443,9 @@
   .pin.active { opacity: 1; background: var(--bg3); outline: 1.5px solid var(--accent); }
   .pin img { width: 16px; height: 16px; border-radius: 4px; }
   .pu { position: absolute; right: 5px; bottom: 5px; width: 7px; height: 7px; border-radius: 50%; }
+  .load { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; overflow: hidden; pointer-events: none; }
+  .load::after { content: ""; position: absolute; top: 0; bottom: 0; width: 35%; background: var(--accent); border-radius: 2px; animation: ld 1.1s ease-in-out infinite; }
+  @keyframes ld { from { left: -35%; } to { left: 100%; } }
   .top { position: fixed; top: 0; right: 0; background: var(--bg); border-bottom: 1px solid var(--line); }
   .drag { position: absolute; top: 0; left: 0; right: 0; height: 38px; }
   .bar { height: 52px; display: flex; align-items: center; gap: 6px; padding: 0 14px; }
