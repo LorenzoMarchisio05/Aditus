@@ -180,7 +180,6 @@
 
   const mac = navigator.platform.includes('Mac'); // traffic lights overlay the sidebar top
 
-  const initial = (n) => n.slice(0, 1).toUpperCase();
 </script>
 
 <svelte:window onclick={() => { menu = null; }} />
