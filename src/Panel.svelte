@@ -17,7 +17,23 @@
   let ab = $state(null);
   let upd = $state(null); // null | 'checking' | result
 
-  const NAV = ['General', 'Tabs', 'Startup and downloads', 'Privacy', 'Profiles and sites', 'Ad blocker', 'Search', 'Shortcuts', 'About'];
+  const NAV = ['General', 'Tabs', 'Startup and downloads', 'Profiles and sites', 'Ad blocker', 'Search', 'Privacy', 'Shortcuts', 'About'];
+  const slug = (n) => n.toLowerCase().replaceAll(' ', '-');
+  let mainEl, jumping = false;
+  function jump(n) {
+    nav = n;
+    jumping = true;
+    document.getElementById('sec-' + slug(n))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(() => (jumping = false), 700);
+  }
+  function spy() {
+    if (jumping || !mainEl) return;
+    const end = mainEl.scrollTop + mainEl.clientHeight >= mainEl.scrollHeight - 4;
+    if (end) return void (nav = NAV[NAV.length - 1]);
+    let cur = NAV[0];
+    for (const n of NAV) if (document.getElementById('sec-' + slug(n)).offsetTop <= mainEl.scrollTop + 60) cur = n;
+    nav = cur;
+  }
   const SHORTCUTS = [['New tab', '⌘T'], ['New window', '⌘N'], ['Close tab', '⌘W'], ['Reopen closed tab', '⇧⌘T'], ['Open location', '⌘L'], ['Find in page', '⌘F'], ['Search tabs', '⇧⌘A'], ['Reload', '⌘R'], ['Back / forward', '⌘[ / ⌘]'], ['Toggle sidebar', '⌘\\'], ['Toggle top bar', '⇧⌘L'], ['Developer tools', '⌥⌘I'], ['History', '⌘Y'], ['Downloads', '⇧⌘J'], ['Settings', '⌘,']];
   const newtab = $derived(view === 'newtab');
   $effect(() => {
@@ -57,7 +73,7 @@
   });
 
   $effect(() => {
-    if (view === 'settings' && nav === 'Ad blocker') call('adblock_info').then((i) => (ab = i));
+    if (view === 'settings') call('adblock_info').then((i) => (ab = i));
   });
   async function checkUpdate() {
     upd = 'checking';
@@ -198,14 +214,14 @@
       <aside>
         <div class="title"><span class="logo"><svg viewBox="0 0 100 100" width="70%" height="70%" fill="currentColor" aria-hidden="true"><path d="M46 18h8l15 60H31z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg></span><span><b>Settings</b><small>Aditus 0.1</small></span></div>
         {#each NAV as n}
-          <button class="nav" class:on={nav === n} onclick={() => (nav = n)}>{n}</button>
+          <button class="nav" class:on={nav === n} onclick={() => jump(n)}>{n}</button>
         {/each}
         <span class="grow"></span>
         <button class="nav" onclick={closeTab}>Close</button>
       </aside>
 
-      <main>
-        {#if nav === 'General'}
+      <main bind:this={mainEl} onscroll={spy}>
+        <section id="sec-general" class="sec">
           <h1>General</h1>
           <div class="card list2">
             <label class="item">
@@ -241,7 +257,8 @@
               <span><input type="number" min="50" max="300" step="10" value={st.cfg.settings.page_zoom} onchange={(e) => set({ page_zoom: Math.min(300, Math.max(50, +e.currentTarget.value)) })} /> %</span>
             </label>
           </div>
-        {:else if nav === 'Tabs'}
+        </section>
+        <section id="sec-tabs" class="sec">
           <h1>Tabs</h1>
           <div class="card list2">
             <label class="item">
@@ -257,7 +274,8 @@
               <span><input type="number" min="1" max="1440" value={st.cfg.settings.idle_minutes} onchange={(e) => set({ idle_minutes: Math.max(1, +e.currentTarget.value) })} /> min</span>
             </label>
           </div>
-        {:else if nav === 'Startup and downloads'}
+        </section>
+        <section id="sec-startup-and-downloads" class="sec">
           <h1>Startup and downloads</h1>
           <div class="card list2">
             <div class="item">
@@ -279,32 +297,8 @@
               <input class="wide" placeholder="/path/to/folder" value={st.cfg.settings.download_dir} onchange={(e) => set({ download_dir: e.currentTarget.value.trim() })} />
             </label>
           </div>
-        {:else if nav === 'Privacy'}
-          <h1>Privacy</h1>
-          <div class="card list2">
-            <label class="item">
-              <span class="grow"><b>Clear history when Aditus quits</b><small>Downloads list is kept.</small></span>
-              <input type="checkbox" class="sw" checked={st.cfg.settings.clear_history_on_quit} onchange={(e) => set({ clear_history_on_quit: e.currentTarget.checked })} />
-            </label>
-            <label class="item">
-              <span class="grow"><b>Delete history older than</b><small>0 keeps everything. Runs at launch.</small></span>
-              <span><input type="number" min="0" max="3650" value={st.cfg.settings.history_days} onchange={(e) => set({ history_days: Math.max(0, +e.currentTarget.value) })} /> days</span>
-            </label>
-            <div class="item">
-              <span class="grow"><b>Clear history now</b><small>Everything, across profiles.</small></span>
-              <button class="ghost" onclick={() => call('history_clear')}>Clear…</button>
-            </div>
-          </div>
-          <p class="meta">Cookies and site data live in each profile. Delete a profile to wipe its data.</p>
-        {:else if nav === 'Shortcuts'}
-          <h1>Shortcuts</h1>
-          <div class="card list2">
-            {#each SHORTCUTS as [name, keys]}
-              <div class="kv"><span>{name}</span><kbd>{keys}</kbd></div>
-            {/each}
-          </div>
-          <p class="meta">Shortcuts follow the menu bar and aren't rebindable yet. Ctrl replaces ⌘ on Windows and Linux.</p>
-        {:else if nav === 'Profiles and sites'}
+        </section>
+        <section id="sec-profiles-and-sites" class="sec">
           <h1>Profiles <small>Separate cookies and logins. Each tab runs in one profile.</small></h1>
           <div class="pgrid">
             {#each st.cfg.profiles as p}
@@ -341,7 +335,8 @@
             <button class="solid">＋ Add site</button>
           </form>
           <p class="meta">Login and OAuth hosts (accounts.*, auth.*, sso.*) are exempt automatically, so sign-in flows are never interrupted.</p>
-        {:else if nav === 'Ad blocker'}
+        </section>
+        <section id="sec-ad-blocker" class="sec">
           <h1>Ad blocker</h1>
           <div class="card list2">
             <label class="item">
@@ -373,7 +368,8 @@
             {:else}<span class="meta">No sites.</span>{/each}
           </div>
           <p class="meta">The shield in the address bar pauses blocking for the current site only.</p>
-        {:else if nav === 'Search'}
+        </section>
+        <section id="sec-search" class="sec">
           <h1>Search</h1>
           <div class="engines">
             {#each ENGINES as [id, name, sub]}
@@ -385,7 +381,35 @@
             <input class="mono" value={st.cfg.settings.search_template} disabled={engine !== 'custom'} onchange={(e) => set({ search_template: e.currentTarget.value })} />
           </div>
           <p class="meta">Searches follow the same site rules: if the search site is mapped to a profile, it opens there.</p>
-        {:else}
+        </section>
+        <section id="sec-privacy" class="sec">
+          <h1>Privacy</h1>
+          <div class="card list2">
+            <label class="item">
+              <span class="grow"><b>Clear history when Aditus quits</b><small>Downloads list is kept.</small></span>
+              <input type="checkbox" class="sw" checked={st.cfg.settings.clear_history_on_quit} onchange={(e) => set({ clear_history_on_quit: e.currentTarget.checked })} />
+            </label>
+            <label class="item">
+              <span class="grow"><b>Delete history older than</b><small>0 keeps everything. Runs at launch.</small></span>
+              <span><input type="number" min="0" max="3650" value={st.cfg.settings.history_days} onchange={(e) => set({ history_days: Math.max(0, +e.currentTarget.value) })} /> days</span>
+            </label>
+            <div class="item">
+              <span class="grow"><b>Clear history now</b><small>Everything, across profiles.</small></span>
+              <button class="ghost" onclick={() => call('history_clear')}>Clear…</button>
+            </div>
+          </div>
+          <p class="meta">Cookies and site data live in each profile. Delete a profile to wipe its data.</p>
+        </section>
+        <section id="sec-shortcuts" class="sec">
+          <h1>Shortcuts</h1>
+          <div class="card list2">
+            {#each SHORTCUTS as [name, keys]}
+              <div class="kv"><span>{name}</span><kbd>{keys}</kbd></div>
+            {/each}
+          </div>
+          <p class="meta">Shortcuts follow the menu bar and aren't rebindable yet. Ctrl replaces ⌘ on Windows and Linux.</p>
+        </section>
+        <section id="sec-about" class="sec">
           <h1>About</h1>
           <div class="card about">
             <span class="logo big"><svg viewBox="0 0 100 100" width="70%" height="70%" fill="currentColor" aria-hidden="true"><path d="M46 18h8l15 60H31z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg></span>
@@ -414,7 +438,7 @@
             <div class="kv"><span class="meta">Interface</span><span class="mono">Tauri 2 + Svelte</span></div>
             <div class="kv"><span class="meta">Data</span><span class="mono">config.toml · aditus.db</span></div>
           </div>
-        {/if}
+        </section>
       </main>
     </div>
   {/if}
@@ -484,7 +508,9 @@
   .logo.big { width: 56px; height: 56px; border-radius: 16px; }
   .nav { height: 38px; text-align: left; padding: 0 12px; border-radius: 10px; color: var(--dim); font-weight: 500; }
   .nav.on { background: var(--bg3); color: var(--fg); }
-  main { flex: 1; min-width: 0; padding: 40px 56px; max-width: 880px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; align-content: start; }
+  .sec { display: flex; flex-direction: column; gap: 14px; padding-bottom: 48px; }
+  .sec:last-child { min-height: 70vh; }
+  main { position: relative; flex: 1; min-width: 0; padding: 40px 56px; max-width: 880px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; align-content: start; scroll-behavior: smooth; }
   .list2 { display: flex; flex-direction: column; }
   .item, .kv { display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-top: 1px solid var(--line); }
   .item:first-child, .kv:first-child { border-top: 0; }
