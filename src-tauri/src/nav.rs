@@ -45,8 +45,14 @@ pub fn clean_pattern(p: &str) -> String {
     p.to_string()
 }
 
+/// `www.` is not a different site: `youtube.com` and `www.youtube.com` are the same mapping.
+fn bare(h: &str) -> &str {
+    h.strip_prefix("www.").unwrap_or(h)
+}
+
 pub fn matches(pattern: &str, host: &str) -> bool {
     let pattern = clean_pattern(pattern);
+    let (pattern, host) = (bare(&pattern), bare(host));
     match pattern.strip_prefix("*.") {
         Some(base) => host == base || host.ends_with(&format!(".{base}")),
         None => pattern == host,
@@ -97,6 +103,14 @@ mod tests {
     fn path_and_query_in_a_saved_pattern_are_ignored() {
         let maps = vec![m("https://youtube.com/watch?v=1", "B")];
         assert_eq!(decide(&maps, "A", "youtube.com", true), Decision::Swap("B".into()));
+    }
+
+    #[test]
+    fn www_is_ignored() {
+        let maps = vec![m("www.youtube.com", "B")];
+        assert_eq!(decide(&maps, "A", "youtube.com", true), Decision::Swap("B".into()));
+        let maps = vec![m("youtube.com", "B")];
+        assert_eq!(decide(&maps, "A", "www.youtube.com", true), Decision::Swap("B".into()));
     }
 
     #[test]
