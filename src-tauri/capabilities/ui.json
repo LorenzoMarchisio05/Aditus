@@ -11,7 +11,7 @@
     "panel"
   ],
   "permissions": [
-    "core:default",
+    "core:default", "core:window:allow-start-dragging",
     "allow-get-state",
     "allow-new-tab",
     "allow-close-tab",

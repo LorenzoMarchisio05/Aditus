@@ -342,7 +342,7 @@ fn profile_menu(app: AppHandle) -> Result<(), String> {
     let menu = Menu::with_items(&app, &refs).map_err(|e| e.to_string())?;
     let window = app.get_window("main").ok_or("no window")?;
     app.run_on_main_thread(move || {
-        let _ = menu.popup(window);
+        eprintln!("[profile_menu] popup -> {:?}", menu.popup(window));
     })
     .map_err(|e| e.to_string())
 }
@@ -493,11 +493,15 @@ pub fn run() {
             app.manage(Shared { app: Mutex::new(App::new(cfg)), db, cfg_path, data_dir: dir });
 
             let handle = app.handle().clone();
-            let window = WindowBuilder::new(app, "main")
+            let wb = WindowBuilder::new(app, "main")
                 .title("Aditus")
                 .inner_size(1280.0, 820.0)
-                .min_inner_size(640.0, 400.0)
-                .build()?;
+                .min_inner_size(640.0, 400.0);
+            // The native title bar would swallow clicks on the top ~28px of the top bar; the UI
+            // draws its own drag regions instead.
+            #[cfg(target_os = "macos")]
+            let wb = wb.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
+            let window = wb.build()?;
             let sf = window.scale_factor()?;
             let size = window.inner_size()?.to_logical::<f64>(sf);
             let ui = window.add_child(

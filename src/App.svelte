@@ -236,6 +236,7 @@
 {/snippet}
 
 <aside class="side" style="width:{sidebarW}px; padding-top:{mac ? 38 : 0}px">
+  {#if mac}<div class="drag" data-tauri-drag-region></div>{/if}
   {#if collapsed}
     <button class="cbtn" onclick={() => settings({ sidebar_collapsed: false })} title="Expand sidebar" aria-label="Expand sidebar">☰</button>
   {/if}
@@ -287,7 +288,7 @@
 
 {#if topbar}
   <header class="top" style="left:{sidebarW}px">
-    <div class="bar">
+    <div class="bar" data-tauri-drag-region>
       <button disabled={!tab?.can_back} onclick={() => call('back')} aria-label="Back"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
       <button disabled={!tab?.can_forward} onclick={() => call('forward')} aria-label="Forward"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
       <button onclick={() => call('reload')} aria-label="Reload"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"/></svg></button>
@@ -419,6 +420,7 @@
   .shield.off { background: #3a1620; color: var(--danger); }
   .grip { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; }
   .top { position: fixed; top: 0; right: 0; background: var(--bg2); border-bottom: 1px solid var(--line); }
+  .drag { position: absolute; top: 0; left: 0; right: 0; height: 38px; }
   .bar { height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 8px; }
   form { flex: 1; }
   form input { width: 100%; }
