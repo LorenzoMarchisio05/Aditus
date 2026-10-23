@@ -25,9 +25,9 @@ use url::Url;
 
 const LATE_WINDOW: Duration = Duration::from_millis(1500);
 const GESTURE_WINDOW: Duration = Duration::from_millis(2500);
-pub #[cfg(target_os = "macos")]
+#[cfg(target_os = "macos")]
 const SAFARI_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
-const NEWTAB: &str = "newtab.html";
+pub const NEWTAB: &str = "newtab.html";
 
 pub struct Shared {
     pub app: Mutex<App>,
