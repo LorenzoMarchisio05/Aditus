@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { call, on, onState, color, applyTheme, ACCENT_NAMES } from './lib/api.js';
+  import { call, on, onState, color, applyTheme, setProfileColors, ACCENT_NAMES } from './lib/api.js';
 
   let { view } = $props();
   let st = $state(null);
@@ -54,6 +54,7 @@
     (async () => {
       offs.push(
         await onState((s) => {
+          setProfileColors(s.cfg.profiles);
           st = s;
           newHostProfile ||= s.cfg.profiles[0].name;
         })
@@ -250,6 +251,9 @@
                 {#each ACCENT_NAMES as a}
                   <button class="swatch" class:on={st.cfg.settings.accent === a} data-a={a} aria-label={a} onclick={() => set({ accent: a })}></button>
                 {/each}
+                <label class="swatch custom" class:on={st.cfg.settings.accent.startsWith('#')} title="Custom colour" style={st.cfg.settings.accent.startsWith('#') ? `background:${st.cfg.settings.accent}` : ''}>
+                  <input type="color" value={st.cfg.settings.accent.startsWith('#') ? st.cfg.settings.accent : '#ffb020'} onchange={(e) => set({ accent: e.currentTarget.value })} />
+                </label>
               </span>
             </div>
             <label class="item">
@@ -305,6 +309,12 @@
               <div class="card pcard" style="border-top-color:{color(p.name)}">
                 <div class="phead"><span class="pi" style="background:{color(p.name)}">{p.name[0].toUpperCase()}</span><b class="grow">{p.name}</b></div>
                 <div class="stats"><span><b>{sites(p.name)}</b>sites</span><span><b>{count(p.name)}</b>tabs</span></div>
+                <div class="row pcolor">
+                  <label class="swatch custom" title="Profile colour" style="background:{color(p.name)}">
+                    <input type="color" value={p.color ?? '#999999'} onchange={(e) => call('set_profile_color', { name: p.name, color: e.currentTarget.value })} />
+                  </label>
+                  {#if p.color}<button class="ghost" onclick={() => call('set_profile_color', { name: p.name, color: null })}>Reset</button>{/if}
+                </div>
                 <button class="ghost" onclick={() => call('delete_profile', { name: p.name })} disabled={st.cfg.profiles.length < 2 || count(p.name) > 0}>Delete</button>
               </div>
             {/each}
@@ -520,8 +530,11 @@
   .sw:checked { background: var(--accent); }
   .sw:checked::after { left: 21px; background: #111114; }
   .wide { width: 280px; height: 34px; background: var(--bg3); border: 0; }
+  .pcolor { align-items: center; }
   .swatches { display: flex; gap: 8px; }
   .swatch { width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 2px solid transparent; outline: 1.5px solid transparent; outline-offset: 2px; }
+  .swatch.custom { background: conic-gradient(#ff5f5f, #ffd24a, #5ad19a, #6ea8fe, #b79cff, #ff5f5f); position: relative; overflow: hidden; cursor: pointer; }
+  .swatch.custom input { position: absolute; inset: -8px; width: 40px; height: 40px; opacity: 0; cursor: pointer; padding: 0; border: 0; }
   .swatch.on { outline-color: var(--fg); }
   .swatch[data-a='amber'] { background: #ffb020; } .swatch[data-a='blue'] { background: #6ea8fe; } .swatch[data-a='green'] { background: #5ad19a; } .swatch[data-a='pink'] { background: #ff7eb6; } .swatch[data-a='violet'] { background: #b79cff; }
   .item input[type='number'] { width: 64px; height: 30px; background: var(--bg3); border: 0; }

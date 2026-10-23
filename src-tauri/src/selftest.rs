@@ -37,7 +37,7 @@ pub fn run(app: &AppHandle, port: u16) {
     if std::env::var("ADITUS_SELFTEST_ONLY").as_deref() == Ok("back") {
         {
             let mut g = app.state::<Shared>().inner().app.lock().unwrap();
-            g.cfg.profiles.push(crate::config::Profile { name: "Work".into(), id: uuid_str() });
+            g.cfg.profiles.push(crate::config::Profile { name: "Work".into(), id: uuid_str(), color: None });
             g.cfg.mappings.push(crate::nav::Mapping { pattern: "localhost".into(), profile: "Work".into() });
             g.cfg.mappings.push(crate::nav::Mapping { pattern: "127.0.0.1".into(), profile: "Default".into() });
         }
@@ -158,7 +158,7 @@ pub fn run(app: &AppHandle, port: u16) {
     let local = format!("http://localhost:{port}");
     {
         let mut g = app.state::<Shared>().inner().app.lock().unwrap();
-        g.cfg.profiles.push(crate::config::Profile { name: "Work".into(), id: uuid_str() });
+        g.cfg.profiles.push(crate::config::Profile { name: "Work".into(), id: uuid_str(), color: None });
         g.cfg.mappings.push(crate::nav::Mapping { pattern: "localhost".into(), profile: "Work".into() });
         g.cfg.mappings.push(crate::nav::Mapping { pattern: "127.0.0.1".into(), profile: "Default".into() });
         g.cfg.settings.adblock = false;

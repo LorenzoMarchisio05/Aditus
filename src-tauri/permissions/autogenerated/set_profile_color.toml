@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-profile-color"
+description = "Enables the set_profile_color command without any pre-configured scope."
+commands.allow = ["set_profile_color"]
+
+[[permission]]
+identifier = "deny-set-profile-color"
+description = "Denies the set_profile_color command without any pre-configured scope."
+commands.deny = ["set_profile_color"]

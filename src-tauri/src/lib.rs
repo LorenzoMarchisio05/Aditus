@@ -133,6 +133,17 @@ fn save_settings(app: AppHandle, settings: Settings) {
     }
 }
 
+#[tauri::command(async)]
+fn set_profile_color(app: AppHandle, name: String, color: Option<String>) {
+    let ok = |c: &str| c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|h| h.is_ascii_hexdigit());
+    let color = color.filter(|c| ok(c));
+    mutate_cfg(&app, |c| {
+        if let Some(p) = c.profiles.iter_mut().find(|p| p.name == name) {
+            p.color = color;
+        }
+    });
+}
+
 /// Opens the OS page where the default browser is chosen (apps can't set it silently).
 #[tauri::command(async)]
 fn default_browser_settings() {
@@ -182,7 +193,7 @@ fn add_profile(app: AppHandle, name: String) {
     }
     mutate_cfg(&app, |c| {
         if c.profile(&name).is_none() {
-            c.profiles.push(config::Profile { name, id: uuid::Uuid::new_v4().to_string() });
+            c.profiles.push(config::Profile { name, id: uuid::Uuid::new_v4().to_string(), color: None });
         }
     });
 }
@@ -502,7 +513,7 @@ pub fn run() {
             delete_profile, delete_mapping, toggle_allowlist, pin_tab, group_tab, find, find_clear,
             open_devtools, history_search, history_clear, downloads_list, show_palette, hide_palette,
             reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile, profile_menu,
-            adblock_info, check_update, default_browser_settings
+            adblock_info, check_update, default_browser_settings, set_profile_color
         ])
         .on_menu_event(|app, ev| on_menu(app, ev.id().as_ref()))
         .on_window_event(|win, ev| match ev {

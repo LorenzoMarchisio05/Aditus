@@ -14,7 +14,9 @@ export function hue(name) {
   return h;
 }
 // Default profile is a neutral dot; the rest get a stable hue.
-export const color = (name) => (name === 'Default' ? 'var(--fg)' : `hsl(${hue(name)} 55% 62%)`);
+let custom = {};
+export const setProfileColors = (profiles) => (custom = Object.fromEntries(profiles.filter((p) => p.color).map((p) => [p.name, p.color])));
+export const color = (name) => custom[name] ?? (name === 'Default' ? 'var(--fg)' : `hsl(${hue(name)} 55% 62%)`);
 
 const ACCENTS = { amber: ['#ffb020', '#d98e00'], blue: ['#6ea8fe', '#2f6fe0'], green: ['#5ad19a', '#1f9d63'], pink: ['#ff7eb6', '#d63a84'], violet: ['#b79cff', '#7a56e0'] };
 export const ACCENT_NAMES = Object.keys(ACCENTS);
@@ -26,6 +28,7 @@ export function applyTheme(s) {
   root.dataset.theme = theme;
   const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   const pair = ACCENTS[s?.accent];
-  if (pair && s.accent !== 'amber') root.style.setProperty('--accent', pair[dark ? 0 : 1]);
+  if (/^#[0-9a-f]{6}$/i.test(s?.accent ?? '')) root.style.setProperty('--accent', s.accent);
+  else if (pair && s.accent !== 'amber') root.style.setProperty('--accent', pair[dark ? 0 : 1]);
   else root.style.removeProperty('--accent');
 }

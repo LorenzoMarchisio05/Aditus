@@ -9,6 +9,9 @@ pub struct Profile {
     pub name: String,
     /// Stable id for the engine-side data store (macOS) / directory name (Windows, Linux).
     pub id: String,
+    /// "#rrggbb"; None = automatic (neutral for the first profile, a hash hue for the rest).
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -117,7 +120,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             settings: Settings::default(),
-            profiles: vec![Profile { name: "Default".into(), id: uuid::Uuid::new_v4().to_string() }],
+            profiles: vec![Profile { name: "Default".into(), id: uuid::Uuid::new_v4().to_string(), color: None }],
             mappings: vec![],
             allowlist: vec![],
         }
