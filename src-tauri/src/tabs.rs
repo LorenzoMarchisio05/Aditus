@@ -154,6 +154,24 @@ pub fn no_inset(_: &tauri::Webview) {}
 /// Opens the inspector; it docks inside the page container (see `mount`), not across the window.
 pub fn open_inspector(wv: &tauri::Webview) {
     wv.open_devtools();
+    // WebKit remembers the last state; force docked so it never starts as a separate window.
+    #[cfg(target_os = "macos")]
+    {
+        let wv = wv.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            let _ = wv.with_webview(|pw| unsafe {
+                use objc2::{msg_send, runtime::AnyObject, sel};
+                let v = &*(pw.inner() as *const AnyObject);
+                let insp: *mut AnyObject = msg_send![v, _inspector];
+                let ok = !insp.is_null() && msg_send![&*insp, respondsToSelector: sel!(attach)];
+                eprintln!("[inspector] attach available: {ok}");
+                if ok {
+                    let _: () = msg_send![&*insp, attach];
+                }
+            });
+        });
+    }
 }
 
 /// macOS: WebKit docks the inspector across its superview and resizes the page to match. Page
