@@ -680,7 +680,22 @@ fn on_menu(app: &AppHandle, id: &str) {
 // ---------- entry ----------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// A dev run is a bare binary, so macOS names the app menu after it ("aditus").
+#[cfg(target_os = "macos")]
+fn brand_name() {
+    use objc2::{class, msg_send, runtime::AnyObject};
+    use objc2_foundation::NSString;
+    unsafe {
+        let bundle: *mut AnyObject = msg_send![class!(NSBundle), mainBundle];
+        let info: *mut AnyObject = msg_send![bundle, infoDictionary];
+        let (name, key) = (NSString::from_str("Aditus"), NSString::from_str("CFBundleName"));
+        let _: () = msg_send![info, setObject: &*name, forKey: &*key];
+    }
+}
+
 pub fn run() {
+    #[cfg(target_os = "macos")]
+    brand_name();
     let builder = tauri::Builder::default();
     // A second launch (a link opened from another app) hands its arguments to the running one.
     #[cfg(not(target_os = "macos"))]
