@@ -367,14 +367,14 @@ if(window.top===window){try{window.__TAURI_INTERNALS__.invoke('cosmetic_css').th
 const YT_SCRIPT: &str = r#"(()=>{
 if(!/(^|\.)youtube\.com$/.test(location.hostname))return;
 try{if(sessionStorage.getItem('__aditus_off'))return}catch(e){}
-const K=['adPlacements','playerAds','adSlots','adBreakHeartbeatParams'];
-const strip=(o,d=0)=>{if(o&&typeof o==='object'&&d<5){for(const k of K)if(k in o)try{delete o[k]}catch(e){}for(const k in o)if(o[k]&&typeof o[k]==='object')strip(o[k],d+1)}return o};
+const K=['adPlacements','playerAds','adSlots','adBreakParams','adBreakHeartbeatParams','adSafetyReason'];
+const strip=(o,d=0)=>{if(o&&typeof o==='object'&&d<5){for(const k of K)if(k in o){try{delete o[k]}catch(e){}console.debug('[aditus] stripped',k)}for(const k in o)if(o[k]&&typeof o[k]==='object')strip(o[k],d+1)}return o};
 let v;try{Object.defineProperty(window,'ytInitialPlayerResponse',{configurable:true,get:()=>v,set:x=>{v=strip(x)}})}catch(e){}
 const p=JSON.parse;JSON.parse=function(){return strip(p.apply(this,arguments))};
 const f=window.fetch;window.fetch=function(...a){return f.apply(this,a).then(r=>{try{const u=String(a[0]&&a[0].url||a[0]);if(!/\/youtubei\/v1\/(player|next|browse|search|reel)/.test(u))return r;return r.clone().json().then(j=>new Response(JSON.stringify(strip(j)),{status:r.status,statusText:r.statusText,headers:r.headers})).catch(()=>r)}catch(e){return r}})};
 const st=document.createElement('style');st.textContent='#movie_player.ad-showing video{opacity:0!important}.video-ads,.ytp-ad-module,.ytp-ad-overlay-container,#player-ads,ytd-ad-slot-renderer,ytd-in-feed-ad-layout-renderer,ytd-display-ad-renderer,ytd-promoted-sparkles-web-renderer{display:none!important}';
 const add=()=>(document.head||document.documentElement).appendChild(st);document.documentElement?add():addEventListener('DOMContentLoaded',add);
-let was=0;const skip=()=>{const m=document.querySelector('#movie_player.ad-showing');if(!m){if(was){was=0;const pl=document.querySelector('#movie_player');if(pl&&pl.playVideo)pl.playVideo()}return}was=1;const vd=m.querySelector('video');if(vd&&isFinite(vd.duration)){vd.muted=true;vd.playbackRate=16;vd.currentTime=vd.duration}const b=document.querySelector('.ytp-skip-ad-button,.ytp-ad-skip-button-modern,.ytp-ad-skip-button');if(b)b.click()};
+let was=0;const skip=()=>{const m=document.querySelector('#movie_player.ad-showing');if(m&&!was)console.debug('[aditus] ad playing, skipping');if(!m){if(was){was=0;const pl=document.querySelector('#movie_player');if(pl&&pl.playVideo)pl.playVideo()}return}was=1;const vd=m.querySelector('video');if(vd&&isFinite(vd.duration)){vd.muted=true;vd.playbackRate=16;vd.currentTime=vd.duration}const b=document.querySelector('.ytp-skip-ad-button,.ytp-ad-skip-button-modern,.ytp-ad-skip-button');if(b)b.click()};
 new MutationObserver(skip).observe(document,{subtree:true,attributes:true,attributeFilter:['class']});setInterval(skip,150);
 })();"#;
 
