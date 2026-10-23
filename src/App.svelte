@@ -295,7 +295,7 @@
         {#if tab && !tab.url?.startsWith('aditus://')}
           {#if pmenu}
             {#each cfg.profiles as p}
-              <button class="seg" class:cur={tab.profile === p.name} style="background:{color(p.name)}" title={tab.host ? `Always open ${tab.host} in ${p.name}` : p.name} onclick={() => setProfile(tab, p.name)}>{p.name}</button>
+              <button class="seg pick" class:cur={tab.profile === p.name} style="background:{color(p.name)}" title={tab.host ? `Always open ${tab.host} in ${p.name}` : p.name} onclick={() => setProfile(tab, p.name)}>{p.name}</button>
             {/each}
           {:else}
             <button class="seg" style="background:{color(tab.profile)}" title="Profile for this site" onclick={(e) => { e.stopPropagation(); pmenu = { open: true }; }}>
@@ -384,7 +384,7 @@
   .tab.active .pbar { opacity: 1; }
   .host { color: var(--dim); font-weight: 400; margin-left: 6px; }
   .tag { font-size: 9.5px; font-weight: 700; letter-spacing: .03em; flex: none; }
-  .seg.cur { box-shadow: inset 0 -3px 0 rgba(0,0,0,.35); }
+  .seg.pick:not(.cur) { opacity: .5; }
   .seg { font-size: 12px; font-weight: 700; color: #120d1d; padding: 0 12px; height: 100%; border-radius: 0; display: flex; align-items: center; gap: 6px; cursor: pointer; flex: none; }
   .tab.discarded .title { opacity: .55; }
   .fav { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
