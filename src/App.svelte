@@ -141,6 +141,20 @@
     return () => offs.forEach((f) => f());
   });
 
+  // inline completion from history: fill the rest of the most recent matching URL, selected so Backspace drops it
+  async function complete(e) {
+    const el = e.currentTarget, typed = el.value;
+    if (e.inputType?.startsWith('delete') || !typed || typed.includes(' ')) return;
+    const rows = await call('history_search', { q: typed });
+    if (el.value !== typed || el.selectionStart !== typed.length) return;
+    const bare = (u) => u.replace(/^https?:\/\/(www\.)?/, '');
+    const hit = rows.map((r) => bare(r.url)).find((u) => u.toLowerCase().startsWith(typed.toLowerCase()));
+    if (!hit || hit.length === typed.length) return;
+    urlText = typed + hit.slice(typed.length);
+    await tick();
+    el.setSelectionRange(typed.length, urlText.length);
+  }
+
   function submitAddress(e) {
     e.preventDefault();
     call('address', { input: urlText });
@@ -303,6 +317,7 @@
             class:ghost={!editing && tab?.url}
             bind:this={addrEl}
             bind:value={urlText}
+            oninput={complete}
             placeholder="Search or enter address"
             onfocus={(e) => { editing = true; e.currentTarget.select(); }}
             onblur={() => (editing = false)}
