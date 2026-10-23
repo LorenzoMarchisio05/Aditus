@@ -122,16 +122,21 @@
   const mapped = $derived(
     (st?.cfg.mappings ?? []).filter((m) => m.pattern.includes(hostQuery.trim().toLowerCase()))
   );
+  // Most visited sites, one per domain; sign-in and consent hosts are noise here.
   const topSites = $derived.by(() => {
     const m = new Map();
     for (const r of rows) {
       const h = host(r.url);
-      if (!h || /^(127\.|localhost)/.test(h)) continue;
-      if (!m.has(h)) m.set(h, { host: h, url: r.url, profile: r.profile, n: 0 });
-      m.get(h).n++;
+      if (!h || /^(127\.|localhost)/.test(h) || /^(accounts|consent|gds|auth|sso|login|id|myaccount)\./.test(h)) continue;
+      const root = h.split('.').slice(-2).join('.');
+      if (!m.has(root)) m.set(root, { host: h.replace(/^www\./, ''), url: r.url, profile: r.profile, n: 0 });
+      m.get(root).n++;
     }
-    return [...m.values()].sort((a, b) => b.n - a.n).slice(0, 6);
+    return [...m.values()].sort((a, b) => b.n - a.n).slice(0, 8);
   });
+  const now = new Date();
+  const greeting = now.getHours() < 5 ? 'Still up' : now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
+  const today = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
   const count = (name) => st.tabs.filter((t) => t.profile === name).length;
   const sites = (name) => st.cfg.mappings.filter((m) => m.profile === name).length;
 </script>
@@ -193,14 +198,35 @@
     </div>
   {:else if newtab && st}
     <div class="nt">
-      <div class="hero"><svg width="72" height="72" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M46 18h8l15 60H31z" fill="url(#gc)" stroke="url(#gc)" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg><h1>aditus</h1><span class="meta big">{st.incognito ? "Private window. Nothing is saved: no history, cookies or session." : "One window. A different account for every site."}</span></div>
-      <div class="sites">
-        {#each st.incognito ? [] : topSites as s}
-          <button class="site" onclick={() => { call('new_tab', { url: s.url }); call('hide_panel'); }}>
-            <span class="ico"><b>{s.host[0].toUpperCase()}</b><i style="background:{color(s.profile)}"></i></span>
-            <span>{s.host.replace(/^www\./, '')}</span>
-          </button>
-        {/each}
+      <div class="hero">
+        <svg width="44" height="44" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M46 18h8l15 60H31z" fill="url(#gc)" stroke="url(#gc)" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg>
+        {#if st.incognito}
+          <h1>Private window</h1>
+          <p class="sub">Nothing from this window is saved: no history, cookies, logins or session. Downloads stay.</p>
+        {:else}
+          <span class="when">{today}</span>
+          <h1>{greeting}.</h1>
+        {/if}
+      </div>
+      {#if !st.incognito && topSites.length}
+        <div class="frequent">
+          <span class="lbl">FREQUENT</span>
+          <div class="sites">
+            {#each topSites as s}
+              <button class="site" onclick={() => { call('new_tab', { url: s.url }); call('hide_panel'); }}>
+                <span class="ico"><b>{s.host[0].toUpperCase()}</b><img src="https://{s.host}/favicon.ico" alt="" onerror={(e) => (e.currentTarget.style.display = 'none')} /></span>
+                <span class="hn">{s.host}</span>
+                <i style="background:{color(s.profile)}"></i>
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
+      <div class="keys">
+        <span><kbd>⌘L</kbd> search or type an address</span>
+        <span><kbd>⌘T</kbd> new tab</span>
+        <span><kbd>⇧⌘A</kbd> search tabs</span>
+        <span><kbd>⇧⌘N</kbd> private window</span>
       </div>
     </div>
   {:else if st}
@@ -477,17 +503,23 @@
   .x { color: var(--dim); }
   input.search, .row input, .add input { height: 38px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 0 14px; }
 
-  .nt { height: 100%; display: flex; flex-direction: column; align-items: center; padding-top: 130px; gap: 44px; overflow-y: auto; }
-  .hero { display: flex; flex-direction: column; align-items: center; gap: 16px; }
-  .hero h1 { font-size: 84px; letter-spacing: -.04em; display: block; }
-  .big { font-size: 17px; }
+  .nt { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 32px 40px; gap: 56px; overflow-y: auto; }
+  .hero { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+  .hero svg { margin-bottom: 8px; }
+  .hero h1 { font-size: 64px; letter-spacing: -.035em; line-height: 1; display: block; }
+  .when, .lbl { font: 500 11px/1 'JetBrains Mono Variable', ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+  .sub { max-width: 440px; color: var(--dim); font-size: 15px; line-height: 1.5; margin-top: 6px; }
   kbd { font: 11px ui-monospace, 'SF Mono', monospace; color: var(--dim); background: var(--bg3); border-radius: 6px; padding: 2px 6px; }
-  .sites { display: flex; gap: 12px; }
-  .site { width: 124px; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0; font-size: 13px; color: var(--dim); }
-  .site > span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .site:hover { color: var(--fg); background: none; }
-  .ico { width: 64px; height: 64px; border-radius: 18px; background: var(--card); border: 1px solid var(--line); display: grid; place-items: center; position: relative; font: 800 26px 'Bricolage Grotesque Variable', system-ui, sans-serif; color: var(--fg); }
-  .ico i { position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; border: 3px solid var(--bg); }
+  .frequent { width: 100%; max-width: 760px; display: flex; flex-direction: column; gap: 14px; }
+  .sites { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; }
+  .site { display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 10px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); font-size: 14px; font-weight: 500; text-align: left; position: relative; }
+  .site:hover { border-color: var(--dim); background: var(--card); }
+  .site .hn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .site > i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .ico { width: 34px; height: 34px; border-radius: 10px; background: var(--bg3); display: grid; place-items: center; position: relative; flex: none; overflow: hidden; font: 800 15px 'Bricolage Grotesque Variable', system-ui, sans-serif; color: var(--fg); }
+  .ico img { position: absolute; inset: 0; width: 100%; height: 100%; padding: 7px; box-sizing: border-box; background: var(--bg3); object-fit: contain; }
+  .keys { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 22px; color: var(--dim); font-size: 13px; }
+  .keys span { display: inline-flex; align-items: center; gap: 8px; }
   .lib { display: flex; height: 100%; }
   .hist { flex: 1; min-width: 0; padding: 40px 56px; display: flex; flex-direction: column; gap: 18px; border-right: 1px solid var(--line); }
   .dl { width: 430px; flex: none; padding: 40px 28px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
