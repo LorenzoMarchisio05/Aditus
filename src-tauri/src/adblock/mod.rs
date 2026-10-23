@@ -143,7 +143,10 @@ pub fn refresh(app: &AppHandle) {
     };
     // Internal pages (settings, history...) have nothing to re-filter; reloading would reset them.
     if crate::tabs::internal_view(&url).is_none() {
-        crate::tabs::reload(app, id);
+        let host = url::Url::parse(&url).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
+        let off = !enabled_for(app, &host);
+        let pre = if off { "try{sessionStorage.setItem('__aditus_off','1')}catch(e){}" } else { "try{sessionStorage.removeItem('__aditus_off')}catch(e){}" };
+        crate::tabs::reload_with(app, id, pre);
     }
 }
 

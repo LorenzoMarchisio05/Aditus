@@ -360,6 +360,21 @@ addEventListener('ended',()=>ping('p0'),true);
 if(window.top===window){try{window.__TAURI_INTERNALS__.invoke('cosmetic_css').then(css=>{if(!css)return;const s=document.createElement('style');s.textContent=css;(document.head||document.documentElement).appendChild(s)}).catch(()=>{})}catch(e){}}
 })();"#;
 
+/// YouTube serves ads from its own origin, so network and cosmetic filters can't touch them:
+/// strip ad data from player responses and skip any ad that still plays.
+/// ponytail: hand-written, breaks when YouTube renames fields; port uBO scriptlets if it keeps breaking.
+/// Paused per tab via sessionStorage (set by adblock::refresh).
+const YT_SCRIPT: &str = r#"(()=>{
+if(!/(^|\.)youtube\.com$/.test(location.hostname))return;
+try{if(sessionStorage.getItem('__aditus_off'))return}catch(e){}
+const K=['adPlacements','playerAds','adSlots','adBreakHeartbeatParams'];
+const strip=o=>{if(o&&typeof o==='object')for(const k of K)if(k in o)try{delete o[k]}catch(e){}return o};
+let v;try{Object.defineProperty(window,'ytInitialPlayerResponse',{configurable:true,get:()=>v,set:x=>{v=strip(x)}})}catch(e){}
+const p=JSON.parse;JSON.parse=function(){return strip(p.apply(this,arguments))};
+const f=window.fetch;window.fetch=function(...a){return f.apply(this,a).then(r=>{try{const u=String(a[0]&&a[0].url||a[0]);if(!/\/youtubei\/v1\/(player|next|browse|search|reel)/.test(u))return r;return r.clone().json().then(j=>new Response(JSON.stringify(strip(j)),{status:r.status,statusText:r.statusText,headers:r.headers})).catch(()=>r)}catch(e){return r}})};
+setInterval(()=>{const m=document.querySelector('#movie_player.ad-showing');if(!m)return;const vd=m.querySelector('video');if(vd&&isFinite(vd.duration)){vd.muted=true;vd.currentTime=vd.duration}const b=document.querySelector('.ytp-skip-ad-button,.ytp-ad-skip-button-modern,.ytp-ad-skip-button');if(b)b.click()},300);
+})();"#;
+
 fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String> {
     let window = app.get_window("main").ok_or("no main window")?;
     let (profile_name, gen, url, cfg_profile) = {
@@ -368,6 +383,7 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
         let p = g.cfg.profile(&t.profile).or(g.cfg.profiles.first()).ok_or("no profile")?.clone();
         (t.profile.clone(), t.gen, t.url(), p)
     };
+    let adblock_on = shared(app).app.lock().unwrap().cfg.settings.adblock;
     let data_dir = config::Config::data_dir(&shared(app).data_dir, &cfg_profile);
     let _ = std::fs::create_dir_all(&data_dir);
 
@@ -390,6 +406,7 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
     }
     let mut builder = builder
         .initialization_script(PAGE_SCRIPT)
+        .initialization_script(if adblock_on { YT_SCRIPT } else { "" })
         .data_store_identifier(config::store_identifier(&cfg_profile))
         .data_directory(data_dir)
         .on_navigation(move |u| on_navigation(&a_nav, tab_id, gen, u))
@@ -839,6 +856,11 @@ pub fn go_history(app: &AppHandle, tab_id: u32, delta: i32) {
 }
 
 pub fn reload(app: &AppHandle, tab_id: u32) {
+    reload_with(app, tab_id, "");
+}
+
+/// `pre` runs first in the page; it survives the reload only via storage.
+pub fn reload_with(app: &AppHandle, tab_id: u32, pre: &str) {
     let lbl = {
         let mut g = shared(app).app.lock().unwrap();
         let Some(t) = g.tab(tab_id) else { return };
@@ -846,7 +868,7 @@ pub fn reload(app: &AppHandle, tab_id: u32) {
         label(t.id, t.gen)
     };
     if let Some(wv) = app.get_webview(&lbl) {
-        let _ = wv.eval("location.reload()");
+        let _ = wv.eval(format!("{pre}location.reload()"));
     }
 }
 
