@@ -51,12 +51,6 @@
     return () => offs.forEach((f) => f());
   });
 
-  // Same tint as the main chrome: active tab's profile color.
-  const accent = $derived.by(() => {
-    const t = st?.tabs.find((x) => x.id === st.active);
-    return t ? color(t.profile) : '#b79cff';
-  });
-
   $effect(() => {
     document.documentElement.dataset.theme = st?.cfg.settings.theme ?? 'system';
   });
@@ -125,7 +119,7 @@
   const sites = (name) => st.cfg.mappings.filter((m) => m.profile === name).length;
 </script>
 
-<div class="panel" style="--accent:{accent}">
+<div class="panel">
   {#if library}
     <div class="lib">
       <section class="hist">
@@ -172,7 +166,7 @@
               <span class="name">{fname(d)}</span>
               <span class="meta">{new Date(d.started_at * 1000).toLocaleString()}</span>
             </span>
-            <span class="state" style="color:{tint[d.status] ?? accent}">{d.status}</span>
+            <span class="state" style="color:{tint[d.status] ?? 'var(--accent)'}">{d.status}</span>
             {#if d.path}<button class="ghost" onclick={() => call('reveal_path', { path: d.path })}>Show</button>{/if}
           </div>
         {:else}
@@ -201,7 +195,7 @@
   {:else if st}
     <div class="settings">
       <aside>
-        <div class="title"><span class="logo">S</span><span><b>Settings</b><small>Aditus 0.1</small></span></div>
+        <div class="title"><span class="logo"><svg viewBox="0 0 100 100" width="70%" height="70%" fill="currentColor" aria-hidden="true"><path d="M46 18h8l15 60H31z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg></span><span><b>Settings</b><small>Aditus 0.1</small></span></div>
         {#each NAV as n}
           <button class="nav" class:on={nav === n} onclick={() => (nav = n)}>{n}</button>
         {/each}
@@ -322,7 +316,7 @@
         {:else}
           <h1>About</h1>
           <div class="card about">
-            <span class="logo big">A</span>
+            <span class="logo big"><svg viewBox="0 0 100 100" width="70%" height="70%" fill="currentColor" aria-hidden="true"><path d="M46 18h8l15 60H31z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg></span>
             <span class="grow"><b>Aditus 0.1.0</b><small>Open source, GPL-3.0</small></span>
             {#if upd && upd !== 'checking' && upd.newer}
               <button class="solid" onclick={() => call('new_tab', { url: upd.url })}>Get {upd.latest}</button>
@@ -359,7 +353,7 @@
   h2 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); margin: 18px 0 8px; font-weight: 600; }
   .card { background: var(--card); border-radius: 14px; }
   .ghost { border: 1px solid var(--line); color: #c9bfe6; font-weight: 500; height: 28px; }
-  .solid { background: #f1eefb; color: #120d1d; font-weight: 700; height: 34px; border-radius: 10px; padding: 0 14px; }
+  .solid { background: #f1eefb; color: #111114; font-weight: 700; height: 34px; border-radius: 10px; padding: 0 14px; }
   .solid:hover:not(:disabled) { background: #fff; }
   .x { color: var(--dim); }
   input.search, .row input, .add input { height: 36px; background: var(--card); border: 0; border-radius: 10px; padding: 0 14px; }
@@ -382,7 +376,7 @@
   header { display: flex; align-items: center; gap: 12px; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; }
   .chips button { height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 7px; background: var(--card); font-size: 12px; }
-  .chips button.on { background: #f1eefb; color: #120d1d; font-weight: 600; }
+  .chips button.on { background: #f1eefb; color: #111114; font-weight: 600; }
   .chips i, .who i { width: 8px; height: 8px; border-radius: 2px; display: block; }
   .list { flex: 1; overflow-y: auto; }
   .day { padding: 14px 0 6px; color: var(--dim); font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; font-weight: 600; }
@@ -398,11 +392,11 @@
 
   .settings { display: flex; height: 100%; }
   aside { width: 236px; flex: none; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
-  .title { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--accent); color: #120d1d; margin-bottom: 10px; }
+  .title { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--accent); color: #111114; margin-bottom: 10px; }
   .title b { display: block; font-size: 13.5px; }
   .title small { color: inherit; opacity: .7; font-size: 11px; margin: 0; }
-  .logo { width: 28px; height: 28px; border-radius: 9px; background: #120d1d; color: var(--accent); display: grid; place-items: center; font-weight: 700; }
-  .logo.big { width: 56px; height: 56px; border-radius: 16px; background: var(--accent); color: #120d1d; font-size: 28px; font-weight: 800; }
+  .logo { width: 28px; height: 28px; border-radius: 9px; background: #111114; color: var(--accent); display: grid; place-items: center; font-weight: 700; }
+  .logo.big { width: 56px; height: 56px; border-radius: 16px; background: var(--accent); color: #111114; font-size: 28px; font-weight: 800; }
   .nav { height: 32px; text-align: left; padding: 0 12px; border-radius: 8px; color: #c9bfe6; font-weight: 500; }
   .nav.on { background: var(--hi); color: #fff; font-weight: 600; }
   main { flex: 1; min-width: 0; margin: 8px 8px 8px 0; border-radius: 12px; background: var(--bg2); padding: 32px 44px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; align-content: start; }
@@ -417,7 +411,7 @@
   .item input[type='number'] { width: 64px; height: 30px; background: var(--hi); border: 0; }
   .segc { display: flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--bg); }
   .segc button { height: 26px; padding: 0 12px; border-radius: 7px; color: var(--dim); }
-  .segc button.on { background: var(--accent); color: #120d1d; font-weight: 700; }
+  .segc button.on { background: var(--accent); color: #111114; font-weight: 700; }
   .tiles { display: flex; gap: 10px; }
   .tile { flex: 1; padding: 14px; color: var(--dim); }
   .tile b { display: block; font-size: 24px; letter-spacing: -.02em; color: var(--fg); }
@@ -425,7 +419,7 @@
   .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
   .pcard { padding: 14px; display: flex; flex-direction: column; gap: 12px; border-top: 3px solid; align-items: flex-start; }
   .phead { display: flex; align-items: center; gap: 10px; width: 100%; }
-  .pi { width: 28px; height: 28px; border-radius: 9px; color: #120d1d; display: grid; place-items: center; font-weight: 700; }
+  .pi { width: 28px; height: 28px; border-radius: 9px; color: #111114; display: grid; place-items: center; font-weight: 700; }
   .stats { display: flex; gap: 18px; color: var(--dim); font-size: 12px; }
   .stats b { display: block; color: #f1eefb; font-size: 16px; }
   .add { border: 1.5px dashed var(--hi); background: none; display: grid; place-items: center; min-height: 120px; padding: 12px; }
@@ -438,7 +432,7 @@
   .engines { display: flex; gap: 8px; }
   .engine { flex: 1; border-radius: 14px; background: var(--card); padding: 14px; text-align: left; font-weight: 600; }
   .engine small { font-weight: 500; opacity: .7; }
-  .engine.on { background: var(--accent); color: #120d1d; }
+  .engine.on { background: var(--accent); color: #111114; }
   .tpl { padding: 12px 14px; }
   .tpl h2 { margin-top: 0; }
   .tpl input { width: 100%; background: none; border: 0; padding: 0; }

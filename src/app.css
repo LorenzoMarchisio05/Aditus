@@ -1,12 +1,12 @@
 :root {
-  --bg: #0f0f12; --bg2: #15151a; --bg3: #22222a; --fg: #ececf2; --dim: #8f8fa0; --line: #2a2a33;
-  --accent: #6ea8fe; --danger: #f07178;
+  --bg: #111114; --bg2: #18181c; --bg3: #232328; --fg: #f3f1ec; --dim: #8f8f98; --line: #2b2b31;
+  --accent: #ffb020; --danger: #f07178;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme='dark']) { --bg: #f4f5f7; --bg2: #e9ebef; --bg3: #dcdfe5; --fg: #1d2127; --dim: #6b7280; --line: #d3d7de; color-scheme: light; }
+  :root:not([data-theme='dark']) { --bg: #f3f1ec; --bg2: #e4e0d6; --bg3: #d8d3c6; --fg: #111114; --dim: #5b5b63; --line: #cfcabd; --accent: #d98e00; color-scheme: light; }
 }
-:root[data-theme='light'] { --bg: #f4f5f7; --bg2: #e9ebef; --bg3: #dcdfe5; --fg: #1d2127; --dim: #6b7280; --line: #d3d7de; color-scheme: light; }
+:root[data-theme='light'] { --bg: #f3f1ec; --bg2: #e4e0d6; --bg3: #d8d3c6; --fg: #111114; --dim: #5b5b63; --line: #cfcabd; --accent: #d98e00; color-scheme: light; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--fg);
   font: 13px -apple-system, BlinkMacSystemFont, system-ui, sans-serif; user-select: none; -webkit-user-select: none; }

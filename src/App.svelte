@@ -53,10 +53,9 @@
     if (cfg && !resizing) width = cfg.settings.sidebar_width;
   });
 
-  // Neutral theme; only the accent follows the active profile.
+  // Brand theme; profile colour only tints the profile chip.
   $effect(() => {
     const r = document.documentElement.style;
-    r.setProperty('--accent', tab ? color(tab.profile) : '#6ea8fe');
     for (const v of ['--bg', '--bg2', '--bg3', '--line']) r.removeProperty(v); // stale tint from older builds
   });
 
