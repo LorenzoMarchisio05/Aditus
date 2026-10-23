@@ -602,7 +602,7 @@ fn suggest_show(app: AppHandle, window: tauri::Window, webview: Webview, payload
     } else {
         (LogicalPosition::new(x, y), w)
     };
-    let size = LogicalSize::new(width.max(200.0), rows * 36.0 + 14.0);
+    let size = LogicalSize::new(width.max(200.0), rows * 38.0 + 16.0);
     {
         let mut g = SUGGEST.lock().unwrap();
         g.retain(|(w, _)| *w != win);

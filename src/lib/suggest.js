@@ -10,7 +10,7 @@ const urlish = (q) => /^(\w+:\/\/|[\w-]+(\.[\w-]+)+(:\d+)?(\/|$))/.test(q);
  */
 export function createSuggest({ anchor = () => ({ x: 0, y: 0, w: 0 }), palette = false, fill }) {
   let rows = [], sel = -1, typed = '', seq = 0, timer;
-  const push = () => call('suggest_show', { payload: { rows, sel }, palette, ...anchor() });
+  const push = () => call('suggest_show', { payload: { rows, sel, q: typed }, palette, ...anchor() });
 
   function hide() {
     seq++;
@@ -26,14 +26,16 @@ export function createSuggest({ anchor = () => ({ x: 0, y: 0, w: 0 }), palette =
     if (!q.trim()) return hide();
     const found = await call('history_search', { q });
     if (mine !== seq) return;
-    const lq = q.toLowerCase(), seen = new Set(), hist = [];
+    const lq = q.toLowerCase(), byUrl = new Map();
+    // rows come newest first; how often a page shows up is a cheap stand-in for how much it is used
     for (const r of found) {
       const k = bare(r.url);
-      if (seen.has(k)) continue;
-      seen.add(k);
-      hist.push({ kind: 'hist', url: r.url, title: r.title, score: k.toLowerCase().startsWith(lq) ? 0 : r.url.toLowerCase().includes(lq) ? 1 : 2 });
+      const h = byUrl.get(k) ?? { kind: 'hist', url: r.url, title: r.title, n: 0, score: k.toLowerCase().startsWith(lq) ? 0 : r.url.toLowerCase().includes(lq) ? 1 : 2 };
+      h.n++;
+      byUrl.set(k, h);
     }
-    hist.sort((a, b) => a.score - b.score);
+    // a page you typed in full is already the first row
+    const hist = [...byUrl.values()].filter((h) => bare(h.url).toLowerCase() !== lq).sort((a, b) => a.score - b.score || b.n - a.n);
     const head = { kind: urlish(q) ? 'go' : 'search', url: q, title: q };
     rows = [head, ...hist.slice(0, 3)];
     push();
