@@ -234,7 +234,7 @@
     oncontextmenu={(e) => ctx(e, t)}
   >
     <span class="fav">
-      {#if t.loading}<span class="spin"></span>{:else if favicon(t)}<img src={favicon(t)} alt="" onerror={(e) => (e.currentTarget.style.display = 'none')} />{:else}{(t.host || t.title || '·')[0].toUpperCase()}{/if}
+      {#if t.loading}<span class="spin"></span>{:else}{(t.host || t.title || '·')[0].toUpperCase()}{#if favicon(t)}<img class="fi" src={favicon(t)} alt="" onerror={(e) => (e.currentTarget.style.display = 'none')} />{/if}{/if}
     </span>
     {#if !collapsed}
       <span class="title">{t.title}</span>
@@ -401,7 +401,9 @@
   .tag { display: flex; align-items: center; gap: 5px; font: 10px ui-monospace, 'SF Mono', monospace; color: var(--dim); flex: none; }
   .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
   .fav { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border-radius: 6px; background: var(--bg2); border: 1px solid var(--line); font-size: 11px; font-weight: 600; color: var(--fg); overflow: hidden; }
+  .fav { position: relative; }
   .fav img { width: 14px; height: 14px; border-radius: 3px; }
+  .fav img.fi { position: absolute; inset: 0; width: 100%; height: 100%; padding: 2px; background: var(--bg2); border-radius: 5px; box-sizing: border-box; }
   .title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
   .x { padding: 0 6px; opacity: 0; line-height: 1.2; color: var(--dim); }
   .tab:hover .x { opacity: 1; }
