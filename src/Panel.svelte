@@ -197,14 +197,6 @@
           </button>
         {/each}
       </div>
-      <div class="pcards">
-        {#each st.cfg.profiles as p}
-          <div class="card pc" style="border-top-color:{color(p.name)}">
-            <div class="phead"><b class="grow">{p.name}</b><span class="mono" style="color:{color(p.name)}">{count(p.name)} tabs</span></div>
-            <span class="meta">{st.cfg.mappings.filter((m) => m.profile === p.name).slice(0, 3).map((m) => m.pattern).join(', ') || 'No sites mapped yet.'}</span>
-          </div>
-        {/each}
-      </div>
     </div>
   {:else if st}
     <div class="settings">
@@ -384,8 +376,6 @@
   .site > span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ico { width: 64px; height: 64px; border-radius: 18px; background: var(--card); display: grid; place-items: center; position: relative; font-size: 22px; }
   .ico i { position: absolute; left: 10px; right: 10px; bottom: 7px; height: 3px; border-radius: 2px; }
-  .pcards { display: flex; gap: 12px; }
-  .pc { width: 196px; padding: 14px; display: flex; flex-direction: column; gap: 10px; border-top: 3px solid; }
   .lib { display: flex; height: 100%; }
   .hist { flex: 1; min-width: 0; padding: 28px 36px; display: flex; flex-direction: column; gap: 14px; border-right: 1px solid var(--line); }
   .dl { width: 430px; flex: none; padding: 28px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
