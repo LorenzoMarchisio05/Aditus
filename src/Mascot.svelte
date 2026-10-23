@@ -1,5 +1,6 @@
 <script>
-  let { incognito = false, roam = false } = $props();
+  // side: roam only in a strip on the right (settings page).
+  let { incognito = false, roam = false, side = false } = $props();
   // Swing wanders the bottom of the browser pages, picking something to do every few seconds.
   let floorEl = $state(), x = $state(0), face = $state(roam ? 1 : -1), mode = $state('idle'), dur = $state(0);
   let hop = $state(false), said = $state(false), startled = $state(false), wake;
@@ -69,7 +70,7 @@
 
 <svelte:window onpointermove={track} />
 
-<div class="floor" class:corner={!roam} bind:this={floorEl} aria-hidden="true">
+<div class="floor" class:corner={!roam} class:side bind:this={floorEl} aria-hidden="true">
   <div class="walker" style="left:{x}px; --d:{dur}s">
     <button class="mascot m-{mode}" class:hop class:startle={startled} bind:this={mascotEl} onclick={poke} tabindex="-1" aria-label="Swing">
       {#if said}<span class="say">{said}</span>{/if}
@@ -97,6 +98,7 @@
 
 <style>
   .floor.corner { left: auto; right: 18px; width: 50px; }
+  .floor.side { left: auto; right: 18px; width: 360px; }
   .corner .say { left: auto; right: 0; transform: none; }
   .floor { position: fixed; left: 40px; right: 40px; z-index: 5; bottom: 0; height: 70px; pointer-events: none; }
   .walker { position: absolute; bottom: 0; transition: left var(--d) linear; }
