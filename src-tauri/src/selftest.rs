@@ -242,7 +242,8 @@ pub fn run(app: &AppHandle, port: u16) {
     snapshot(app, "panel", "/tmp/aditus-snap-downloads.tiff");
     wait(2);
     snapshot(app, "ui", "/tmp/aditus-snap-ui.tiff");
-    if let Some(wv) = tabs::active_webview(app, app.state::<Shared>().inner().app.lock().unwrap().active) {
+    let active = app.state::<Shared>().inner().app.lock().unwrap().active;
+    if let Some(wv) = tabs::active_webview(app, active) {
         snapshot(app, wv.label(), "/tmp/aditus-snap-page.tiff");
     }
     wait(4);
