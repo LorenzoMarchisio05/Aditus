@@ -134,12 +134,43 @@
     }
     return [...m.values()].sort((a, b) => b.n - a.n).slice(0, 8);
   });
-  let hop = $state(false), said = $state(false);
+  // Cone wanders the bottom of the new tab page, picking something to do every few seconds.
+  let floorEl = $state(), x = $state(0), face = $state(1), mode = $state('idle'), dur = $state(0);
+  let hop = $state(false), said = $state(false), wake;
   function poke() {
     hop = said = true;
-    setTimeout(() => (hop = false), 500);
+    wake?.();
+    setTimeout(() => (hop = false), 600);
     setTimeout(() => (said = false), 2200);
   }
+  $effect(() => {
+    if (!newtab || !floorEl) return;
+    let alive = true, timer;
+    const wait = (ms) => new Promise((r) => { wake = r; timer = setTimeout(r, ms); });
+    const doing = async (m, ms) => { mode = m; await wait(ms); mode = 'idle'; await wait(500 + Math.random() * 1200); };
+    const walk = async () => {
+      const max = floorEl.clientWidth - 50;
+      let to = Math.random() * max;
+      if (Math.abs(to - x) < 80) to = x < max / 2 ? max : 0;
+      face = to > x ? 1 : -1;
+      dur = Math.abs(to - x) / 70;
+      mode = 'walk';
+      x = to;
+      await wait(dur * 1000 + 60);
+      mode = 'idle';
+      await wait(400);
+    };
+    (async () => {
+      let last = '';
+      while (alive) {
+        const acts = { walk, wave: () => doing('wave', 1900), jump: () => doing('jump', 700), spin: () => doing('spin', 950), look: () => doing('look', 2300), sleep: () => doing('sleep', 6500), rest: () => doing('idle', 2500) };
+        const bag = ['walk', 'walk', 'walk', 'walk', 'wave', 'jump', 'spin', 'look', 'sleep', 'rest'].filter((k) => k !== last);
+        last = bag[Math.floor(Math.random() * bag.length)];
+        await acts[last]();
+      }
+    })();
+    return () => { alive = false; clearTimeout(timer); };
+  });
   const now = new Date();
   const greeting = now.getHours() < 5 ? 'Still up' : now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
   const today = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
@@ -231,27 +262,29 @@
         <span><kbd>⇧⌘A</kbd> search tabs</span>
         <span><kbd>⇧⌘N</kbd> private window</span>
       </div>
-      <div class="floor" aria-hidden="true">
-        <div class="walker">
-          <div>
-            <button class="mascot" class:hop onclick={poke} tabindex="-1" aria-label="Cone">
-              {#if said}<span class="say">{st.incognito ? 'Shh. Nobody saw.' : 'Open the way.'}</span>{/if}
-              <svg class="turn" width="44" height="54" viewBox="0 0 44 54">
-                <defs><linearGradient id="mg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs>
-                <rect class="leg l1" x="12" y="43" width="6" height="9" rx="3" fill="currentColor"/>
-                <rect class="leg l2" x="26" y="43" width="6" height="9" rx="3" fill="currentColor"/>
-                <g class="body">
-                  <path d="M18 4h8l13 40H5z" fill="url(#mg)" stroke="url(#mg)" stroke-width="4" stroke-linejoin="round"/>
-                  {#if st.incognito}
-                    <rect x="13" y="19" width="18" height="7" rx="3" fill="#111114"/>
-                  {:else}
-                    <g class="eyes"><circle cx="18" cy="24" r="2.2" fill="#111114"/><circle cx="26" cy="24" r="2.2" fill="#111114"/></g>
-                  {/if}
-                  <path d="M19 31q3 3 6 0" fill="none" stroke="#111114" stroke-width="1.8" stroke-linecap="round"/>
-                </g>
-              </svg>
-            </button>
-          </div>
+      <div class="floor" bind:this={floorEl} aria-hidden="true">
+        <div class="walker" style="left:{x}px; --d:{dur}s">
+          <button class="mascot m-{mode}" class:hop onclick={poke} tabindex="-1" aria-label="Cone">
+            {#if said}<span class="say">{st.incognito ? 'Shh. Nobody saw.' : 'Open the way.'}</span>{/if}
+            {#if mode === 'sleep'}<span class="zzz">z<small>z</small></span>{/if}
+            <svg class="fig" style="transform: scaleX({face})" width="50" height="54" viewBox="0 0 50 54">
+              <defs><linearGradient id="mg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs>
+              <rect class="leg l1" x="14" y="43" width="6" height="9" rx="3" fill="currentColor"/>
+              <rect class="leg l2" x="28" y="43" width="6" height="9" rx="3" fill="currentColor"/>
+              <g class="body">
+                <path d="M20 4h8l13 40H7z" fill="url(#mg)" stroke="url(#mg)" stroke-width="4" stroke-linejoin="round"/>
+                {#if st.incognito}
+                  <rect x="15" y="19" width="18" height="7" rx="3" fill="#111114"/>
+                {:else if mode === 'sleep'}
+                  <path d="M16 24q2 2 4 0M28 24q2 2 4 0" fill="none" stroke="#111114" stroke-width="1.8" stroke-linecap="round"/>
+                {:else}
+                  <g class="eyes"><circle class="pupil" cx="20" cy="24" r="2.2" fill="#111114"/><circle class="pupil" cx="28" cy="24" r="2.2" fill="#111114"/></g>
+                {/if}
+                <path d={mode === 'sleep' ? 'M22 31h4' : 'M21 31q3 3 6 0'} fill="none" stroke="#111114" stroke-width="1.8" stroke-linecap="round"/>
+              </g>
+              <path class="arm" d="M40 34l6 4" stroke="#FFB020" stroke-width="4" stroke-linecap="round"/>
+            </svg>
+          </button>
         </div>
       </div>
     </div>
@@ -546,24 +579,40 @@
   .ico img { position: absolute; inset: 0; width: 100%; height: 100%; padding: 16px; box-sizing: border-box; border-radius: 18px; background: var(--card); object-fit: contain; }
   .ico i { position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; border: 3px solid var(--bg); }
   .nt { position: relative; }
-  .floor { position: absolute; left: 40px; right: 40px; bottom: 44px; height: 56px; border-bottom: 1px solid var(--line); pointer-events: none; }
-  .walker { position: absolute; bottom: -1px; left: 0; animation: walk 40s linear infinite; }
-  .turn { display: block; animation: turn 40s step-end infinite; }
-  .mascot { position: relative; display: block; padding: 0; background: none; color: var(--fg); pointer-events: auto; cursor: pointer; animation: bob .5s ease-in-out infinite; transform-origin: 50% 100%; }
-  .mascot.hop { animation: hop .5s ease-out; }
+  .floor { position: absolute; left: 40px; right: 40px; bottom: 14px; height: 70px; pointer-events: none; }
+  .walker { position: absolute; bottom: 0; transition: left var(--d) linear; }
+  .mascot { position: relative; display: block; padding: 0; background: none; color: var(--fg); pointer-events: auto; cursor: pointer; transform-origin: 50% 100%; }
   .mascot:hover { background: none; }
+  .fig { display: block; overflow: visible; }
   .leg { transform-box: fill-box; transform-origin: 50% 0; }
-  .l1 { animation: step .5s ease-in-out infinite; }
-  .l2 { animation: step .5s ease-in-out infinite reverse; }
+  .arm { transform-box: fill-box; transform-origin: 0 50%; }
   .eyes { transform-box: fill-box; transform-origin: 50% 50%; animation: blink 5s infinite; }
+  .m-walk { animation: bob .5s ease-in-out infinite; }
+  .m-walk .l1 { animation: step .5s ease-in-out infinite; }
+  .m-walk .l2 { animation: step .5s ease-in-out infinite reverse; }
+  .m-walk .arm { animation: swing .5s ease-in-out infinite; }
+  .m-idle { animation: breathe 3s ease-in-out infinite; }
+  .m-wave .arm { animation: wave .45s ease-in-out 4; }
+  .m-jump, .mascot.hop { animation: hop .6s ease-out; }
+  .m-spin { animation: spin .9s ease-in-out; }
+  .m-look .pupil { animation: look 2.2s ease-in-out; }
+  .m-sleep { animation: sleep 2.4s ease-in-out infinite; }
+  .m-sleep .body { transform-box: fill-box; transform-origin: 50% 100%; }
+  .zzz { position: absolute; left: 34px; top: -4px; font: 700 14px 'Bricolage Grotesque Variable', system-ui, sans-serif; color: var(--dim); animation: float 2.4s ease-out infinite; }
+  .zzz small { font-size: 10px; margin-left: 2px; }
   .say { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 12px; color: var(--fg); background: var(--bg3); border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; margin-bottom: 4px; }
-  @keyframes walk { from { left: 0; } 50% { left: calc(100% - 44px); } to { left: 0; } }
-  @keyframes turn { 0% { transform: scaleX(1); } 50% { transform: scaleX(-1); } }
   @keyframes bob { 50% { transform: translateY(-3px) rotate(2deg); } }
-  @keyframes hop { 40% { transform: translateY(-26px) scaleY(1.08); } 100% { transform: none; } }
+  @keyframes breathe { 50% { transform: scaleY(1.03); } }
   @keyframes step { 50% { transform: rotate(28deg); } }
+  @keyframes swing { 50% { transform: rotate(-35deg); } }
+  @keyframes wave { 0%, 100% { transform: rotate(-70deg); } 50% { transform: rotate(-120deg); } }
+  @keyframes hop { 40% { transform: translateY(-34px) scaleY(1.08); } 55% { transform: translateY(-34px); } 100% { transform: none; } }
+  @keyframes spin { 0%, 100% { transform: translateY(0) rotateY(0); } 40% { transform: translateY(-22px) rotateY(360deg); } }
+  @keyframes look { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-2.5px); } 70% { transform: translateX(2.5px); } }
+  @keyframes sleep { 50% { transform: scaleY(.96) translateY(1px); } }
+  @keyframes float { from { opacity: 1; transform: translate(0, 0); } to { opacity: 0; transform: translate(8px, -16px); } }
   @keyframes blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(.1); } }
-  @media (prefers-reduced-motion: reduce) { .walker, .turn, .mascot, .l1, .l2, .eyes { animation: none; } .walker { left: 50%; } }
+  @media (prefers-reduced-motion: reduce) { .mascot, .mascot *, .zzz { animation: none !important; } .walker { transition: none; } }
   .keys { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 22px; color: var(--dim); font-size: 13px; }
   .keys span { display: inline-flex; align-items: center; gap: 8px; }
   .lib { display: flex; height: 100%; }
