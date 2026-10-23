@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { call, on, onState, color } from './lib/api.js';
+  import { call, on, onState, color, applyTheme, ACCENT_NAMES } from './lib/api.js';
 
   let { view } = $props();
   let st = $state(null);
@@ -17,7 +17,8 @@
   let ab = $state(null);
   let upd = $state(null); // null | 'checking' | result
 
-  const NAV = ['General', 'Profiles and sites', 'Ad blocker', 'Search', 'About'];
+  const NAV = ['General', 'Tabs', 'Startup and downloads', 'Privacy', 'Profiles and sites', 'Ad blocker', 'Search', 'Shortcuts', 'About'];
+  const SHORTCUTS = [['New tab', '⌘T'], ['New window', '⌘N'], ['Close tab', '⌘W'], ['Reopen closed tab', '⇧⌘T'], ['Open location', '⌘L'], ['Find in page', '⌘F'], ['Search tabs', '⇧⌘A'], ['Reload', '⌘R'], ['Back / forward', '⌘[ / ⌘]'], ['Toggle sidebar', '⌘\\'], ['Toggle top bar', '⇧⌘L'], ['Developer tools', '⌥⌘I'], ['History', '⌘Y'], ['Downloads', '⇧⌘J'], ['Settings', '⌘,']];
   const newtab = $derived(view === 'newtab');
   $effect(() => {
     if (!newtab) document.title = { history: 'History', downloads: 'Downloads', settings: 'Settings' }[view] ?? 'Aditus';
@@ -52,7 +53,7 @@
   });
 
   $effect(() => {
-    document.documentElement.dataset.theme = st?.cfg.settings.theme ?? 'system';
+    applyTheme(st?.cfg.settings);
   });
 
   $effect(() => {
@@ -227,11 +228,82 @@
               <span class="grow"><b>Sidebar width</b><small>Drag the sidebar edge, or set it here.</small></span>
               <span><input type="number" min="160" max="480" value={st.cfg.settings.sidebar_width} onchange={(e) => set({ sidebar_width: Math.min(480, Math.max(160, +e.currentTarget.value)) })} /> px</span>
             </label>
+            <div class="item">
+              <span class="grow"><b>Accent colour</b><small>Highlights, switches and the active tab.</small></span>
+              <span class="swatches">
+                {#each ACCENT_NAMES as a}
+                  <button class="swatch" class:on={st.cfg.settings.accent === a} data-a={a} aria-label={a} onclick={() => set({ accent: a })}></button>
+                {/each}
+              </span>
+            </div>
+            <label class="item">
+              <span class="grow"><b>Page zoom</b><small>Applied to every site.</small></span>
+              <span><input type="number" min="50" max="300" step="10" value={st.cfg.settings.page_zoom} onchange={(e) => set({ page_zoom: Math.min(300, Math.max(50, +e.currentTarget.value)) })} /> %</span>
+            </label>
+          </div>
+        {:else if nav === 'Tabs'}
+          <h1>Tabs</h1>
+          <div class="card list2">
+            <label class="item">
+              <span class="grow"><b>Compact tab list</b><small>Shorter rows, more tabs in view.</small></span>
+              <input type="checkbox" class="sw" checked={st.cfg.settings.compact_tabs} onchange={(e) => set({ compact_tabs: e.currentTarget.checked })} />
+            </label>
+            <label class="item">
+              <span class="grow"><b>Open links in the background</b><small>Links that open a new tab load behind the current one.</small></span>
+              <input type="checkbox" class="sw" checked={st.cfg.settings.links_background} onchange={(e) => set({ links_background: e.currentTarget.checked })} />
+            </label>
             <label class="item">
               <span class="grow"><b>Sleep idle tabs after</b><small>Pinned and playing tabs stay awake.</small></span>
               <span><input type="number" min="1" max="1440" value={st.cfg.settings.idle_minutes} onchange={(e) => set({ idle_minutes: Math.max(1, +e.currentTarget.value) })} /> min</span>
             </label>
           </div>
+        {:else if nav === 'Startup and downloads'}
+          <h1>Startup and downloads</h1>
+          <div class="card list2">
+            <div class="item">
+              <span class="grow"><b>When Aditus starts</b><small>Pick up where you left off, or start fresh.</small></span>
+              <span class="segc">
+                {#each [['restore', 'Last session'], ['newtab', 'New tab'], ['home', 'Home page']] as [v, l]}
+                  <button class:on={st.cfg.settings.startup === v} onclick={() => set({ startup: v })}>{l}</button>
+                {/each}
+              </span>
+            </div>
+            {#if st.cfg.settings.startup === 'home'}
+              <label class="item">
+                <span class="grow"><b>Home page</b><small>Opened on start, https://… only.</small></span>
+                <input class="wide" placeholder="https://" value={st.cfg.settings.home_url} onchange={(e) => set({ home_url: e.currentTarget.value.trim() })} />
+              </label>
+            {/if}
+            <label class="item">
+              <span class="grow"><b>Download folder</b><small>Leave empty for your system Downloads folder.</small></span>
+              <input class="wide" placeholder="/path/to/folder" value={st.cfg.settings.download_dir} onchange={(e) => set({ download_dir: e.currentTarget.value.trim() })} />
+            </label>
+          </div>
+        {:else if nav === 'Privacy'}
+          <h1>Privacy</h1>
+          <div class="card list2">
+            <label class="item">
+              <span class="grow"><b>Clear history when Aditus quits</b><small>Downloads list is kept.</small></span>
+              <input type="checkbox" class="sw" checked={st.cfg.settings.clear_history_on_quit} onchange={(e) => set({ clear_history_on_quit: e.currentTarget.checked })} />
+            </label>
+            <label class="item">
+              <span class="grow"><b>Delete history older than</b><small>0 keeps everything. Runs at launch.</small></span>
+              <span><input type="number" min="0" max="3650" value={st.cfg.settings.history_days} onchange={(e) => set({ history_days: Math.max(0, +e.currentTarget.value) })} /> days</span>
+            </label>
+            <div class="item">
+              <span class="grow"><b>Clear history now</b><small>Everything, across profiles.</small></span>
+              <button class="ghost" onclick={() => call('history_clear')}>Clear…</button>
+            </div>
+          </div>
+          <p class="meta">Cookies and site data live in each profile. Delete a profile to wipe its data.</p>
+        {:else if nav === 'Shortcuts'}
+          <h1>Shortcuts</h1>
+          <div class="card list2">
+            {#each SHORTCUTS as [name, keys]}
+              <div class="kv"><span>{name}</span><kbd>{keys}</kbd></div>
+            {/each}
+          </div>
+          <p class="meta">Shortcuts follow the menu bar and aren't rebindable yet. Ctrl replaces ⌘ on Windows and Linux.</p>
         {:else if nav === 'Profiles and sites'}
           <h1>Profiles <small>Separate cookies and logins. Each tab runs in one profile.</small></h1>
           <div class="pgrid">
@@ -328,6 +400,16 @@
             <p class="meta">{upd.latest === null ? 'No published release found.' : upd.newer ? `Version ${upd.latest} is available.` : "You're on the latest version."}</p>
           {/if}
           <div class="card list2">
+            <label class="item">
+              <span class="grow"><b>Check for updates on launch</b><small>Looks at GitHub releases, installs nothing.</small></span>
+              <input type="checkbox" class="sw" checked={st.cfg.settings.auto_update} onchange={(e) => set({ auto_update: e.currentTarget.checked })} />
+            </label>
+            <div class="item">
+              <span class="grow"><b>Default browser</b><small>Your system decides; this opens its setting.</small></span>
+              <button class="ghost" onclick={() => call('default_browser_settings')}>Open settings</button>
+            </div>
+          </div>
+          <div class="card list2">
             <div class="kv"><span class="meta">Engine</span><span class="mono">System webview</span></div>
             <div class="kv"><span class="meta">Interface</span><span class="mono">Tauri 2 + Svelte</span></div>
             <div class="kv"><span class="meta">Data</span><span class="mono">config.toml · aditus.db</span></div>
@@ -411,6 +493,11 @@
   .sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--dim); transition: left .12s; }
   .sw:checked { background: var(--accent); }
   .sw:checked::after { left: 21px; background: #111114; }
+  .wide { width: 280px; height: 34px; background: var(--bg3); border: 0; }
+  .swatches { display: flex; gap: 8px; }
+  .swatch { width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 2px solid transparent; outline: 1.5px solid transparent; outline-offset: 2px; }
+  .swatch.on { outline-color: var(--fg); }
+  .swatch[data-a='amber'] { background: #ffb020; } .swatch[data-a='blue'] { background: #6ea8fe; } .swatch[data-a='green'] { background: #5ad19a; } .swatch[data-a='pink'] { background: #ff7eb6; } .swatch[data-a='violet'] { background: #b79cff; }
   .item input[type='number'] { width: 64px; height: 30px; background: var(--bg3); border: 0; }
   .segc { display: flex; gap: 2px; padding: 3px; border-radius: 11px; background: var(--bg); border: 1px solid var(--line); }
   .segc button { height: 28px; padding: 0 12px; border-radius: 8px; color: var(--dim); }

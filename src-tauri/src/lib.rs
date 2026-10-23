@@ -114,7 +114,16 @@ fn save_settings(app: AppHandle, settings: Settings) {
         let old = &g.cfg.settings;
         (old.disabled_lists != settings.disabled_lists, old.adblock != settings.adblock || old.disabled_lists != settings.disabled_lists)
     };
+    let zoom = settings.page_zoom;
+    let zoom_changed = app.state::<Shared>().app.lock().unwrap().cfg.settings.page_zoom != zoom;
     mutate_cfg(&app, |c| c.settings = settings);
+    if zoom_changed {
+        for (label, wv) in app.webviews() {
+            if label.starts_with("tab-") {
+                let _ = wv.set_zoom(zoom as f64 / 100.0);
+            }
+        }
+    }
     if lists_changed {
         adblock::rebuild(&app);
     }
@@ -122,6 +131,17 @@ fn save_settings(app: AppHandle, settings: Settings) {
     if blocking_changed {
         adblock::refresh(&app);
     }
+}
+
+/// Opens the OS page where the default browser is chosen (apps can't set it silently).
+#[tauri::command(async)]
+fn default_browser_settings() {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg("x-apple.systempreferences:com.apple.Desktop-Settings.extension").spawn();
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("cmd").args(["/C", "start", "ms-settings:defaultapps"]).spawn();
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("xdg-settings").args(["set", "default-web-browser", "aditus.desktop"]).spawn();
 }
 
 #[tauri::command(async)]
@@ -482,7 +502,7 @@ pub fn run() {
             delete_profile, delete_mapping, toggle_allowlist, pin_tab, group_tab, find, find_clear,
             open_devtools, history_search, history_clear, downloads_list, show_palette, hide_palette,
             reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile, profile_menu,
-            adblock_info, check_update
+            adblock_info, check_update, default_browser_settings
         ])
         .on_menu_event(|app, ev| on_menu(app, ev.id().as_ref()))
         .on_window_event(|win, ev| match ev {
@@ -514,6 +534,13 @@ pub fn run() {
             app.set_menu(build_menu(&handle)?)?;
 
             adblock::init(&handle);
+            {
+                let state = handle.state::<Shared>();
+                let days = state.app.lock().unwrap().cfg.settings.history_days;
+                if days > 0 {
+                    state.db.prune_history(days);
+                }
+            }
             tabs::restore_session(&handle);
 
             #[cfg(debug_assertions)]
@@ -534,6 +561,14 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Aditus");
+        .build(tauri::generate_context!())
+        .expect("error while building Aditus")
+        .run(|app, ev| {
+            if let tauri::RunEvent::Exit = ev {
+                let s = app.state::<Shared>();
+                if s.app.lock().unwrap().cfg.settings.clear_history_on_quit {
+                    s.db.clear_history();
+                }
+            }
+        });
 }

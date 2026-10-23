@@ -2,7 +2,7 @@
   // A site on a real host is remembered (mapping); blank tabs just switch.
   const setProfile = (t, profile) => (t.host ? call('assign_mapping', { host: t.host, profile }) : call('switch_profile', { profile }));
   import { onMount, tick } from 'svelte';
-  import { call, on, onState, color } from './lib/api.js';
+  import { call, on, onState, color, applyTheme } from './lib/api.js';
 
   const COLLAPSED = 52;
   const TOP = 52;
@@ -10,6 +10,8 @@
 
   let st = $state({ tabs: [], active: 0, cfg: null, prompt: null, toast: null, adblock_site: true });
   let width = $state(236);
+  let newer = $state(null); // { latest, url } when a release is available
+  let checked = false;
   let resizing = false;
   let urlText = $state('');
   let editing = $state(false);
@@ -49,7 +51,7 @@
   }
 
   $effect(() => {
-    document.documentElement.dataset.theme = cfg?.settings.theme ?? 'system';
+    applyTheme(cfg?.settings);
     if (cfg && !resizing) width = cfg.settings.sidebar_width;
   });
 
@@ -119,6 +121,12 @@
     findOpen = false;
     call('find_clear');
   }
+
+  $effect(() => {
+    if (!cfg || checked || !cfg.settings.auto_update) return;
+    checked = true;
+    call('check_update').then((u) => { if (u?.newer) newer = u; }).catch(() => {});
+  });
 
   onMount(() => {
     const offs = [];
@@ -247,7 +255,7 @@
   </div>
 {/snippet}
 
-<aside class="side" style="width:{sidebarW}px; padding-top:{mac ? 38 : 0}px">
+<aside class="side" class:compact={cfg?.settings.compact_tabs} style="width:{sidebarW}px; padding-top:{mac ? 38 : 0}px">
   {#if mac}<div class="drag" data-tauri-drag-region></div>{/if}
   {#if !collapsed}
     <div class="brand">
@@ -280,6 +288,13 @@
       {/each}
     {/each}
   </div>
+
+  {#if newer && !collapsed}
+    <div class="card toast">
+      <span>Aditus {newer.latest} is out</span>
+      <button onclick={() => { call('new_tab', { url: newer.url }); newer = null; }}>Get</button>
+    </div>
+  {/if}
 
   {#if st.toast && !collapsed}
     <div class="card toast">
@@ -398,6 +413,8 @@
   .tab.active { background: var(--bg3); color: var(--fg); }
   .tab.active::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--accent); }
   .tab.discarded { opacity: .55; }
+  .compact .tab { height: 30px; }
+  .compact .fav { width: 18px; height: 18px; }
   .tag { display: flex; align-items: center; gap: 5px; font: 10px ui-monospace, 'SF Mono', monospace; color: var(--dim); flex: none; }
   .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
   .fav { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border-radius: 6px; background: var(--bg2); border: 1px solid var(--line); font-size: 11px; font-weight: 600; color: var(--fg); overflow: hidden; }

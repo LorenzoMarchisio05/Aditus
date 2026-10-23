@@ -580,14 +580,17 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
                 }
             };
             let app = a_new.clone();
+            let front = !shared(&app).app.lock().unwrap().cfg.settings.links_background;
             tauri::async_runtime::spawn(async move {
-                open_tab_in(&app, &win, Some(u), profile, true);
+                open_tab_in(&app, &win, Some(u), profile, front);
             });
             NewWindowResponse::Deny
         })
         .on_download(move |_, ev| match ev {
             DownloadEvent::Requested { url, destination } => {
-                if let Ok(dir) = a_dl.path().download_dir() {
+                let custom = shared(&a_dl).app.lock().unwrap().cfg.settings.download_dir.clone();
+                let custom = (!custom.is_empty()).then(|| PathBuf::from(custom)).filter(|d| std::fs::create_dir_all(d).is_ok());
+                if let Some(dir) = custom.or_else(|| a_dl.path().download_dir().ok()) {
                     let name = destination.file_name().map(|n| n.to_owned()).unwrap_or_else(|| "download".into());
                     *destination = dir.join(name);
                 }
@@ -615,6 +618,10 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
     let wv = window.add_child(builder, pos, size).map_err(|e| e.to_string())?;
     no_inset(&wv);
     fit_page(app, &wv);
+    let zoom = shared(app).app.lock().unwrap().cfg.settings.page_zoom;
+    if zoom != 100 {
+        let _ = wv.set_zoom(zoom as f64 / 100.0);
+    }
     crate::adblock::attach(app, &wv, &profile_name);
     if !show {
         let _ = wv.hide();
@@ -1294,8 +1301,13 @@ pub fn restore_session(app: &AppHandle) {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
-    if session.tabs.is_empty() {
-        open_tab_in(app, "main", None, None, true);
+    let (startup, home) = {
+        let g = shared(app).app.lock().unwrap();
+        (g.cfg.settings.startup.clone(), g.cfg.settings.home_url.clone())
+    };
+    if startup != "restore" || session.tabs.is_empty() {
+        let url = if startup == "home" { Url::parse(&home).ok() } else { None };
+        open_tab_in(app, "main", url, None, true);
         return;
     }
     let mut to_activate: HashMap<String, u32> = HashMap::new();

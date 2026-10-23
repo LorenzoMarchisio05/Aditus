@@ -26,6 +26,48 @@ pub struct Settings {
     /// Filter list names (see adblock::LISTS) switched off.
     #[serde(default)]
     pub disabled_lists: Vec<String>,
+    /// "restore" | "newtab" | "home"
+    #[serde(default = "default_startup")]
+    pub startup: String,
+    #[serde(default)]
+    pub home_url: String,
+    /// Empty = the system Downloads folder.
+    #[serde(default)]
+    pub download_dir: String,
+    /// Delete history older than this many days; 0 keeps everything.
+    #[serde(default)]
+    pub history_days: u32,
+    #[serde(default)]
+    pub clear_history_on_quit: bool,
+    /// "amber" | "blue" | "green" | "pink" | "violet"
+    #[serde(default = "default_accent")]
+    pub accent: String,
+    #[serde(default)]
+    pub compact_tabs: bool,
+    /// Links that open a new tab load behind the current one.
+    #[serde(default)]
+    pub links_background: bool,
+    #[serde(default = "yes")]
+    pub auto_update: bool,
+    /// Page zoom in percent.
+    #[serde(default = "default_zoom")]
+    pub page_zoom: u32,
+}
+
+fn default_startup() -> String {
+    "restore".into()
+}
+
+fn default_accent() -> String {
+    "amber".into()
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn default_zoom() -> u32 {
+    100
 }
 
 fn default_theme() -> String {
@@ -47,6 +89,16 @@ impl Default for Settings {
             theme: default_theme(),
             sidebar_width: default_sidebar(),
             disabled_lists: vec![],
+            startup: default_startup(),
+            home_url: String::new(),
+            download_dir: String::new(),
+            history_days: 0,
+            clear_history_on_quit: false,
+            accent: default_accent(),
+            compact_tabs: false,
+            links_background: false,
+            auto_update: true,
+            page_zoom: default_zoom(),
         }
     }
 }

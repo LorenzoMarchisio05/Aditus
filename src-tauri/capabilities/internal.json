@@ -42,6 +42,7 @@
     "allow-hide-panel",
     "allow-switch-profile",
     "allow-adblock-info",
-    "allow-check-update"
+    "allow-check-update",
+    "allow-default-browser-settings"
   ]
 }

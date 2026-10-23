@@ -74,6 +74,13 @@ impl Db {
         .collect()
     }
 
+    pub fn prune_history(&self, days: u32) {
+        let _ = self.0.lock().unwrap().execute(
+            "DELETE FROM history WHERE visited_at < strftime('%s','now') - ?1 * 86400",
+            params![days],
+        );
+    }
+
     pub fn clear_history(&self) {
         let _ = self.0.lock().unwrap().execute("DELETE FROM history", []);
     }

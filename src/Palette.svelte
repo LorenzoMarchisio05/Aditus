@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { call, on, onState } from './lib/api.js';
+  import { call, on, onState, applyTheme } from './lib/api.js';
 
   let text = $state('');
   let input;
@@ -9,7 +9,7 @@
   onMount(() => {
     const offs = [];
     (async () => {
-      offs.push(await onState((s) => { url = s.tabs.find((t) => t.id === s.active)?.url ?? ''; document.documentElement.dataset.theme = s.cfg.settings.theme; }));
+      offs.push(await onState((s) => { url = s.tabs.find((t) => t.id === s.active)?.url ?? ''; applyTheme(s.cfg.settings); }));
       offs.push(
         await on('palette-open', () => {
           text = url;
