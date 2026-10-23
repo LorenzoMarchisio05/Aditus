@@ -106,6 +106,7 @@ fn dismiss_toast(app: AppHandle) {
 #[tauri::command(async)]
 fn save_settings(app: AppHandle, settings: Settings) {
     mutate_cfg(&app, |c| c.settings = settings);
+    adblock::refresh(&app);
 }
 
 #[tauri::command(async)]
@@ -285,6 +286,12 @@ fn hide_palette(app: AppHandle) {
     }
 }
 
+/// Page webviews may call this: CSS hiding ads on the page's real (engine-reported) URL.
+#[tauri::command]
+fn cosmetic_css(app: AppHandle, webview: Webview) -> String {
+    webview.url().ok().map(|u| adblock::cosmetic_css(&app, &u)).unwrap_or_default()
+}
+
 /// Page webviews may call only this. The payload is a hint; Rust re-derives everything.
 #[tauri::command]
 fn page_ping(app: AppHandle, webview: Webview, kind: String) {
@@ -390,7 +397,7 @@ pub fn run() {
             assign_mapping, skip_prompt, undo_swap, dismiss_toast, save_settings, add_profile,
             delete_profile, delete_mapping, toggle_allowlist, pin_tab, group_tab, find, find_clear,
             open_devtools, history_search, history_clear, downloads_list, show_palette, hide_palette,
-            reveal_path, reorder_tab, page_ping, show_panel, hide_panel, switch_profile
+            reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile
         ])
         .on_menu_event(|app, ev| on_menu(app, ev.id().as_ref()))
         .on_window_event(|win, ev| {
@@ -421,6 +428,7 @@ pub fn run() {
             )?;
             app.set_menu(build_menu(&handle)?)?;
 
+            adblock::init(&handle);
             tabs::restore_session(&handle);
 
             let h = handle.clone();
@@ -428,7 +436,6 @@ pub fn run() {
                 std::thread::sleep(Duration::from_secs(30));
                 tabs::discard_idle(&h);
             });
-            adblock::init(&handle);
             Ok(())
         })
         .run(tauri::generate_context!())

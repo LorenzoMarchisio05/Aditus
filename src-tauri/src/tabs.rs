@@ -288,6 +288,7 @@ addEventListener('popstate',()=>ping('u'));addEventListener('hashchange',()=>pin
 addEventListener('playing',()=>ping('p1'),true);
 addEventListener('pause',()=>ping('p0'),true);
 addEventListener('ended',()=>ping('p0'),true);
+if(window.top===window){try{window.__TAURI_INTERNALS__.invoke('cosmetic_css').then(css=>{if(!css)return;const s=document.createElement('style');s.textContent=css;(document.head||document.documentElement).appendChild(s)}).catch(()=>{})}catch(e){}}
 })();"#;
 
 fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String> {
@@ -409,8 +410,12 @@ fn on_navigation(app: &AppHandle, tab_id: u32, gen: u32, u: &Url) -> bool {
         d
     };
     match decision {
-        Decision::Allow => true,
+        Decision::Allow => {
+            crate::adblock::on_navigate(app, &label(tab_id, gen), &host);
+            true
+        }
         Decision::Prompt(host) => {
+            crate::adblock::on_navigate(app, &label(tab_id, gen), &host);
             s.app.lock().unwrap().prompt = Some(host);
             emit_state(app);
             true

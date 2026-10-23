@@ -1,10 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "page",
-  "description": "Untrusted web pages. May only send page_ping.",
+  "description": "Untrusted web pages. May only call page_ping and cosmetic_css.",
   "windows": ["main"],
   "webviews": ["tab-*"],
   "remote": { "urls": ["http://*", "https://*", "http://*:*", "https://*:*"] },
   "local": true,
-  "permissions": ["allow-page-ping"]
+  "permissions": ["allow-page-ping", "allow-cosmetic-css"]
 }
