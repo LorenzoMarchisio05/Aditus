@@ -271,7 +271,7 @@
   {#if !collapsed}
     <div class="brand">
       <svg width="24" height="24" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M46 18h8l15 60H31z" fill="url(#gc)" stroke="url(#gc)" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="var(--fg)" stroke-width="5" stroke-linecap="round"/></svg>
-      aditus{#if st.incognito}<span class="priv">private</span>{/if}
+      Aditus{#if st.incognito}<span class="priv">private</span>{/if}
     </div>
   {/if}
   {#if collapsed}
@@ -378,9 +378,15 @@
           class="shield"
           class:off={!st.adblock_site}
           onclick={() => call('toggle_allowlist', { host: tab.host })}
-          title={st.adblock_site ? 'Ad blocking on for this site' : 'Ad blocking paused for this site'}
+          title={st.adblock_site ? 'Ads and trackers blocked on this site. Click to pause.' : 'Ad blocking paused on this site. Click to resume.'}
           aria-label="Toggle ad blocking"
-        ><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg></button>
+        ><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          {#if st.adblock_site}
+            <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" fill="currentColor" fill-opacity=".22"/><path d="M8.5 12l2.5 2.5 4.5-5"/>
+          {:else}
+            <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M4 4l16 16"/>
+          {/if}
+        </svg></button>
       {/if}
       <button onclick={() => call('open_devtools')} title="Developer tools" aria-label="Developer tools"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg></button>
     </div>
@@ -472,8 +478,8 @@
   .shown { position: absolute; inset: 0; padding: 0 14px; display: flex; align-items: center; pointer-events: none; color: var(--dim); font-size: 15px; white-space: nowrap; overflow: hidden; }
   .shown b { color: var(--fg); font-weight: 600; }
   .pill kbd { margin-right: 12px; }
-  .bar > .shield { color: var(--accent); background: var(--bg2); border: 1px solid var(--line); }
-  .bar > .shield.off { color: var(--dim); }
+  .bar > .shield { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg2)); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  .bar > .shield.off { color: var(--dim); background: transparent; border: 1px dashed var(--line); }
   .grip { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; }
   form { flex: 1; }
   form input { width: 100%; }

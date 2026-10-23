@@ -640,6 +640,12 @@ fn on_menu(app: &AppHandle, id: &str) {
     tauri::async_runtime::spawn(async move {
         let (win, cur) = app.state::<Shared>().app.lock().unwrap().focused_active_with_win();
         let ui = tabs::wv_label("ui", &win);
+        // The page webview usually holds keyboard focus; an input in the UI webview can't take it otherwise.
+        if matches!(id.as_str(), "focus-address" | "new-tab" | "find" | "search-tabs") {
+            if let Some(wv) = app.get_webview(&ui) {
+                let _ = wv.set_focus();
+            }
+        }
         match id.as_str() {
             "new-tab" => {
                 tabs::open_tab_in(&app, &win, None, None, true);
