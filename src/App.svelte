@@ -393,7 +393,7 @@
   .tab.active .pbar { opacity: 1; }
   .host { color: var(--dim); font-weight: 400; margin-left: 6px; }
   .tag { font-size: 9.5px; font-weight: 700; letter-spacing: .03em; flex: none; }
-  .seg { font-size: 12px; font-weight: 700; color: #120d1d; padding: 0 12px; height: 100%; border-radius: 0; display: flex; align-items: center; gap: 6px; cursor: pointer; flex: none; }
+  .seg { font-size: 12px; font-weight: 700; color: #111114; padding: 0 12px; height: 100%; border-radius: 0; display: flex; align-items: center; gap: 6px; cursor: pointer; flex: none; }
   .tab.discarded .title { opacity: .55; }
   .fav { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
   .fav img { width: 16px; height: 16px; border-radius: 3px; }

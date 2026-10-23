@@ -1,4 +1,6 @@
 import { mount } from 'svelte';
+import '@fontsource-variable/bricolage-grotesque/wght.css';
+import '@fontsource-variable/instrument-sans/wght.css';
 import './app.css';
 import App from './App.svelte';
 import Palette from './Palette.svelte';

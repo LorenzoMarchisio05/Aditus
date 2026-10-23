@@ -9,9 +9,10 @@
 :root[data-theme='light'] { --bg: #f3f1ec; --bg2: #e4e0d6; --bg3: #d8d3c6; --fg: #111114; --dim: #5b5b63; --line: #cfcabd; --accent: #d98e00; color-scheme: light; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--fg);
-  font: 13px -apple-system, BlinkMacSystemFont, system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+  font: 13px 'Instrument Sans Variable', -apple-system, BlinkMacSystemFont, system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
 button { font: inherit; color: inherit; background: none; border: 0; border-radius: 6px; cursor: pointer; padding: 4px 8px; }
 button:hover:not(:disabled) { background: var(--bg3); }
 button:disabled { opacity: .35; cursor: default; }
 input, select { font: inherit; color: var(--fg); background: var(--bg2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; outline: none; user-select: text; -webkit-user-select: text; }
 input:focus, select:focus { border-color: var(--accent); }
+h1, .brand { font-family: 'Bricolage Grotesque Variable', 'Instrument Sans Variable', system-ui, sans-serif; }

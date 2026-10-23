@@ -176,7 +176,7 @@
     </div>
   {:else if newtab && st}
     <div class="nt">
-      <div class="hero"><h1>Aditus</h1><span class="meta big">One window. A different account for every site.</span></div>
+      <div class="hero"><svg width="72" height="72" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M46 18h8l15 60H31z" fill="url(#gc)" stroke="url(#gc)" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg><h1>aditus</h1><span class="meta big">One window. A different account for every site.</span></div>
       <form class="nsearch" onsubmit={(e) => { e.preventDefault(); call('address', { input: ntq }); call('hide_panel'); }}>
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
         <!-- svelte-ignore a11y_autofocus -->
@@ -360,7 +360,7 @@
 
   .nt { height: 100%; display: flex; flex-direction: column; align-items: center; padding-top: 150px; gap: 36px; overflow-y: auto; }
   .hero { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-  .hero h1 { font-size: 64px; font-weight: 800; letter-spacing: -.03em; line-height: 1; display: block; }
+  .hero h1 { font-size: 64px; font-weight: 800; letter-spacing: -.035em; line-height: 1; display: block; }
   .big { font-size: 14px; }
   .nsearch { width: 620px; max-width: 90%; height: 52px; border-radius: 14px; background: var(--card); display: flex; align-items: center; gap: 12px; padding: 0 18px; color: var(--dim); }
   .nsearch input { flex: 1; height: 100%; background: none; border: 0; font-size: 15px; color: #f1eefb; padding: 0; }
