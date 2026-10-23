@@ -1,10 +1,10 @@
 <script>
   let { incognito = false, roam = false } = $props();
-  // Cone wanders the bottom of the browser pages, picking something to do every few seconds.
+  // Swing wanders the bottom of the browser pages, picking something to do every few seconds.
   let floorEl = $state(), x = $state(0), face = $state(roam ? 1 : -1), mode = $state('idle'), dur = $state(0);
   let hop = $state(false), said = $state(false), startled = $state(false), wake;
   let mascotEl = $state(), gaze = $state([0, 0]), mouseX = 0, calm = 0;
-  // Eyes follow the pointer; coming close makes Cone jump (not more than every few seconds).
+  // Eyes follow the pointer; coming close makes Swing jump (not more than every few seconds).
   function track(e) {
     if (!mascotEl) return;
     const r = mascotEl.getBoundingClientRect();
@@ -71,7 +71,7 @@
 
 <div class="floor" class:corner={!roam} bind:this={floorEl} aria-hidden="true">
   <div class="walker" style="left:{x}px; --d:{dur}s">
-    <button class="mascot m-{mode}" class:hop class:startle={startled} bind:this={mascotEl} onclick={poke} tabindex="-1" aria-label="Cone">
+    <button class="mascot m-{mode}" class:hop class:startle={startled} bind:this={mascotEl} onclick={poke} tabindex="-1" aria-label="Swing">
       {#if said}<span class="say">{said}</span>{/if}
       {#if mode === 'sleep'}<span class="zzz">z<small>z</small></span>{/if}
       <svg class="fig" style="transform: scaleX({face})" width="50" height="52" viewBox="0 0 50 52">
@@ -79,15 +79,15 @@
         <rect class="leg l1" x="14" y="43" width="6" height="9" rx="3" fill="currentColor"/>
         <rect class="leg l2" x="28" y="43" width="6" height="9" rx="3" fill="currentColor"/>
         <g class="body">
-          <path d="M20 4h8l13 40H7z" fill="url(#mg)" stroke="url(#mg)" stroke-width="4" stroke-linejoin="round"/>
+          <path d="M7 43H41A34 34 0 0 0 7 9z" fill="url(#mg)" stroke="url(#mg)" stroke-width="3" stroke-linejoin="round"/>
           {#if incognito}
-            <rect x="15" y="19" width="18" height="7" rx="3" fill="#111114"/>
+            <rect x="13" y="30" width="22" height="7" rx="3" fill="#111114"/>
           {:else if mode === 'sleep'}
-            <path d="M16 24q2 2 4 0M28 24q2 2 4 0" fill="none" stroke="#111114" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M16 34q2 2 4 0M26 34q2 2 4 0" fill="none" stroke="#111114" stroke-width="1.8" stroke-linecap="round"/>
           {:else}
-            <g class="eyes"><circle class="pupil" style="transform: translate({gaze[0] * face}px, {gaze[1]}px)" cx="20" cy="24" r={startled ? 3.2 : 2.2} fill="#111114"/><circle class="pupil" style="transform: translate({gaze[0] * face}px, {gaze[1]}px)" cx="28" cy="24" r={startled ? 3.2 : 2.2} fill="#111114"/></g>
+            <g class="eyes"><circle class="pupil" style="transform: translate({gaze[0] * face}px, {gaze[1]}px)" cx="18" cy="34" r={startled ? 3.2 : 2.2} fill="#111114"/><circle class="pupil" style="transform: translate({gaze[0] * face}px, {gaze[1]}px)" cx="28" cy="34" r={startled ? 3.2 : 2.2} fill="#111114"/></g>
           {/if}
-          <path d={mode === 'sleep' ? 'M22 31h4' : 'M21 31q3 3 6 0'} fill="none" stroke="#111114" stroke-width="1.8" stroke-linecap="round"/>
+          <path d={mode === 'sleep' ? 'M20 41h4' : 'M19 40q4 3 8 0'} fill="none" stroke="#111114" stroke-width="1.8" stroke-linecap="round"/>
         </g>
         <path class="arm" d="M40 34l6 4" stroke="#FFB020" stroke-width="4" stroke-linecap="round"/>
       </svg>

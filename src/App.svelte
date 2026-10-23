@@ -270,7 +270,7 @@
   {#if mac}<div class="drag" data-tauri-drag-region></div>{/if}
   {#if !collapsed}
     <div class="brand">
-      <svg width="24" height="24" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M46 18h8l15 60H31z" fill="url(#gc)" stroke="url(#gc)" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="var(--fg)" stroke-width="5" stroke-linecap="round"/></svg>
+      <svg width="24" height="24" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M28 74V26" stroke="var(--fg)" stroke-width="7" stroke-linecap="round"/><path d="M28 74H74A46 46 0 0 0 28 28z" fill="url(#gc)"/><path d="M28 74H74" stroke="var(--fg)" stroke-width="7" stroke-linecap="round"/></svg>
       Aditus{#if st.incognito}<span class="priv">private</span>{/if}
     </div>
   {/if}

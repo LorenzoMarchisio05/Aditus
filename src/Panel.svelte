@@ -202,7 +202,7 @@
   {:else if newtab && st}
     <div class="nt">
       <div class="hero">
-        <svg width="44" height="44" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M46 18h8l15 60H31z" fill="url(#gc)" stroke="url(#gc)" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg>
+        <svg width="44" height="44" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M28 74V26" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M28 74H74A46 46 0 0 0 28 28z" fill="url(#gc)"/><path d="M28 74H74" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg>
         {#if st.incognito}
           <h1>Private window</h1>
           <p class="sub">Nothing from this window is saved: no history, cookies, logins or session. Downloads stay.</p>
@@ -232,7 +232,7 @@
   {:else if st}
     <div class="settings">
       <aside>
-        <div class="title"><span class="logo"><svg viewBox="0 0 100 100" width="70%" height="70%" fill="currentColor" aria-hidden="true"><path d="M46 18h8l15 60H31z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg></span><span><b>Settings</b><small>Aditus 0.1</small></span></div>
+        <div class="title"><span class="logo"><svg viewBox="0 0 100 100" width="70%" height="70%" fill="currentColor" aria-hidden="true"><path d="M28 74V26" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M28 74H74A46 46 0 0 0 28 28z"/><path d="M28 74H74" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg></span><span><b>Settings</b><small>Aditus 0.1</small></span></div>
         {#each NAV as n}
           <button class="nav" class:on={nav === n} onclick={() => jump(n)}>{n}</button>
         {/each}
@@ -451,7 +451,7 @@
         <section id="sec-about" class="sec">
           <h1>About</h1>
           <div class="card about">
-            <span class="logo big"><svg viewBox="0 0 100 100" width="70%" height="70%" fill="currentColor" aria-hidden="true"><path d="M46 18h8l15 60H31z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg></span>
+            <span class="logo big"><svg viewBox="0 0 100 100" width="70%" height="70%" fill="currentColor" aria-hidden="true"><path d="M28 74V26" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M28 74H74A46 46 0 0 0 28 28z"/><path d="M28 74H74" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg></span>
             <span class="grow"><b>Aditus 0.1.0</b><small>Open source, GPL-3.0</small></span>
             {#if upd && upd !== 'checking' && upd.newer}
               <button class="solid" onclick={() => call('new_tab', { url: upd.url })}>Get {upd.latest}</button>
