@@ -1,4 +1,6 @@
 <script>
+  // A site on a real host is remembered (mapping); blank tabs just switch.
+  const setProfile = (t, profile) => (t.host ? call('assign_mapping', { host: t.host, profile }) : call('switch_profile', { profile }));
   import { onMount, tick } from 'svelte';
   import { call, on, color } from './lib/api.js';
 
@@ -290,7 +292,7 @@
       <button onclick={() => call('reload')} aria-label="Reload"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"/></svg></button>
       <div class="pill">
         {#if tab}
-          <select class="seg" style="background:{color(tab.profile)}" value={tab.profile} onchange={(e) => call('switch_profile', { profile: e.currentTarget.value })} title="Profile for this tab">
+          <select class="seg" style="background:{color(tab.profile)}" value={tab.profile} onchange={(e) => setProfile(tab, e.currentTarget.value)} title="Profile for this site">
             {#each cfg.profiles as p}<option value={p.name}>{p.name}</option>{/each}
           </select>
         {/if}
@@ -351,9 +353,9 @@
     <form onsubmit={(e) => groupTab(e, menu.tab)} onclick={(e) => e.stopPropagation()}>
       <input name="g" placeholder="New group name…" value={menu.tab.group ?? ''} />
     </form>
-    <h6>Move to profile</h6>
+    <h6>Always open this site in</h6>
     {#each cfg.profiles as p}
-      <button class:sel={menu.tab.profile === p.name} onclick={async () => { await call('activate_tab', { id: menu.tab.id }); call('switch_profile', { profile: p.name }); }}>
+      <button class:sel={menu.tab.profile === p.name} onclick={async () => { await call('activate_tab', { id: menu.tab.id }); setProfile(menu.tab, p.name); }}>
         <i style="background:{color(p.name)}"></i>{p.name}
       </button>
     {/each}

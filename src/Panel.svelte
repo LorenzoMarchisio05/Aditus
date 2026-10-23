@@ -274,7 +274,7 @@
                 <button class="ghost" onclick={() => call('delete_mapping', { pattern: m.pattern })}>Remove</button>
               </div>
             {:else}
-              <div class="trow meta">None yet. You'll be asked the first time you visit a site.</div>
+              <div class="trow meta">None yet. Pick a profile in the address bar to map a site.</div>
             {/each}
           </div>
           <form class="row" onsubmit={(e) => { e.preventDefault(); if (newHost.trim()) call('assign_mapping', { host: newHost.trim(), profile: newHostProfile }); newHost = ''; }}>
