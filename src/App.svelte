@@ -17,7 +17,7 @@
   let urlText = $state('');
   let pillEl;
   const sg = createSuggest({
-    anchor: () => { const r = pillEl.getBoundingClientRect(); return { x: r.left, y: r.bottom + 6, w: r.width }; },
+    anchor: () => { const r = pillEl.getBoundingClientRect(); return { x: r.left, y: r.bottom + 4, w: r.width }; },
     fill: (t) => (urlText = t)
   });
   let editing = $state(false);
