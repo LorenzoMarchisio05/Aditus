@@ -36,7 +36,17 @@ pub fn is_auth_host(host: &str) -> bool {
     })
 }
 
+/// Reduces whatever was typed or saved (`https://Site.com:8080/a?b#c`) to the bare host pattern.
+pub fn clean_pattern(p: &str) -> String {
+    let p = p.trim().to_lowercase();
+    let p = p.split_once("://").map_or(p.as_str(), |(_, r)| r);
+    let p = p.split(['/', '?', '#']).next().unwrap_or_default();
+    let p = p.rsplit_once(':').filter(|(_, port)| !port.is_empty() && port.chars().all(|c| c.is_ascii_digit())).map_or(p, |(h, _)| h);
+    p.to_string()
+}
+
 pub fn matches(pattern: &str, host: &str) -> bool {
+    let pattern = clean_pattern(pattern);
     match pattern.strip_prefix("*.") {
         Some(base) => host == base || host.ends_with(&format!(".{base}")),
         None => pattern == host,
@@ -81,6 +91,12 @@ mod tests {
         assert_eq!(decide(&maps, "A", "youtube.com", true), Decision::Swap("B".into()));
         assert_eq!(decide(&maps, "B", "youtube.com", true), Decision::Allow);
         assert_eq!(decide(&maps, "B", "photos.google.com", true), Decision::Swap("A".into()));
+    }
+
+    #[test]
+    fn path_and_query_in_a_saved_pattern_are_ignored() {
+        let maps = vec![m("https://youtube.com/watch?v=1", "B")];
+        assert_eq!(decide(&maps, "A", "youtube.com", true), Decision::Swap("B".into()));
     }
 
     #[test]
