@@ -394,6 +394,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         &[
             &item("new-tab", "New Tab", "CmdOrCtrl+T")?,
             &item("close-tab", "Close Tab", "CmdOrCtrl+W")?,
+            &item("reopen-tab", "Reopen Closed Tab", "CmdOrCtrl+Shift+T")?,
             &item("focus-address", "Open Location", "CmdOrCtrl+L")?,
             &item("find", "Find in Page", "CmdOrCtrl+F")?,
             &item("search-tabs", "Search Tabs", "CmdOrCtrl+Shift+A")?,
@@ -445,6 +446,7 @@ fn on_menu(app: &AppHandle, id: &str) {
                 let _ = app.emit("menu", "focus-address");
             }
             "close-tab" => tabs::close_tab(&app, cur),
+            "reopen-tab" => tabs::reopen_closed(&app),
             "reload" => tabs::reload(&app, cur),
             "back" => tabs::go_history(&app, cur, -1),
             "forward" => tabs::go_history(&app, cur, 1),

@@ -92,6 +92,8 @@ pub struct App {
     /// Navigation that would have swapped had the gesture ping arrived first (WebView2 orders them the other way).
     late: HashMap<u32, (String, String, Instant)>,
     pub overlay_open: bool,
+    /// Recently closed tabs (url, profile), newest last.
+    closed: Vec<(String, String)>,
 }
 
 impl App {
@@ -110,6 +112,7 @@ impl App {
             gestures: HashMap::new(),
             late: HashMap::new(),
             overlay_open: false,
+            closed: vec![],
         }
     }
 
@@ -775,6 +778,13 @@ pub fn close_tab(app: &AppHandle, id: u32) {
         let Some(pos) = g.tabs.iter().position(|t| t.id == id) else { return };
         let t = g.tabs.remove(pos);
         g.gestures.remove(&id);
+        let url = t.url();
+        if !is_blank(&url) && internal_view(&url).is_none() {
+            g.closed.push((url, t.profile.clone()));
+            if g.closed.len() > 20 {
+                g.closed.remove(0);
+            }
+        }
         let next = if g.active == id {
             g.tabs.get(pos.min(g.tabs.len().saturating_sub(1))).map(|t| t.id)
         } else {
@@ -795,6 +805,14 @@ pub fn close_tab(app: &AppHandle, id: u32) {
                 emit_state(app);
             }
         }
+    }
+}
+
+/// Cmd/Ctrl+Shift+T: reopen the most recently closed tab in its profile.
+pub fn reopen_closed(app: &AppHandle) {
+    let last = shared(app).app.lock().unwrap().closed.pop();
+    if let Some((url, profile)) = last {
+        open_tab(app, Url::parse(&url).ok(), Some(profile), true);
     }
 }
 
