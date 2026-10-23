@@ -189,6 +189,7 @@
               <span class="meta">{new Date(d.started_at * 1000).toLocaleString()}</span>
             </span>
             <span class="state" style="color:{tint[d.status] ?? 'var(--accent)'}">{d.status}</span>
+            {#if d.path && d.status === 'done'}<button class="ghost" onclick={() => call('open_download', { path: d.path })}>Open</button>{/if}
             {#if d.path}<button class="ghost" onclick={() => call('reveal_path', { path: d.path })}>Show</button>{/if}
           </div>
         {:else}

@@ -292,6 +292,14 @@ fn downloads_list(app: AppHandle) -> Vec<DownloadRow> {
     app.state::<Shared>().db.downloads()
 }
 
+/// Opens a finished download with its default app. Only paths in the downloads table qualify.
+#[tauri::command]
+fn open_download(app: AppHandle, path: String) {
+    if app.state::<Shared>().db.downloads().iter().any(|d| d.path == path && d.status == "done") {
+        tabs::open_external(&path);
+    }
+}
+
 #[tauri::command]
 fn reveal_path(path: String) {
     #[cfg(target_os = "macos")]
@@ -678,7 +686,7 @@ pub fn run() {
             delete_profile, delete_mapping, toggle_allowlist, pin_tab, group_tab, find, find_clear,
             open_devtools, history_search, history_clear, downloads_list, show_palette, hide_palette,
             reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile, profile_menu, tab_menu,
-            adblock_info, check_update, default_browser_settings, set_profile_color, page_context, answer_permission, delete_permission
+            adblock_info, check_update, default_browser_settings, set_profile_color, page_context, open_download, answer_permission, delete_permission
         ])
         .on_menu_event(|app, ev| on_menu(app, ev.id().as_ref()))
         .on_window_event(|win, ev| match ev {
