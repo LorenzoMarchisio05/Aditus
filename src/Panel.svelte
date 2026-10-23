@@ -13,8 +13,10 @@
   let newHost = $state('');
   let newHostProfile = $state('');
   let hostQuery = $state('');
+  let ntq = $state('');
 
   const NAV = ['General', 'Profiles and sites', 'Ad blocker', 'Search', 'About'];
+  const newtab = $derived(view === 'newtab');
   const library = $derived(view === 'history' || view === 'downloads');
 
   async function loadHistory() {
@@ -36,7 +38,7 @@
       offs.push(await on('downloads-changed', loadDownloads));
       call('get_state'); // after listeners exist, or the reply is lost
     })();
-    if (library) {
+    if (library || newtab) {
       loadHistory();
       loadDownloads();
     }
@@ -83,6 +85,16 @@
   const mapped = $derived(
     (st?.cfg.mappings ?? []).filter((m) => m.pattern.includes(hostQuery.trim().toLowerCase()))
   );
+  const topSites = $derived.by(() => {
+    const m = new Map();
+    for (const r of rows) {
+      const h = host(r.url);
+      if (!h || /^(127\.|localhost)/.test(h)) continue;
+      if (!m.has(h)) m.set(h, { host: h, url: r.url, profile: r.profile, n: 0 });
+      m.get(h).n++;
+    }
+    return [...m.values()].sort((a, b) => b.n - a.n).slice(0, 6);
+  });
   const count = (name) => st.tabs.filter((t) => t.profile === name).length;
   const sites = (name) => st.cfg.mappings.filter((m) => m.profile === name).length;
 </script>
@@ -141,6 +153,32 @@
           <div class="meta">No downloads yet.</div>
         {/each}
       </section>
+    </div>
+  {:else if newtab && st}
+    <div class="nt">
+      <div class="hero"><h1>Aditus</h1><span class="meta big">One window. A different account for every site.</span></div>
+      <form class="nsearch" onsubmit={(e) => { e.preventDefault(); call('address', { input: ntq }); call('hide_panel'); }}>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+        <!-- svelte-ignore a11y_autofocus -->
+        <input autofocus bind:value={ntq} placeholder="Search with {ENGINES.find((e) => e[0] === engine)[1]} or type an address" spellcheck="false" />
+        <kbd>⌘L</kbd>
+      </form>
+      <div class="sites">
+        {#each topSites as s}
+          <button class="site" onclick={() => { call('new_tab', { url: s.url }); call('hide_panel'); }}>
+            <span class="ico"><b>{s.host[0].toUpperCase()}</b><i style="background:{color(s.profile)}"></i></span>
+            <span>{s.host.replace(/^www\./, '')}</span>
+          </button>
+        {/each}
+      </div>
+      <div class="pcards">
+        {#each st.cfg.profiles as p}
+          <div class="card pc" style="border-top-color:{color(p.name)}">
+            <div class="phead"><b class="grow">{p.name}</b><span class="mono" style="color:{color(p.name)}">{count(p.name)} tabs</span></div>
+            <span class="meta">{st.cfg.mappings.filter((m) => m.profile === p.name).slice(0, 3).map((m) => m.pattern).join(', ') || 'No sites mapped yet.'}</span>
+          </div>
+        {/each}
+      </div>
     </div>
   {:else if st}
     <div class="settings">
@@ -270,6 +308,19 @@
   .x { color: var(--dim); }
   input.search, .row input, .add input { height: 36px; background: var(--card); border: 0; border-radius: 10px; padding: 0 14px; }
 
+  .nt { height: 100%; display: flex; flex-direction: column; align-items: center; padding-top: 150px; gap: 36px; overflow-y: auto; }
+  .hero { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .hero h1 { font-size: 64px; font-weight: 800; letter-spacing: -.03em; line-height: 1; display: block; }
+  .big { font-size: 14px; }
+  .nsearch { width: 620px; max-width: 90%; height: 52px; border-radius: 14px; background: var(--card); display: flex; align-items: center; gap: 12px; padding: 0 18px; color: var(--dim); }
+  .nsearch input { flex: 1; height: 100%; background: none; border: 0; font-size: 15px; color: #f1eefb; padding: 0; }
+  kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+  .sites { display: flex; gap: 28px; }
+  .site { width: 84px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0; font-size: 12px; font-weight: 500; overflow: hidden; }
+  .ico { width: 64px; height: 64px; border-radius: 18px; background: var(--card); display: grid; place-items: center; position: relative; font-size: 22px; }
+  .ico i { position: absolute; left: 10px; right: 10px; bottom: 7px; height: 3px; border-radius: 2px; }
+  .pcards { display: flex; gap: 12px; }
+  .pc { width: 196px; padding: 14px; display: flex; flex-direction: column; gap: 10px; border-top: 3px solid; }
   .lib { display: flex; height: 100%; }
   .hist { flex: 1; min-width: 0; padding: 28px 36px; display: flex; flex-direction: column; gap: 14px; border-right: 1px solid var(--line); }
   .dl { width: 430px; flex: none; padding: 28px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }

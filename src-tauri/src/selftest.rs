@@ -72,6 +72,16 @@ pub fn run(app: &AppHandle, port: u16) {
         wait(2);
         snapshot(app, "ui", "/tmp/aditus-snap-prompt.tiff");
         wait(2);
+        tabs::open_tab(app, None, Some("Default".into()), true);
+        wait(4);
+        snapshot(app, "panel", "/tmp/aditus-snap-newtab.tiff");
+        if let Some(w) = app.get_webview("ui") {
+            let _ = w.eval("document.querySelector('.pcard')?.click()");
+        }
+        wait(1);
+        snapshot(app, "ui", "/tmp/aditus-snap-picker.tiff");
+        crate::hide_panel(app.clone());
+        wait(1);
         let _ = tauri::Emitter::emit(app, "menu", "search-tabs");
         wait(1);
         if let Some(w) = app.get_webview("ui") {
