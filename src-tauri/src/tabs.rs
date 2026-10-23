@@ -375,7 +375,7 @@ const f=window.fetch;window.fetch=function(...a){return f.apply(this,a).then(r=>
 const st=document.createElement('style');st.textContent='#movie_player.ad-showing video{opacity:0!important}.video-ads,.ytp-ad-module,.ytp-ad-overlay-container,#player-ads,ytd-ad-slot-renderer,ytd-in-feed-ad-layout-renderer,ytd-display-ad-renderer,ytd-promoted-sparkles-web-renderer{display:none!important}';
 const add=()=>(document.head||document.documentElement).appendChild(st);document.documentElement?add():addEventListener('DOMContentLoaded',add);
 let was=0;const skip=()=>{const m=document.querySelector('#movie_player.ad-showing');if(m&&!was)console.debug('[aditus] ad playing, skipping');if(!m){if(was){was=0;const pl=document.querySelector('#movie_player');if(pl&&pl.playVideo)pl.playVideo()}return}was=1;const vd=m.querySelector('video');if(vd&&isFinite(vd.duration)){vd.muted=true;vd.playbackRate=16;vd.currentTime=vd.duration}const b=document.querySelector('.ytp-skip-ad-button,.ytp-ad-skip-button-modern,.ytp-ad-skip-button');if(b)b.click()};
-new MutationObserver(skip).observe(document,{subtree:true,attributes:true,attributeFilter:['class']});setInterval(skip,150);
+new MutationObserver(skip).observe(document,{subtree:true,attributes:true,attributeFilter:['class']});for(const ev of ['loadstart','loadedmetadata','durationchange','playing'])document.addEventListener(ev,skip,true);setInterval(skip,100);
 })();"#;
 
 fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String> {
