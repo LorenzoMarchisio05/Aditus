@@ -1,6 +1,6 @@
-import http.server, sys, urllib.parse, datetime
+import http.server, sys, urllib.parse, datetime, os
 PORT = int(sys.argv[1])
-LOG = open('/tmp/aditus-server.log', 'a', buffering=1)
+LOG = open(os.environ.get('ADITUS_SERVER_LOG', '/tmp/aditus-server.log'), 'a', buffering=1)
 def log(*a): print(datetime.datetime.now().strftime('%H:%M:%S'), *a, file=LOG)
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass

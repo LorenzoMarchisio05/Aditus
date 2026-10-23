@@ -243,7 +243,10 @@ fn show_palette(app: AppHandle) {
             pos,
             size,
         ) {
-            Ok(wv) => wv,
+            Ok(wv) => {
+                tabs::no_inset(&wv);
+                wv
+            }
             Err(e) => return eprintln!("palette: {e}"),
         },
     };
@@ -262,6 +265,7 @@ fn show_panel(app: AppHandle, view: String) {
     let url = WebviewUrl::App(format!("index.html?view={view}").into());
     match window.add_child(WebviewBuilder::new("panel", url), pos, size) {
         Ok(wv) => {
+            tabs::no_inset(&wv);
             let _ = wv.set_focus();
         }
         Err(e) => eprintln!("panel: {e}"),
@@ -427,11 +431,12 @@ pub fn run() {
                 .build()?;
             let sf = window.scale_factor()?;
             let size = window.inner_size()?.to_logical::<f64>(sf);
-            window.add_child(
+            let ui = window.add_child(
                 WebviewBuilder::new("ui", WebviewUrl::App("index.html".into())).auto_resize(),
                 LogicalPosition::new(0.0, 0.0),
                 size,
             )?;
+            tabs::no_inset(&ui);
             app.set_menu(build_menu(&handle)?)?;
 
             adblock::init(&handle);
@@ -443,6 +448,11 @@ pub fn run() {
                 std::thread::spawn(move || selftest::run(&h, port));
             }
 
+            let h = handle.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(1));
+                tabs::no_inset_all(&h);
+            });
             let h = handle.clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(30));

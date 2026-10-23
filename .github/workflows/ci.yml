@@ -31,3 +31,48 @@ jobs:
       - name: Test
         working-directory: src-tauri
         run: cargo test
+
+  runtime:
+    # Runs the debug self-test (profiles, swaps, ad blocker, IPC lockdown) on a real webview.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev patchelf xvfb dbus-x11
+      - run: npm ci
+      - run: cargo build
+        working-directory: src-tauri
+      - name: Self-test
+        run: |
+          export ADITUS_SERVER_LOG=server.log; rm -f server.log
+          (npm run dev > vite.log 2>&1 &)
+          python3 scripts/selftest-server.py 8765 &
+          sleep 8
+          run() { ADITUS_DATA_DIR="$RUNNER_TEMP/aditus-data" ADITUS_SELFTEST_PORT=8765 timeout 300 src-tauri/target/debug/aditus > app.log 2>&1 || true; }
+          if [ "$RUNNER_OS" = Linux ]; then
+            export -f run
+            xvfb-run -a -s "-screen 0 1600x1000x24" dbus-run-session -- bash -c run
+          else
+            run
+          fi
+          cat app.log
+          echo ---- server; cat server.log || true
+          scripts/selftest-check.sh app.log server.log

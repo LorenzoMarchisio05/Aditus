@@ -127,6 +127,24 @@ fn shared(app: &AppHandle) -> &Shared {
     app.state::<Shared>().inner()
 }
 
+/// macOS: WebKit shrinks the viewport by the titlebar obscured inset (32pt) although our layout
+/// already positions webviews below it. Zero the inset so the CSS viewport equals the frame.
+#[cfg(target_os = "macos")]
+pub fn no_inset(wv: &tauri::Webview) {
+    let _ = wv.with_webview(|pw| unsafe {
+        let v = &*(pw.inner() as *const objc2_web_kit::WKWebView);
+        v.setObscuredContentInsets(objc2_foundation::NSEdgeInsets { top: 0.0, left: 0.0, bottom: 0.0, right: 0.0 });
+    });
+}
+/// AppKit re-applies the inset on show/resize, so redo it for every webview then.
+pub fn no_inset_all(app: &AppHandle) {
+    for (_, wv) in app.webviews() {
+        no_inset(&wv);
+    }
+}
+#[cfg(not(target_os = "macos"))]
+pub fn no_inset(_: &tauri::Webview) {}
+
 /// Host of the tab's current entry. Never ask the engine: wry panics (and aborts) when a fresh webview has no URL yet.
 pub fn host_of(app: &AppHandle, wlabel: &str) -> String {
     let g = shared(app).app.lock().unwrap();
@@ -244,6 +262,7 @@ pub fn content_rect(app: &AppHandle) -> (LogicalPosition<f64>, LogicalSize<f64>)
 }
 
 pub fn apply_layout(app: &AppHandle) {
+    no_inset_all(app);
     let (pos, size) = content_rect(app);
     let (id, gen) = {
         let g = shared(app).app.lock().unwrap();
@@ -392,6 +411,7 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
 
     let (pos, size) = content_rect(app);
     let wv = window.add_child(builder, pos, size).map_err(|e| e.to_string())?;
+    no_inset(&wv);
     crate::adblock::attach(app, &wv, &profile_name);
     if !show {
         let _ = wv.hide();

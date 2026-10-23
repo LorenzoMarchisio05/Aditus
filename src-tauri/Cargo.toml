@@ -26,7 +26,7 @@ ureq = "2"
 block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSImage", "NSImageRep", "NSBitmapImageRep", "NSView", "NSResponder"] }
-objc2-foundation = { version = "0.3", features = ["NSString", "NSError", "NSData", "NSDictionary"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSError", "NSData", "NSDictionary", "NSGeometry"] }
 objc2-web-kit = { version = "0.3", features = ["WKContentRuleList", "WKContentRuleListStore", "WKSnapshotConfiguration", "WKUserContentController", "WKWebView", "WKWebViewConfiguration", "block2"] }
 
 [target."cfg(windows)".dependencies]

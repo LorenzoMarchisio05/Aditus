@@ -56,6 +56,7 @@ pub fn run(app: &AppHandle, port: u16) {
             let _ = w.with_webview(|pw| unsafe {
                 let v = &*(pw.inner() as *const objc2_web_kit::WKWebView);
                 let sv = v.superview();
+                eprintln!("[selftest] obscured={:?}", v.obscuredContentInsets());
                 eprintln!("[selftest] frame={:?} super={:?} insets={:?}", v.frame(), sv.map(|s| s.frame()), v.safeAreaInsets());
             });
             eprintln!("[selftest] ui webview size={:?} window inner={:?} scale={:?}", w.size(), win.inner_size(), win.scale_factor());
