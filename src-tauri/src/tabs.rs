@@ -1052,6 +1052,11 @@ pub fn address_bar(app: &AppHandle, tab_id: u32, input: &str) {
     if let Some(view) = internal_view(input.trim()).filter(|v| matches!(v.as_str(), "settings" | "history" | "downloads")) {
         return open_internal(app, &win, &view);
     }
+    // easter egg: ask the door nicely
+    if input.trim().eq_ignore_ascii_case("open sesame") {
+        shared(app).app.lock().unwrap().toast = Some(Toast { message: "Aditus: the door was never locked.".into(), undo: false });
+        return emit(app, false);
+    }
     let url = search::resolve(input, &template);
     if internal {
         open_tab_in(app, &win, Some(url), None, true);
