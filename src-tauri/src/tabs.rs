@@ -1208,6 +1208,14 @@ pub fn address_bar(app: &AppHandle, tab_id: u32, input: &str) {
 }
 
 pub fn assign_mapping(app: &AppHandle, host: &str, profile: &str) {
+    // Mappings match on the host only: drop scheme, path, query and port if a full URL was typed.
+    let host = host.trim().to_lowercase();
+    let host = host.split_once("://").map_or(host.as_str(), |(_, r)| r);
+    let host = host.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = host.rsplit_once(':').filter(|(_, p)| p.chars().all(|c| c.is_ascii_digit())).map_or(host, |(h, _)| h);
+    if host.is_empty() {
+        return;
+    }
     let to_swap = {
         let mut g = shared(app).app.lock().unwrap();
         g.prompt = None;
