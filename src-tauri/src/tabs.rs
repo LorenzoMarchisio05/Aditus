@@ -387,7 +387,7 @@ fn emit(app: &AppHandle, save: bool) {
                     TabView {
                         id: t.id,
                         title: if t.title.is_empty() { if is_blank(&url) { "New Tab".into() } else { url.clone() } } else { t.title.clone() },
-                        host: if internal_view(&url).is_some() { String::new() } else { parsed.as_ref().and_then(|u| u.host_str().map(String::from)).unwrap_or_default() },
+                        host: if is_blank(&url) || internal_view(&url).is_some() { String::new() } else { parsed.as_ref().and_then(|u| u.host_str().map(String::from)).unwrap_or_default() },
                         url: if is_blank(&url) { String::new() } else { url },
                         profile: t.profile.clone(),
                         pinned: t.pinned,
