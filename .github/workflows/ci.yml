@@ -62,17 +62,8 @@ jobs:
         working-directory: src-tauri
       - name: Self-test
         run: |
-          export ADITUS_SERVER_LOG=server.log; rm -f server.log
-          (npm run dev > vite.log 2>&1 &)
-          python3 scripts/selftest-server.py 8765 &
-          sleep 8
-          run() { ADITUS_DATA_DIR="$RUNNER_TEMP/aditus-data" ADITUS_SELFTEST_PORT=8765 timeout 300 src-tauri/target/debug/aditus > app.log 2>&1 || true; }
           if [ "$RUNNER_OS" = Linux ]; then
-            export -f run
-            xvfb-run -a -s "-screen 0 1600x1000x24" dbus-run-session -- bash -c run
+            xvfb-run -a -s "-screen 0 1600x1000x24" dbus-run-session -- scripts/selftest-run.sh src-tauri/target/debug/aditus
           else
-            run
+            scripts/selftest-run.sh src-tauri/target/debug/aditus.exe
           fi
-          cat app.log
-          echo ---- server; cat server.log || true
-          scripts/selftest-check.sh app.log server.log

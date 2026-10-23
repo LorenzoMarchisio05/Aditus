@@ -23,6 +23,7 @@ use tauri::{
 };
 use url::Url;
 
+const LATE_WINDOW: Duration = Duration::from_millis(1500);
 const GESTURE_WINDOW: Duration = Duration::from_millis(2500);
 pub const NEWTAB: &str = "newtab.html";
 
@@ -86,6 +87,8 @@ pub struct App {
     toast: Option<Toast>,
     undo: Option<Undo>,
     gestures: HashMap<u32, Instant>,
+    /// Navigation that would have swapped had the gesture ping arrived first (WebView2 orders them the other way).
+    late: HashMap<u32, (String, String, Instant)>,
     pub overlay_open: bool,
 }
 
@@ -103,6 +106,7 @@ impl App {
             toast: None,
             undo: None,
             gestures: HashMap::new(),
+            late: HashMap::new(),
             overlay_open: false,
         }
     }
@@ -437,6 +441,12 @@ fn on_navigation(app: &AppHandle, tab_id: u32, gen: u32, u: &Url) -> bool {
         if cfg!(debug_assertions) {
             eprintln!("[nav] tab={tab_id} user={user} {u}");
         }
+        g.late.remove(&tab_id);
+        if !user {
+            if let Decision::Swap(p) = nav::decide(&g.cfg.mappings, &profile, &host, true) {
+                g.late.insert(tab_id, (p, u.to_string(), Instant::now()));
+            }
+        }
         let mut d = nav::decide(&g.cfg.mappings, &profile, &host, user);
         if let Decision::Prompt(h) = &d {
             if g.skipped.contains(h) || g.prompt.is_some() {
@@ -510,7 +520,18 @@ pub fn page_ping(app: &AppHandle, webview_label: &str, kind: &str) {
     let s = shared(app);
     match kind {
         "g" => {
-            s.app.lock().unwrap().gestures.insert(id, Instant::now());
+            let late = {
+                let mut g = s.app.lock().unwrap();
+                g.gestures.insert(id, Instant::now());
+                g.late.remove(&id).filter(|(_, _, t)| t.elapsed() < LATE_WINDOW)
+            };
+            if let Some((profile, url, _)) = late {
+                s.app.lock().unwrap().gestures.remove(&id);
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    swap(&app, id, &profile, &url, true);
+                });
+            }
         }
         "p1" | "p0" => {
             let mut g = s.app.lock().unwrap();

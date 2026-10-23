@@ -10,6 +10,6 @@ want "$app" 'palette webview exists=true' 'palette webview'
 want "$app" 'panel webview exists=true' 'panel webview'
 want "$app" '\[selftest\] done' 'self-test finished'
 want "$srv" "cookie=None" 'cookie isolation (clean profile saw no cookie)'
-want "$srv" "ADRESULT.*hidden.*True" 'ad blocker hides cosmetic element'
+want "$srv" "ADRESULT.*'hidden': 'true'" 'ad blocker hides cosmetic element'
 if grep -q panicked "$app"; then echo "FAIL panic"; fail=1; fi
 exit $fail

@@ -247,10 +247,16 @@ pub fn run(app: &AppHandle, port: u16) {
     }
     wait(4);
     crate::hide_panel(app.clone());
+    eprintln!("[selftest] panels cycled");
     crate::find(app.clone(), "report".into(), true);
+    eprintln!("[selftest] find ok");
+    eprintln!("[selftest] done");
+    if std::env::var_os("ADITUS_SELFTEST_EXIT").is_some() {
+        app.exit(0);
+        return;
+    }
     crate::open_devtools(app.clone());
     wait(2);
-    eprintln!("[selftest] done");
 }
 
 #[cfg(target_os = "macos")]
