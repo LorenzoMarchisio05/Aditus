@@ -202,7 +202,7 @@
   {:else if newtab && st}
     <div class="nt">
       <div class="hero">
-        <svg width="44" height="44" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M28 74V26" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M28 74H74A46 46 0 0 0 28 28z" fill="url(#gc)"/><path d="M28 74H74" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg>
+        <svg width="96" height="96" viewBox="21 21 62 62" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M28 74V26" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M28 74H74A46 46 0 0 0 28 28z" fill="url(#gc)"/><path d="M28 74H74" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg>
         {#if st.incognito}
           <h1>Private window</h1>
           <p class="sub">Nothing from this window is saved: no history, cookies, logins or session. Downloads stay.</p>
@@ -510,7 +510,7 @@
   .when, .lbl { font: 500 11px/1 'JetBrains Mono Variable', ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
   .sub { max-width: 440px; color: var(--dim); font-size: 15px; line-height: 1.5; margin-top: 6px; }
   kbd { font: 11px ui-monospace, 'SF Mono', monospace; color: var(--dim); background: var(--bg3); border-radius: 6px; padding: 2px 6px; }
-  .hero svg { filter: drop-shadow(0 0 22px rgba(255, 176, 32, .35)); }
+  .hero svg { filter: drop-shadow(0 0 34px rgba(255, 176, 32, .4)); }
   .sites { display: flex; flex-wrap: wrap; justify-content: center; gap: 22px 18px; max-width: 760px; }
   .site { width: 96px; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0; font-size: 12.5px; color: var(--dim); }
   .site:hover { color: var(--fg); background: none; }
