@@ -313,6 +313,13 @@
     </div>
   {/if}
 
+  {#if st.perm && !collapsed}
+    <div class="card perm">
+      <span><b>{st.perm[0]}</b> wants to use your {st.perm[1]}</span>
+      <div class="row2"><button onclick={() => call('answer_permission', { allow: false })}>Block</button><button class="ok" onclick={() => call('answer_permission', { allow: true })}>Allow</button></div>
+    </div>
+  {/if}
+
   {#if st.toast && !collapsed}
     <div class="card toast">
       <span>{st.toast.message}</span>
@@ -429,6 +436,11 @@
   .group span { flex: 1; }
   .group em { font-style: normal; }
   .card { margin: 6px 10px; padding: 8px 8px 8px 14px; background: var(--bg3); border-radius: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .card.perm { gap: 10px; }
+  .card.perm span { overflow-wrap: anywhere; }
+  .row2 { display: flex; gap: 8px; justify-content: flex-end; }
+  .row2 button { height: 30px; padding: 0 14px; border-radius: 8px; background: var(--bg3); font-weight: 500; }
+  .row2 .ok { background: var(--accent); color: #111114; font-weight: 600; }
   .card.toast { flex-direction: row; align-items: center; justify-content: space-between; }
   .card.toast button { color: var(--accent); font-weight: 600; }
   .foot { display: flex; gap: 6px; padding: 10px 10px 6px; margin: 0 0 0; border-top: 1px solid var(--line); }

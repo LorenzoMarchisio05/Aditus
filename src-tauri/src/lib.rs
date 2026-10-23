@@ -92,6 +92,16 @@ fn assign_mapping(app: AppHandle, host: String, profile: String) {
 }
 
 #[tauri::command(async)]
+fn answer_permission(app: AppHandle, allow: bool) {
+    tabs::answer_permission(&app, allow);
+}
+
+#[tauri::command(async)]
+fn delete_permission(app: AppHandle, host: String, kind: String) {
+    mutate_cfg(&app, |c| c.permissions.retain(|r| !(r.host == host && r.kind == kind)));
+}
+
+#[tauri::command(async)]
 fn skip_prompt(app: AppHandle) {
     tabs::skip_prompt(&app);
 }
@@ -668,7 +678,7 @@ pub fn run() {
             delete_profile, delete_mapping, toggle_allowlist, pin_tab, group_tab, find, find_clear,
             open_devtools, history_search, history_clear, downloads_list, show_palette, hide_palette,
             reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile, profile_menu, tab_menu,
-            adblock_info, check_update, default_browser_settings, set_profile_color, page_context
+            adblock_info, check_update, default_browser_settings, set_profile_color, page_context, answer_permission, delete_permission
         ])
         .on_menu_event(|app, ev| on_menu(app, ev.id().as_ref()))
         .on_window_event(|win, ev| match ev {

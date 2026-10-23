@@ -106,6 +106,14 @@ impl Default for Settings {
     }
 }
 
+/// A remembered answer to a site asking for camera, microphone, location or notifications.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PermRule {
+    pub host: String,
+    pub kind: String,
+    pub allow: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     pub settings: Settings,
@@ -114,6 +122,8 @@ pub struct Config {
     pub mappings: Vec<Mapping>,
     #[serde(default)]
     pub allowlist: Vec<String>,
+    #[serde(default)]
+    pub permissions: Vec<PermRule>,
 }
 
 impl Default for Config {
@@ -123,6 +133,7 @@ impl Default for Config {
             profiles: vec![Profile { name: "Default".into(), id: uuid::Uuid::new_v4().to_string(), color: None }],
             mappings: vec![],
             allowlist: vec![],
+            permissions: vec![],
         }
     }
 }

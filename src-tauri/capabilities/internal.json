@@ -42,7 +42,7 @@
     "allow-hide-panel",
     "allow-switch-profile",
     "allow-adblock-info",
-    "allow-check-update",
+    "allow-answer-permission", "allow-delete-permission", "allow-check-update",
     "allow-default-browser-settings",
     "allow-set-profile-color"
   ]

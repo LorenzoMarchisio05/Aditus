@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::{
-    webview::{DownloadEvent, NewWindowResponse, PageLoadEvent},
+    webview::{DownloadEvent, NewWindowResponse, PageLoadEvent, PermissionKind, PermissionResponse},
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl,
 };
 use url::Url;
@@ -100,6 +100,10 @@ pub struct App {
     next_id: u32,
     next_win: u32,
     prompt: Option<String>,
+    /// A site asked for a device permission with no saved answer: (host, kind, tab).
+    perm_prompt: Option<(String, String, u32)>,
+    /// Answers given in private windows; never written to disk.
+    perm_tmp: Vec<config::PermRule>,
     skipped: HashSet<String>,
     toast: Option<Toast>,
     undo: Option<Undo>,
@@ -120,6 +124,8 @@ impl App {
             next_id: 1,
             next_win: 2,
             prompt: None,
+            perm_prompt: None,
+            perm_tmp: vec![],
             skipped: HashSet::new(),
             toast: None,
             undo: None,
@@ -347,6 +353,7 @@ struct Snapshot<'a> {
     active: u32,
     cfg: &'a Config,
     prompt: Option<String>,
+    perm: Option<(&'a str, &'a str)>,
     toast: Option<Toast>,
     adblock_site: bool,
     incognito: bool,
@@ -395,6 +402,7 @@ fn emit(app: &AppHandle, save: bool) {
             active: w.active,
             cfg: &g.cfg,
             prompt: g.prompt.clone(),
+            perm: g.perm_prompt.as_ref().filter(|p| g.win_of(p.2) == *win).map(|p| (p.0.as_str(), p.1.as_str())),
             toast: g.toast.clone(),
             adblock_site: !g.cfg.allowlist.contains(&active_host),
             incognito: w.incognito,
@@ -545,8 +553,8 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
         WebviewUrl::External(Url::parse(&url).map_err(|e| e.to_string())?)
     };
 
-    let (a_nav, a_title, a_load, a_new, a_dl) =
-        (app.clone(), app.clone(), app.clone(), app.clone(), app.clone());
+    let (a_nav, a_title, a_load, a_new, a_dl, a_perm) =
+        (app.clone(), app.clone(), app.clone(), app.clone(), app.clone(), app.clone());
 
     let mut builder = WebviewBuilder::new(label(tab_id, gen), wurl);
     // Embedded WKWebView omits the Safari token; YouTube serves a blank page without it.
@@ -564,6 +572,7 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
         .initialization_script(PAGE_SCRIPT)
         .initialization_script(if adblock_on { YT_SCRIPT } else { "" })
         .on_navigation(move |u| on_navigation(&a_nav, tab_id, gen, u))
+        .on_permission_request(move |wv, kind| on_permission(&a_perm, tab_id, wv.url().ok().and_then(|u| u.host_str().map(String::from)), kind))
         .on_document_title_changed(move |_, title| {
             let s = shared(&a_title);
             let url = {
@@ -702,6 +711,55 @@ fn on_navigation(app: &AppHandle, tab_id: u32, gen: u32, u: &Url) -> bool {
             false
         }
     }
+}
+
+/// Camera, microphone, location and notification requests. The handler must answer at once, so an
+/// unknown site is denied and a card in the sidebar asks; allowing reloads the page to ask again.
+fn on_permission(app: &AppHandle, tab_id: u32, host: Option<String>, kind: PermissionKind) -> PermissionResponse {
+    let name = match kind {
+        PermissionKind::Camera => "camera",
+        PermissionKind::Microphone => "microphone",
+        PermissionKind::Geolocation => "location",
+        PermissionKind::Notifications => "notifications",
+        _ => return PermissionResponse::Default,
+    };
+    let Some(host) = host else { return PermissionResponse::Deny };
+    let mut g = shared(app).app.lock().unwrap();
+    let saved = g.cfg.permissions.iter().chain(&g.perm_tmp).find(|r| r.host == host && r.kind == name).map(|r| r.allow);
+    match saved {
+        Some(true) => PermissionResponse::Allow,
+        Some(false) => PermissionResponse::Deny,
+        None => {
+            g.perm_prompt = Some((host, name.into(), tab_id));
+            drop(g);
+            emit_state(app);
+            PermissionResponse::Deny
+        }
+    }
+}
+
+/// The sidebar card's answer. Private tabs keep it for the session only.
+pub fn answer_permission(app: &AppHandle, allow: bool) {
+    let (rule, tab, private) = {
+        let mut g = shared(app).app.lock().unwrap();
+        let Some((host, kind, tab)) = g.perm_prompt.take() else { return };
+        let private = g.tabs.iter().find(|t| t.id == tab).is_some_and(|t| t.private);
+        (config::PermRule { host, kind, allow }, tab, private)
+    };
+    {
+        let s = shared(app);
+        let mut g = s.app.lock().unwrap();
+        if private {
+            g.perm_tmp.push(rule);
+        } else {
+            g.cfg.permissions.push(rule);
+            g.cfg.save(&s.cfg_path);
+        }
+    }
+    if allow {
+        reload(app, tab);
+    }
+    emit_state(app);
 }
 
 fn on_page_load(app: &AppHandle, tab_id: u32, gen: u32, url: String, started: bool) {

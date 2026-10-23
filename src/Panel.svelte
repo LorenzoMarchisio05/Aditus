@@ -334,6 +334,19 @@
             <select bind:value={newHostProfile}>{#each st.cfg.profiles as p}<option>{p.name}</option>{/each}</select>
             <button class="solid">＋ Add site</button>
           </form>
+          <h2>Site permissions</h2>
+          <div class="table">
+            {#each st.cfg.permissions ?? [] as r}
+              <div class="trow">
+                <span class="mono grow">{r.host}</span>
+                <span class="meta w">{r.kind}</span>
+                <span class="meta w">{r.allow ? 'allowed' : 'blocked'}</span>
+                <button class="ghost" onclick={() => call('delete_permission', { host: r.host, kind: r.kind })}>Remove</button>
+              </div>
+            {:else}
+              <div class="trow meta">None yet. Sites ask when they want your camera, microphone or location.</div>
+            {/each}
+          </div>
           <p class="meta">Login and OAuth hosts (accounts.*, auth.*, sso.*) are exempt automatically, so sign-in flows are never interrupted.</p>
         </section>
         <section id="sec-ad-blocker" class="sec">
