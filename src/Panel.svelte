@@ -150,14 +150,24 @@
     if (d < 70 && mode !== 'sleep' && Date.now() > calm) {
       calm = Date.now() + 5000;
       startled = true;
+      say('Whoa!', 1200);
       setTimeout(() => (startled = false), 600);
     }
   }
+  const LINES = ['Open the way.', 'Where to?', 'Try ⌘L, it is fast.', 'I live in the new tab.', 'Door is open.', 'Need a break?', 'Tab hoarder detected.', 'No ads here. Ssh.', 'Walk with me.', 'Stay curious.', 'Did you close that tab?'];
+  const HUSH = ['Shh. Nobody saw.', 'Private mode. I saw nothing.', 'Incognito. Very mysterious.', 'Your secret is safe.', 'I have shades on.'];
+  let sayTimer;
+  function say(text, ms = 2400) {
+    said = text;
+    clearTimeout(sayTimer);
+    sayTimer = setTimeout(() => (said = false), ms);
+  }
+  const line = () => { const l = st.incognito ? HUSH : LINES; return l[Math.floor(Math.random() * l.length)]; };
   function poke() {
-    hop = said = true;
+    hop = true;
     wake?.();
+    say(line());
     setTimeout(() => (hop = false), 600);
-    setTimeout(() => (said = false), 2200);
   }
   $effect(() => {
     if (!newtab || !floorEl) return;
@@ -181,7 +191,7 @@
     (async () => {
       let last = '';
       while (alive) {
-        const acts = { walk, wave: () => doing('wave', 1900), jump: () => doing('jump', 700), spin: () => doing('spin', 950), dance: () => doing('dance', 2600), stretch: () => doing('stretch', 1700), sit: () => doing('sit', 3200), sneeze: async () => { said = 'achoo'; setTimeout(() => (said = false), 1200); await doing('sneeze', 1300); }, follow: async () => { chase = true; await walk(); chase = false; }, sleep: () => doing('sleep', 6500), rest: () => doing('idle', 2500) };
+        const acts = { walk, wave: () => { say('Hi!', 1800); return doing('wave', 1900); }, jump: () => doing('jump', 700), spin: () => doing('spin', 950), dance: () => { say('♪', 2400); return doing('dance', 2600); }, stretch: () => doing('stretch', 1700), sit: () => doing('sit', 3200), sneeze: async () => { say('Achoo!', 1500); await doing('sneeze', 1300); }, follow: async () => { chase = true; await walk(); chase = false; }, sleep: () => { say('Zzz…', 1600); return doing('sleep', 6500); }, rest: () => { say(line(), 2800); return doing('idle', 3000); } };
         const bag = ['walk', 'walk', 'walk', 'follow', 'follow', 'wave', 'jump', 'spin', 'dance', 'stretch', 'sit', 'sneeze', 'sleep', 'rest'].filter((k) => k !== last);
         last = bag[Math.floor(Math.random() * bag.length)];
         await acts[last]();
@@ -285,7 +295,7 @@
       <div class="floor" bind:this={floorEl} aria-hidden="true">
         <div class="walker" style="left:{x}px; --d:{dur}s">
           <button class="mascot m-{mode}" class:hop class:startle={startled} bind:this={mascotEl} onclick={poke} tabindex="-1" aria-label="Cone">
-            {#if said}<span class="say">{said === 'achoo' ? 'Achoo!' : st.incognito ? 'Shh. Nobody saw.' : 'Open the way.'}</span>{/if}
+            {#if said}<span class="say">{said}</span>{/if}
             {#if mode === 'sleep'}<span class="zzz">z<small>z</small></span>{/if}
             <svg class="fig" style="transform: scaleX({face})" width="50" height="52" viewBox="0 0 50 52">
               <defs><linearGradient id="mg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs>
