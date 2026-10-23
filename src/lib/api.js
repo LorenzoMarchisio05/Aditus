@@ -13,5 +13,5 @@ export function hue(name) {
   for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
   return h;
 }
-// Default profile wears the brand amber; the rest get a stable hue.
-export const color = (name) => (name === 'Default' ? '#ffb020' : `hsl(${hue(name)} 65% 58%)`);
+// Default profile is a neutral dot; the rest get a stable hue.
+export const color = (name) => (name === 'Default' ? 'var(--fg)' : `hsl(${hue(name)} 55% 62%)`);

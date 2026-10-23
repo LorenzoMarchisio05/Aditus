@@ -42,6 +42,6 @@
 </form>
 
 <style>
-  form { height: 100vh; padding: 12px; background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; }
-  input { width: 100%; height: 100%; font-size: 16px; padding: 0 12px; }
+  form { height: 100vh; padding: 12px; background: var(--bg2); border: 1px solid var(--line); border-radius: 20px; box-shadow: 0 24px 60px rgba(0,0,0,.5); }
+  input { width: 100%; height: 100%; font-size: 18px; padding: 0 18px; background: var(--bg); border: 1.5px solid var(--accent); border-radius: 14px; box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 12%, transparent); }
 </style>

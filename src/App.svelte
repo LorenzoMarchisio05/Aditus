@@ -5,8 +5,8 @@
   import { call, on, onState, color } from './lib/api.js';
 
   const COLLAPSED = 52;
-  const TOP = 44;
-  const FIND = 36;
+  const TOP = 52;
+  const FIND = 40;
 
   let st = $state({ tabs: [], active: 0, cfg: null, prompt: null, toast: null, adblock_site: true });
   let width = $state(236);
@@ -233,13 +233,12 @@
     onkeydown={(e) => e.key === 'Enter' && call('activate_tab', { id: t.id })}
     oncontextmenu={(e) => ctx(e, t)}
   >
-    <span class="pbar" style="background:{color(t.profile)}"></span>
     <span class="fav">
-      {#if t.loading}<span class="spin"></span>{:else if favicon(t)}<img src={favicon(t)} alt="" onerror={(e) => (e.currentTarget.style.display = 'none')} />{/if}
+      {#if t.loading}<span class="spin"></span>{:else if favicon(t)}<img src={favicon(t)} alt="" onerror={(e) => (e.currentTarget.style.display = 'none')} />{:else}{(t.host || t.title || '·')[0].toUpperCase()}{/if}
     </span>
     {#if !collapsed}
-      <span class="title">{t.title}{#if t.host}<span class="host"> {t.host}</span>{/if}</span>
-      <span class="tag" style="color:{color(t.profile)}" title={t.profile}>{t.profile.slice(0, 3).toUpperCase()}</span>
+      <span class="title">{t.title}</span>
+      <span class="tag" title={t.profile}><i class="dot" style="background:{color(t.profile)}"></i>{t.profile.slice(0, 3).toLowerCase()}</span>
       {#if !t.pinned}
         <button class="x" onclick={(e) => { e.stopPropagation(); call('close_tab', { id: t.id }); }} aria-label="Close tab">×</button>
       {/if}
@@ -250,6 +249,12 @@
 
 <aside class="side" style="width:{sidebarW}px; padding-top:{mac ? 38 : 0}px">
   {#if mac}<div class="drag" data-tauri-drag-region></div>{/if}
+  {#if !collapsed}
+    <div class="brand">
+      <svg width="24" height="24" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M46 18h8l15 60H31z" fill="url(#gc)" stroke="url(#gc)" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="var(--fg)" stroke-width="5" stroke-linecap="round"/></svg>
+      aditus
+    </div>
+  {/if}
   {#if collapsed}
     <button class="cbtn" onclick={() => settings({ sidebar_collapsed: false })} title="Expand sidebar" aria-label="Expand sidebar">☰</button>
   {/if}
@@ -259,11 +264,12 @@
   {/if}
 
   {#if pinned.length}
+    {#if !collapsed}<div class="lbl">PINNED</div>{/if}
     <div class="pins">{#each pinned as t (t.id)}{@render pin(t)}{/each}</div>
   {/if}
 
+  {#if !collapsed}<div class="lbl">TABS · {st.tabs.filter((t) => !t.pinned).length}</div>{/if}
   <div class="tabs">
-
     {#each loose as t (t.id)}{@render row(t)}{/each}
     {#each groups as g (g.name)}
       {#if !collapsed}
@@ -305,12 +311,12 @@
       <button disabled={!tab?.can_back} onclick={() => call('back')} aria-label="Back"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
       <button disabled={!tab?.can_forward} onclick={() => call('forward')} aria-label="Forward"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
       <button onclick={() => call('reload')} aria-label="Reload"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"/></svg></button>
-      <div class="pill">
-        {#if tab && !tab.url?.startsWith('aditus://')}
-          <button class="seg" style="background:{color(tab.profile)}" title="Profile for this site" onclick={() => call('profile_menu')}>
-            {tab.profile}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-          </button>
-        {/if}
+      {#if tab && !tab.url?.startsWith('aditus://')}
+        <button class="seg" title="Profile for this site" onclick={() => call('profile_menu')}>
+          <i class="dot" style="background:{color(tab.profile)}"></i>{tab.profile}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+      {/if}
+      <div class="pill" class:focus={editing}>
         <form onsubmit={submitAddress}>
           <input
             class:ghost={!editing && tab?.url}
@@ -382,71 +388,73 @@
 {/if}
 
 <style>
-  .side { position: fixed; inset: 0 auto 0 0; background: var(--bg2); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
-  .tabsearch { margin: 0 8px 4px; }
-  .tabs { flex: 1; overflow-y: auto; padding: 4px 6px; }
-  .tab { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 8px; cursor: default; position: relative; }
-  .tab:hover { background: var(--bg3); }
-  .tab { padding-left: 0; overflow: hidden; }
-  .tab.active { background: var(--bg3); }
-  .pbar { width: 4px; align-self: stretch; flex: none; opacity: .5; }
-  .tab.active .pbar { opacity: 1; }
-  .host { color: var(--dim); font-weight: 400; margin-left: 6px; }
-  .tag { font-size: 9.5px; font-weight: 700; letter-spacing: .03em; flex: none; }
-  .seg { font-size: 12px; font-weight: 700; color: #111114; padding: 0 12px; height: 100%; border-radius: 0; display: flex; align-items: center; gap: 6px; cursor: pointer; flex: none; }
-  .tab.discarded .title { opacity: .55; }
-  .fav { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
-  .fav img { width: 16px; height: 16px; border-radius: 3px; }
-  .title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .x { padding: 0 6px; opacity: 0; line-height: 1.2; }
+  .side { position: fixed; inset: 0 auto 0 0; background: var(--sb); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding-bottom: 4px; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 8px 18px 12px; font: 800 20px/1 'Bricolage Grotesque Variable', system-ui, sans-serif; letter-spacing: -.02em; flex: none; }
+  .lbl { font: 500 10.5px ui-monospace, 'SF Mono', monospace; letter-spacing: .1em; color: var(--dim); padding: 10px 18px 4px; }
+  .tabsearch { margin: 0 10px 4px; }
+  .tabs { flex: 1; overflow-y: auto; padding: 2px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .tab { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border-radius: 10px; cursor: default; position: relative; color: var(--dim); flex: none; }
+  .tab:hover { background: var(--bg2); color: var(--fg); }
+  .tab.active { background: var(--bg3); color: var(--fg); }
+  .tab.active::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--accent); }
+  .tab.discarded { opacity: .55; }
+  .tag { display: flex; align-items: center; gap: 5px; font: 10px ui-monospace, 'SF Mono', monospace; color: var(--dim); flex: none; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
+  .fav { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border-radius: 6px; background: var(--bg2); border: 1px solid var(--line); font-size: 11px; font-weight: 600; color: var(--fg); overflow: hidden; }
+  .fav img { width: 14px; height: 14px; border-radius: 3px; }
+  .title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
+  .x { padding: 0 6px; opacity: 0; line-height: 1.2; color: var(--dim); }
   .tab:hover .x { opacity: 1; }
   .spin { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s .7s linear infinite; }
   @keyframes s { to { transform: rotate(360deg); } }
   hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
-  .group { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); font-weight: 600; padding: 10px 8px 3px; }
+  .group { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; font: 500 10.5px ui-monospace, 'SF Mono', monospace; text-transform: uppercase; letter-spacing: .1em; color: var(--dim); padding: 10px 10px 3px; }
   .group i { width: 6px; height: 6px; border-radius: 2px; background: var(--dim); }
   .group span { flex: 1; }
-  .group em { font: 500 10.5px ui-monospace, monospace; font-style: normal; }
-  .card { margin: 6px; padding: 8px; background: var(--bg3); border-radius: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .group em { font-style: normal; }
+  .card { margin: 6px 10px; padding: 8px 8px 8px 14px; background: var(--bg3); border-radius: 12px; display: flex; flex-direction: column; gap: 6px; }
   .card.toast { flex-direction: row; align-items: center; justify-content: space-between; }
-  .choices { display: flex; flex-wrap: wrap; gap: 4px; }
-  .choices button { border: 1px solid; }
-  .dim { color: var(--dim); }
-  .foot { display: flex; gap: 4px; padding: 8px; }
-  .newtab { flex: 1; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--bg3); border-radius: 9px; font-weight: 500; }
-  .sq { width: 32px; height: 32px; padding: 0; display: grid; place-items: center; background: var(--bg3); color: var(--dim); border-radius: 9px; }
-  kbd { font: 10.5px ui-monospace, monospace; color: var(--dim); }
+  .card.toast button { color: var(--accent); font-weight: 600; }
+  .foot { display: flex; gap: 6px; padding: 10px 10px 6px; margin: 0 0 0; border-top: 1px solid var(--line); }
+  .newtab { flex: 1; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--bg2); border-radius: 10px; font-weight: 500; color: var(--dim); }
+  .newtab:hover { color: var(--fg); }
+  .sq { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; color: var(--dim); border-radius: 10px; }
+  kbd { font: 11px ui-monospace, 'SF Mono', monospace; color: var(--dim); background: var(--bg3); border-radius: 6px; padding: 2px 6px; }
   .grow { flex: 1; }
   .cbtn { margin: 8px auto 4px; }
-  .pins { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 8px; }
-  .pin { flex: 1; min-width: 34px; height: 34px; padding: 0; border-radius: 9px; background: var(--bg3); display: grid; place-items: center; position: relative; opacity: .85; }
-  .pin.active { opacity: 1; outline: 1.5px solid var(--accent); }
+  .pins { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 10px 6px; }
+  .pin { flex: 1; min-width: 38px; height: 38px; padding: 0; border-radius: 10px; background: var(--bg2); display: grid; place-items: center; position: relative; opacity: .85; }
+  .pin.active { opacity: 1; background: var(--bg3); outline: 1.5px solid var(--accent); }
   .pin img { width: 16px; height: 16px; border-radius: 4px; }
-  .pu { position: absolute; left: 6px; right: 6px; bottom: 3px; height: 2.5px; border-radius: 2px; }
-  .pill { flex: 1; height: 34px; display: flex; align-items: center; border-radius: 10px; background: var(--bg3); overflow: hidden; margin: 0 6px; }
-  .pill form { flex: 1; position: relative; height: 100%; }
-  .pill input { width: 100%; height: 100%; border: 0; background: none; padding: 0 12px; font-size: 13px; }
-  .pill input.ghost { color: transparent; }
-  .shown { position: absolute; inset: 0; padding: 0 12px; display: flex; align-items: center; pointer-events: none; color: var(--dim); font-size: 13px; white-space: nowrap; overflow: hidden; }
-  .shown b { color: #fff; font-weight: 600; }
-  .pill kbd { padding-right: 12px; }
-  .shield { height: 30px; background: #123a2c; color: #5dffb8; border-radius: 9px; padding: 0 10px; }
-  .shield.off { background: #3a1620; color: var(--danger); }
-  .grip { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; }
-  .top { position: fixed; top: 0; right: 0; background: var(--bg2); border-bottom: 1px solid var(--line); }
+  .pu { position: absolute; right: 5px; bottom: 5px; width: 7px; height: 7px; border-radius: 50%; }
+  .top { position: fixed; top: 0; right: 0; background: var(--bg); border-bottom: 1px solid var(--line); }
   .drag { position: absolute; top: 0; left: 0; right: 0; height: 38px; }
-  .bar { height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 8px; }
+  .bar { height: 52px; display: flex; align-items: center; gap: 6px; padding: 0 14px; }
+  .bar > button { width: 34px; height: 34px; padding: 0; display: grid; place-items: center; border-radius: 10px; color: var(--dim); }
+  .bar > button:hover:not(:disabled) { color: var(--fg); }
+  .bar > .seg { width: auto; padding: 0 12px; display: flex; align-items: center; gap: 8px; background: var(--bg2); border: 1px solid var(--line); color: var(--fg); font-weight: 500; flex: none; }
+  .pill { flex: 1; height: 36px; display: flex; align-items: center; border-radius: 12px; background: var(--bg2); border: 1px solid var(--line); overflow: hidden; }
+  .pill.focus { border-color: var(--accent); }
+  .pill form { flex: 1; position: relative; height: 100%; }
+  .pill input { width: 100%; height: 100%; border: 0; background: none; padding: 0 14px; font-size: 15px; }
+  .pill input.ghost { color: transparent; }
+  .shown { position: absolute; inset: 0; padding: 0 14px; display: flex; align-items: center; pointer-events: none; color: var(--dim); font-size: 15px; white-space: nowrap; overflow: hidden; }
+  .shown b { color: var(--fg); font-weight: 600; }
+  .pill kbd { margin-right: 12px; }
+  .bar > .shield { color: var(--accent); background: var(--bg2); border: 1px solid var(--line); }
+  .bar > .shield.off { color: var(--dim); }
+  .grip { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; }
   form { flex: 1; }
   form input { width: 100%; }
-  .find { height: 36px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 0 12px; }
-  .find input { width: 260px; height: 28px; background: var(--bg3); border: 0; border-radius: 8px; }
-  .find button { width: 28px; height: 28px; padding: 0; background: var(--bg3); border-radius: 8px; }
-  .ctx { position: fixed; z-index: 10; background: #1c1530; border-radius: 12px; padding: 6px; display: flex; flex-direction: column; width: 220px; box-shadow: 0 18px 50px rgba(0,0,0,.45); }
-  .ctx button { text-align: left; height: 30px; border-radius: 7px; display: flex; align-items: center; gap: 8px; }
-  .ctx .sel { background: var(--bg3); font-weight: 600; }
-  .ctx i { width: 10px; height: 10px; border-radius: 3px; display: block; }
-  .ctx h6 { margin: 6px 10px 2px; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
-  .ctx hr { margin: 5px 4px; }
+  .find { height: 40px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 0 14px; border-top: 1px solid var(--line); }
+  .find input { width: 260px; height: 30px; background: var(--bg2); border-radius: 9px; }
+  .find button { width: 30px; height: 30px; padding: 0; background: var(--bg2); border-radius: 9px; }
+  .ctx { position: fixed; z-index: 10; background: var(--bg2); border: 1px solid var(--line); border-radius: 16px; padding: 8px; display: flex; flex-direction: column; width: 232px; box-shadow: 0 24px 60px rgba(0,0,0,.5); }
+  .ctx button { text-align: left; height: 36px; border-radius: 10px; display: flex; align-items: center; gap: 10px; padding: 0 12px; font-weight: 500; }
+  .ctx .sel { background: var(--bg3); }
+  .ctx i { width: 9px; height: 9px; border-radius: 50%; display: block; }
+  .ctx h6 { margin: 8px 12px 4px; font: 500 10.5px ui-monospace, 'SF Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+  .ctx hr { margin: 6px 4px; }
   .ctx form { padding: 2px; }
   .ctx input { width: 100%; }
 </style>

@@ -340,103 +340,106 @@
 
 <style>
   .panel {
-    --card: var(--bg3);
-    --hi: color-mix(in srgb, var(--fg) 12%, var(--bg3));
+    --card: var(--bg2);
+    --hi: var(--bg3);
     height: 100vh; overflow: hidden; background: var(--bg); color: var(--fg);
   }
   .grow { flex: 1; min-width: 0; }
-  small { display: block; color: var(--dim); font-size: 12px; font-weight: 400; margin-top: 2px; }
-  .meta { color: var(--dim); font-size: 12px; }
-  .mono { font-family: ui-monospace, 'JetBrains Mono', monospace; font-size: 12px; }
-  h1 { font-size: 24px; letter-spacing: -.01em; margin: 0; display: flex; align-items: baseline; gap: 12px; }
-  h1 small { display: inline; margin: 0; font-size: 12.5px; }
-  h2 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); margin: 18px 0 8px; font-weight: 600; }
-  .card { background: var(--card); border-radius: 14px; }
-  .ghost { border: 1px solid var(--line); color: #c9bfe6; font-weight: 500; height: 28px; }
-  .solid { background: #f1eefb; color: #111114; font-weight: 700; height: 34px; border-radius: 10px; padding: 0 14px; }
-  .solid:hover:not(:disabled) { background: #fff; }
+  small { display: block; color: var(--dim); font-size: 13px; font-weight: 400; margin-top: 2px; }
+  .meta { color: var(--dim); font-size: 13px; }
+  .mono { font-family: ui-monospace, 'SF Mono', monospace; font-size: 12px; }
+  h1 { font-family: 'Bricolage Grotesque Variable', system-ui, sans-serif; font-weight: 800; font-size: 44px; line-height: 1; letter-spacing: -.03em; margin: 0; display: flex; align-items: baseline; gap: 14px; }
+  h1 small { display: inline; margin: 0; font-family: 'Instrument Sans Variable', system-ui, sans-serif; font-size: 14px; font-weight: 400; letter-spacing: 0; }
+  h2 { font: 500 10.5px ui-monospace, 'SF Mono', monospace; text-transform: uppercase; letter-spacing: .1em; color: var(--dim); margin: 18px 0 8px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; }
+  .ghost { border: 1px solid var(--line); color: var(--dim); font-weight: 500; height: 34px; border-radius: 10px; padding: 0 14px; }
+  .solid { background: var(--accent); color: #111114; font-weight: 600; height: 34px; border-radius: 10px; padding: 0 14px; }
+  .solid:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
   .x { color: var(--dim); }
-  input.search, .row input, .add input { height: 36px; background: var(--card); border: 0; border-radius: 10px; padding: 0 14px; }
+  input.search, .row input, .add input { height: 38px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 0 14px; }
 
-  .nt { height: 100%; display: flex; flex-direction: column; align-items: center; padding-top: 150px; gap: 36px; overflow-y: auto; }
-  .hero { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-  .hero h1 { font-size: 64px; font-weight: 800; letter-spacing: -.035em; line-height: 1; display: block; }
-  .big { font-size: 14px; }
-  .nsearch { width: 620px; max-width: 90%; height: 52px; border-radius: 14px; background: var(--card); display: flex; align-items: center; gap: 12px; padding: 0 18px; color: var(--dim); }
-  .nsearch input { flex: 1; height: 100%; background: none; border: 0; font-size: 15px; color: #f1eefb; padding: 0; }
-  kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
-  .sites { display: flex; gap: 28px; }
-  .site { width: 84px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0; font-size: 12px; font-weight: 500; }
+  .nt { height: 100%; display: flex; flex-direction: column; align-items: center; padding-top: 130px; gap: 44px; overflow-y: auto; }
+  .hero { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  .hero h1 { font-size: 84px; letter-spacing: -.04em; display: block; }
+  .big { font-size: 17px; }
+  .nsearch { width: 680px; max-width: 90%; height: 60px; border-radius: 18px; background: var(--card); border: 1.5px solid var(--line); display: flex; align-items: center; gap: 14px; padding: 0 20px; color: var(--dim); }
+  .nsearch:focus-within { border-color: var(--accent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent); }
+  .nsearch input { flex: 1; height: 100%; background: none; border: 0; font-size: 17px; color: var(--fg); padding: 0; }
+  kbd { font: 11px ui-monospace, 'SF Mono', monospace; color: var(--dim); background: var(--bg3); border-radius: 6px; padding: 2px 6px; }
+  .sites { display: flex; gap: 12px; }
+  .site { width: 124px; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0; font-size: 13px; color: var(--dim); }
   .site > span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ico { width: 64px; height: 64px; border-radius: 18px; background: var(--card); display: grid; place-items: center; position: relative; font-size: 22px; }
-  .ico i { position: absolute; left: 10px; right: 10px; bottom: 7px; height: 3px; border-radius: 2px; }
+  .site:hover { color: var(--fg); background: none; }
+  .ico { width: 64px; height: 64px; border-radius: 18px; background: var(--card); border: 1px solid var(--line); display: grid; place-items: center; position: relative; font: 800 26px 'Bricolage Grotesque Variable', system-ui, sans-serif; color: var(--fg); }
+  .ico i { position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; border: 3px solid var(--bg); }
   .lib { display: flex; height: 100%; }
-  .hist { flex: 1; min-width: 0; padding: 28px 36px; display: flex; flex-direction: column; gap: 14px; border-right: 1px solid var(--line); }
-  .dl { width: 430px; flex: none; padding: 28px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+  .hist { flex: 1; min-width: 0; padding: 40px 56px; display: flex; flex-direction: column; gap: 18px; border-right: 1px solid var(--line); }
+  .dl { width: 430px; flex: none; padding: 40px 28px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
   header { display: flex; align-items: center; gap: 12px; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; }
-  .chips button { height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 7px; background: var(--card); font-size: 12px; }
-  .chips button.on { background: #f1eefb; color: #111114; font-weight: 600; }
-  .chips i, .who i { width: 8px; height: 8px; border-radius: 2px; display: block; }
+  .chips button { height: 28px; display: flex; align-items: center; gap: 7px; padding: 0 12px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); font-size: 13px; }
+  .chips button.on { background: var(--accent); border-color: var(--accent); color: #111114; font-weight: 600; }
+  .chips i, .who i { width: 8px; height: 8px; border-radius: 50%; display: block; }
   .list { flex: 1; overflow-y: auto; }
-  .day { padding: 14px 0 6px; color: var(--dim); font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; font-weight: 600; }
-  .hrow { display: flex; align-items: center; gap: 12px; width: 100%; height: 34px; border-radius: 0; border-bottom: 1px solid var(--card); text-align: left; padding: 0 2px; }
-  .time { font-family: ui-monospace, monospace; font-size: 11px; color: var(--dim); width: 70px; flex: none; white-space: nowrap; }
-  .pb { width: 4px; height: 16px; border-radius: 2px; flex: none; }
+  .day { padding: 16px 0 8px; color: var(--dim); font: 500 10.5px ui-monospace, 'SF Mono', monospace; letter-spacing: .1em; text-transform: uppercase; }
+  .hrow { display: flex; align-items: center; gap: 14px; width: 100%; height: 52px; border-radius: 0; border-bottom: 1px solid var(--line); text-align: left; padding: 0 6px; }
+  .hrow:hover { background: var(--bg2); }
+  .time { font: 12px ui-monospace, 'SF Mono', monospace; color: var(--dim); width: 70px; flex: none; white-space: nowrap; }
+  .pb { width: 7px; height: 7px; border-radius: 50%; flex: none; }
   .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
   .empty { padding: 16px 0; }
-  .dcard { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
-  .ext { width: 32px; height: 32px; border-radius: 9px; background: var(--hi); display: grid; place-items: center; font-family: ui-monospace, monospace; font-size: 9.5px; color: var(--accent); flex: none; }
+  .dcard { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
+  .ext { width: 34px; height: 34px; border-radius: 10px; background: var(--bg3); display: grid; place-items: center; font: 10px ui-monospace, 'SF Mono', monospace; color: var(--accent); flex: none; }
   .name { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .state { font-size: 12px; font-weight: 600; }
 
   .settings { display: flex; height: 100%; }
-  aside { width: 236px; flex: none; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
-  .title { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--accent); color: #111114; margin-bottom: 10px; }
-  .title b { display: block; font-size: 13.5px; }
-  .title small { color: inherit; opacity: .7; font-size: 11px; margin: 0; }
-  .logo { width: 28px; height: 28px; border-radius: 9px; background: #111114; color: var(--accent); display: grid; place-items: center; font-weight: 700; }
-  .logo.big { width: 56px; height: 56px; border-radius: 16px; background: var(--accent); color: #111114; font-size: 28px; font-weight: 800; }
-  .nav { height: 32px; text-align: left; padding: 0 12px; border-radius: 8px; color: #c9bfe6; font-weight: 500; }
-  .nav.on { background: var(--hi); color: #fff; font-weight: 600; }
-  main { flex: 1; min-width: 0; margin: 8px 8px 8px 0; border-radius: 12px; background: var(--bg2); padding: 32px 44px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; align-content: start; }
+  aside { width: 220px; flex: none; padding: 36px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--line); }
+  .title { display: flex; align-items: center; gap: 10px; padding: 0 12px 16px; }
+  .title b { display: block; font: 800 18px 'Bricolage Grotesque Variable', system-ui, sans-serif; letter-spacing: -.02em; }
+  .title small { font-size: 11px; margin: 0; }
+  .logo { width: 28px; height: 28px; border-radius: 9px; background: #111114; color: var(--accent); display: grid; place-items: center; flex: none; }
+  .logo.big { width: 56px; height: 56px; border-radius: 16px; }
+  .nav { height: 38px; text-align: left; padding: 0 12px; border-radius: 10px; color: var(--dim); font-weight: 500; }
+  .nav.on { background: var(--bg3); color: var(--fg); }
+  main { flex: 1; min-width: 0; padding: 40px 56px; max-width: 880px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; align-content: start; }
   .list2 { display: flex; flex-direction: column; }
-  .item, .kv { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-top: 1px solid var(--line); }
+  .item, .kv { display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-top: 1px solid var(--line); }
   .item:first-child, .kv:first-child { border-top: 0; }
   .item b { display: block; font-weight: 600; }
-  .sw { appearance: none; width: 38px; height: 22px; border-radius: 11px; background: var(--hi); border: 0; position: relative; padding: 0; flex: none; cursor: pointer; }
-  .sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .12s; }
+  .sw { appearance: none; width: 42px; height: 24px; border-radius: 12px; background: var(--bg3); border: 0; position: relative; padding: 0; flex: none; cursor: pointer; }
+  .sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--dim); transition: left .12s; }
   .sw:checked { background: var(--accent); }
-  .sw:checked::after { left: 19px; }
-  .item input[type='number'] { width: 64px; height: 30px; background: var(--hi); border: 0; }
-  .segc { display: flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--bg); }
-  .segc button { height: 26px; padding: 0 12px; border-radius: 7px; color: var(--dim); }
-  .segc button.on { background: var(--accent); color: #111114; font-weight: 700; }
-  .tiles { display: flex; gap: 10px; }
-  .tile { flex: 1; padding: 14px; color: var(--dim); }
-  .tile b { display: block; font-size: 24px; letter-spacing: -.02em; color: var(--fg); }
-  .kv { justify-content: space-between; padding: 11px 16px; }
-  .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
-  .pcard { padding: 14px; display: flex; flex-direction: column; gap: 12px; border-top: 3px solid; align-items: flex-start; }
-  .phead { display: flex; align-items: center; gap: 10px; width: 100%; }
-  .pi { width: 28px; height: 28px; border-radius: 9px; color: #111114; display: grid; place-items: center; font-weight: 700; }
-  .stats { display: flex; gap: 18px; color: var(--dim); font-size: 12px; }
-  .stats b { display: block; color: #f1eefb; font-size: 16px; }
-  .add { border: 1.5px dashed var(--hi); background: none; display: grid; place-items: center; min-height: 120px; padding: 12px; }
+  .sw:checked::after { left: 21px; background: #111114; }
+  .item input[type='number'] { width: 64px; height: 30px; background: var(--bg3); border: 0; }
+  .segc { display: flex; gap: 2px; padding: 3px; border-radius: 11px; background: var(--bg); border: 1px solid var(--line); }
+  .segc button { height: 28px; padding: 0 12px; border-radius: 8px; color: var(--dim); }
+  .segc button.on { background: var(--accent); color: #111114; font-weight: 600; }
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .tile { padding: 18px 20px; color: var(--dim); font-size: 13px; }
+  .tile b { display: block; font: 800 38px/1 'Bricolage Grotesque Variable', system-ui, sans-serif; letter-spacing: -.03em; color: var(--fg); margin-bottom: 6px; }
+  .kv { justify-content: space-between; padding: 12px 20px; }
+  .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .pcard { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+  .phead { display: flex; align-items: center; gap: 10px; width: 100%; font: 600 20px 'Bricolage Grotesque Variable', system-ui, sans-serif; }
+  .pi { width: 14px; height: 14px; border-radius: 50%; font-size: 0; display: block; flex: none; }
+  .stats { display: flex; gap: 18px; color: var(--dim); font-size: 13px; }
+  .stats b { display: block; color: var(--fg); font-size: 16px; }
+  .add { border: 1.5px dashed var(--line); background: none; display: grid; place-items: center; min-height: 100px; padding: 12px; border-radius: 18px; color: var(--dim); }
   .row { display: flex; gap: 8px; }
-  .table { border-radius: 14px; background: var(--card); overflow: hidden; }
-  .trow { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 16px; border-top: 1px solid var(--line); }
+  .table { border-radius: 18px; background: var(--card); border: 1px solid var(--line); overflow: hidden; }
+  .trow { display: flex; align-items: center; gap: 12px; min-height: 54px; padding: 0 20px; border-top: 1px solid var(--line); }
   .trow:first-child { border-top: 0; }
   .who { width: 150px; display: flex; align-items: center; gap: 8px; font-weight: 600; }
   .w { width: 90px; }
-  .engines { display: flex; gap: 8px; }
-  .engine { flex: 1; border-radius: 14px; background: var(--card); padding: 14px; text-align: left; font-weight: 600; }
+  .engines { display: flex; gap: 10px; }
+  .engine { flex: 1; border-radius: 16px; background: var(--card); border: 1px solid var(--line); padding: 16px; text-align: left; font-weight: 600; }
   .engine small { font-weight: 500; opacity: .7; }
-  .engine.on { background: var(--accent); color: #111114; }
-  .tpl { padding: 12px 14px; }
+  .engine.on { background: var(--accent); border-color: var(--accent); color: #111114; }
+  .tpl { padding: 14px 18px; }
   .tpl h2 { margin-top: 0; }
   .tpl input { width: 100%; background: none; border: 0; padding: 0; }
-  .about { display: flex; gap: 16px; align-items: center; padding: 18px; }
-  .about b { font-size: 18px; display: block; }
+  .about { display: flex; gap: 18px; align-items: center; padding: 20px; }
+  .about b { font: 800 22px 'Bricolage Grotesque Variable', system-ui, sans-serif; display: block; }
   p.meta { line-height: 1.5; margin: 0; }
 </style>

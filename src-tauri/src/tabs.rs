@@ -134,7 +134,7 @@ impl App {
     }
 
     pub fn win(&mut self, w: &str) -> &mut Win {
-        self.wins.entry(w.to_string()).or_insert(Win { active: 0, sidebar: 240.0, top: 44.0, overlay_open: false })
+        self.wins.entry(w.to_string()).or_insert(Win { active: 0, sidebar: 240.0, top: 52.0, overlay_open: false })
     }
 
     /// Selected tab of window `w`.
