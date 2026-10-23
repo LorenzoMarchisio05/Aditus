@@ -231,7 +231,7 @@ fn find_clear(app: AppHandle) {
 #[tauri::command(async)]
 fn open_devtools(app: AppHandle) {
     if let Some(wv) = tabs::active_webview(&app, active_id(&app)) {
-        wv.open_devtools();
+        tabs::open_inspector(&wv);
     }
 }
 
@@ -452,7 +452,7 @@ fn on_menu(app: &AppHandle, id: &str) {
             "prev-tab" => tabs::cycle(&app, -1),
             "devtools" => {
                 if let Some(wv) = tabs::active_webview(&app, cur) {
-                    wv.open_devtools();
+                    tabs::open_inspector(&wv);
                 }
             }
             other => {

@@ -151,6 +151,20 @@ pub fn no_inset_all(app: &AppHandle) {
 #[cfg(not(target_os = "macos"))]
 pub fn no_inset(_: &tauri::Webview) {}
 
+/// Docked, the inspector resizes the page webview over the sidebar; open it detached on macOS.
+pub fn open_inspector(wv: &tauri::Webview) {
+    wv.open_devtools();
+    #[cfg(target_os = "macos")]
+    let _ = wv.with_webview(|pw| unsafe {
+        use objc2::{msg_send, runtime::AnyObject, sel};
+        let v = &*(pw.inner() as *const objc2_web_kit::WKWebView);
+        let insp: *mut AnyObject = msg_send![v, _inspector];
+        if !insp.is_null() && msg_send![&*insp, respondsToSelector: sel!(detach)] {
+            let _: () = msg_send![&*insp, detach];
+        }
+    });
+}
+
 /// Host of the tab's current entry. Never ask the engine: wry panics (and aborts) when a fresh webview has no URL yet.
 pub fn host_of(app: &AppHandle, wlabel: &str) -> String {
     let g = shared(app).app.lock().unwrap();
