@@ -53,12 +53,6 @@ pub fn run(app: &AppHandle, port: u16) {
         tabs::address_bar(app, t, &format!("http://localhost:{port}/report?step=u2"));
         wait(4);
         if let (Some(w), Some(win)) = (app.get_webview("ui"), app.get_window("main")) {
-            let _ = w.with_webview(|pw| unsafe {
-                let v = &*(pw.inner() as *const objc2_web_kit::WKWebView);
-                let sv = v.superview();
-                eprintln!("[selftest] obscured={:?}", v.obscuredContentInsets());
-                eprintln!("[selftest] frame={:?} super={:?} insets={:?}", v.frame(), sv.map(|s| s.frame()), v.safeAreaInsets());
-            });
             eprintln!("[selftest] ui webview size={:?} window inner={:?} scale={:?}", w.size(), win.inner_size(), win.scale_factor());
         }
         if let Some(w) = app.get_webview("ui") {
