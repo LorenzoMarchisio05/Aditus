@@ -7,7 +7,8 @@
   const FIND = 36;
 
   let st = $state({ tabs: [], active: 0, cfg: null, prompt: null, toast: null, adblock_site: true });
-  let width = $state(Number(localStorage.getItem('sidebar') || 236));
+  let width = $state(236);
+  let resizing = false;
   let urlText = $state('');
   let editing = $state(false);
   let findOpen = $state(false);
@@ -44,6 +45,11 @@
     folded.has(g) ? folded.delete(g) : folded.add(g);
     folded = new Set(folded);
   }
+
+  $effect(() => {
+    document.documentElement.dataset.theme = cfg?.settings.theme ?? 'system';
+    if (cfg && !resizing) width = cfg.settings.sidebar_width;
+  });
 
   // Neutral theme; only the accent follows the active profile.
   $effect(() => {
@@ -140,11 +146,13 @@
 
   function startResize(e) {
     e.preventDefault();
+    resizing = true;
     const move = (ev) => (width = Math.min(480, Math.max(160, ev.clientX)));
     const up = () => {
       removeEventListener('pointermove', move);
       removeEventListener('pointerup', up);
-      localStorage.setItem('sidebar', String(width));
+      resizing = false;
+      settings({ sidebar_width: width });
     };
     addEventListener('pointermove', move);
     addEventListener('pointerup', up);

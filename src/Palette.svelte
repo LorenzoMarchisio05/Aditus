@@ -9,7 +9,7 @@
   onMount(() => {
     const offs = [];
     (async () => {
-      offs.push(await on('state', (s) => (url = s.tabs.find((t) => t.id === s.active)?.url ?? '')));
+      offs.push(await on('state', (s) => { url = s.tabs.find((t) => t.id === s.active)?.url ?? ''; document.documentElement.dataset.theme = s.cfg.settings.theme; }));
       offs.push(
         await on('palette-open', () => {
           text = url;

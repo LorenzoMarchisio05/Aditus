@@ -55,6 +55,10 @@
     return t ? color(t.profile) : '#b79cff';
   });
 
+  $effect(() => {
+    document.documentElement.dataset.theme = st?.cfg.settings.theme ?? 'system';
+  });
+
   const set = (patch) => call('save_settings', { settings: { ...st.cfg.settings, ...patch } });
   const engine = $derived(
     !st ? 'ddg' : st.cfg.settings.search_template.includes('duckduckgo') ? 'ddg' : st.cfg.settings.search_template.includes('google.com/search') ? 'google' : 'custom'
@@ -207,6 +211,18 @@
               <span class="grow"><b>Collapse sidebar to icons</b><small>Toggle any time from the View menu.</small></span>
               <input type="checkbox" class="sw" checked={st.cfg.settings.sidebar_collapsed} onchange={(e) => set({ sidebar_collapsed: e.currentTarget.checked })} />
             </label>
+            <div class="item">
+              <span class="grow"><b>Theme</b><small>Follows the system unless you pick one.</small></span>
+              <span class="segc">
+                {#each [['system', 'System'], ['dark', 'Dark'], ['light', 'Light']] as [v, l]}
+                  <button class:on={st.cfg.settings.theme === v} onclick={() => set({ theme: v })}>{l}</button>
+                {/each}
+              </span>
+            </div>
+            <label class="item">
+              <span class="grow"><b>Sidebar width</b><small>Drag the sidebar edge, or set it here.</small></span>
+              <span><input type="number" min="160" max="480" value={st.cfg.settings.sidebar_width} onchange={(e) => set({ sidebar_width: Math.min(480, Math.max(160, +e.currentTarget.value)) })} /> px</span>
+            </label>
             <label class="item">
               <span class="grow"><b>Sleep idle tabs after</b><small>Pinned and playing tabs stay awake.</small></span>
               <span><input type="number" min="1" max="1440" value={st.cfg.settings.idle_minutes} onchange={(e) => set({ idle_minutes: Math.max(1, +e.currentTarget.value) })} /> min</span>
@@ -291,12 +307,9 @@
 
 <style>
   .panel {
-    --bg: #0f0f12;
-    --card: #1c1c23;
-    --hi: #2a2a33;
-    --line: #2a2a33;
-    --dim: #8f8fa0;
-    height: 100vh; overflow: hidden; background: var(--bg); color: #f1eefb;
+    --card: var(--bg3);
+    --hi: color-mix(in srgb, var(--fg) 12%, var(--bg3));
+    height: 100vh; overflow: hidden; background: var(--bg); color: var(--fg);
   }
   .grow { flex: 1; min-width: 0; }
   small { display: block; color: var(--dim); font-size: 12px; font-weight: 400; margin-top: 2px; }
@@ -355,7 +368,7 @@
   .logo.big { width: 56px; height: 56px; border-radius: 16px; background: var(--accent); color: #120d1d; font-size: 28px; font-weight: 800; }
   .nav { height: 32px; text-align: left; padding: 0 12px; border-radius: 8px; color: #c9bfe6; font-weight: 500; }
   .nav.on { background: var(--hi); color: #fff; font-weight: 600; }
-  main { flex: 1; min-width: 0; margin: 8px 8px 8px 0; border-radius: 12px; background: #15151a; padding: 32px 44px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; align-content: start; }
+  main { flex: 1; min-width: 0; margin: 8px 8px 8px 0; border-radius: 12px; background: var(--bg2); padding: 32px 44px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; align-content: start; }
   .list2 { display: flex; flex-direction: column; }
   .item, .kv { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-top: 1px solid var(--line); }
   .item:first-child, .kv:first-child { border-top: 0; }
@@ -365,6 +378,9 @@
   .sw:checked { background: var(--accent); }
   .sw:checked::after { left: 19px; }
   .item input[type='number'] { width: 64px; height: 30px; background: var(--hi); border: 0; }
+  .segc { display: flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--bg); }
+  .segc button { height: 26px; padding: 0 12px; border-radius: 7px; color: var(--dim); }
+  .segc button.on { background: var(--accent); color: #120d1d; font-weight: 700; }
   .kv { justify-content: space-between; padding: 11px 16px; }
   .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
   .pcard { padding: 14px; display: flex; flex-direction: column; gap: 12px; border-top: 3px solid; align-items: flex-start; }

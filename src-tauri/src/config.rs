@@ -18,6 +18,19 @@ pub struct Settings {
     pub sidebar_collapsed: bool,
     pub topbar_visible: bool,
     pub adblock: bool,
+    /// "system" | "dark" | "light"
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    #[serde(default = "default_sidebar")]
+    pub sidebar_width: u32,
+}
+
+fn default_theme() -> String {
+    "system".into()
+}
+
+fn default_sidebar() -> u32 {
+    236
 }
 
 impl Default for Settings {
@@ -28,6 +41,8 @@ impl Default for Settings {
             sidebar_collapsed: false,
             topbar_visible: true,
             adblock: true,
+            theme: default_theme(),
+            sidebar_width: default_sidebar(),
         }
     }
 }
