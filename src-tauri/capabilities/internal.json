@@ -42,6 +42,8 @@
     "allow-reorder-tab",
     "allow-show-panel",
     "allow-hide-panel",
-    "allow-switch-profile"
+    "allow-switch-profile",
+    "allow-adblock-info",
+    "allow-check-update"
   ]
 }

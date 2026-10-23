@@ -23,6 +23,9 @@ pub struct Settings {
     pub theme: String,
     #[serde(default = "default_sidebar")]
     pub sidebar_width: u32,
+    /// Filter list names (see adblock::LISTS) switched off.
+    #[serde(default)]
+    pub disabled_lists: Vec<String>,
 }
 
 fn default_theme() -> String {
@@ -43,6 +46,7 @@ impl Default for Settings {
             adblock: true,
             theme: default_theme(),
             sidebar_width: default_sidebar(),
+            disabled_lists: vec![],
         }
     }
 }

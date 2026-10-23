@@ -14,6 +14,8 @@
   let newHostProfile = $state('');
   let hostQuery = $state('');
   let ntq = $state('');
+  let ab = $state(null);
+  let upd = $state(null); // null | 'checking' | result
 
   const NAV = ['General', 'Profiles and sites', 'Ad blocker', 'Search', 'About'];
   const newtab = $derived(view === 'newtab');
@@ -58,6 +60,22 @@
   $effect(() => {
     document.documentElement.dataset.theme = st?.cfg.settings.theme ?? 'system';
   });
+
+  $effect(() => {
+    if (view === 'settings' && nav === 'Ad blocker') call('adblock_info').then((i) => (ab = i));
+  });
+  async function checkUpdate() {
+    upd = 'checking';
+    upd = await call('check_update');
+  }
+  const toggleList = (name, on) => {
+    const off = new Set(st.cfg.settings.disabled_lists ?? []);
+    on ? off.delete(name) : off.add(name);
+    set({ disabled_lists: [...off] });
+    setTimeout(() => call('adblock_info').then((i) => (ab = i)), 1500);
+  };
+  const ago = (h) => (h == null ? 'never' : h < 1 ? 'just now' : h < 48 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`);
+  const NAMES = { easylist: ['EasyList', 'ads'], easyprivacy: ['EasyPrivacy', 'trackers'], ublock: ['uBlock filters', 'annoyances'] };
 
   const set = (patch) => call('save_settings', { settings: { ...st.cfg.settings, ...patch } });
   const engine = $derived(
@@ -273,12 +291,30 @@
               <input type="checkbox" class="sw" checked={st.cfg.settings.adblock} onchange={(e) => set({ adblock: e.currentTarget.checked })} />
             </label>
           </div>
+          {#if ab}
+            <div class="tiles">
+              <div class="card tile"><b>{ab.rules.toLocaleString()}</b>rules loaded</div>
+              <div class="card tile"><b>{ab.lists.filter((l) => l.enabled).length}/{ab.lists.length}</b>lists on</div>
+              <div class="card tile"><b>{ago(Math.min(...ab.lists.filter((l) => l.age_hours != null).map((l) => l.age_hours)))}</b>since refresh</div>
+              <div class="card tile"><b>{st.cfg.allowlist.length}</b>sites paused</div>
+            </div>
+            <h2>Filter lists</h2>
+            <div class="card list2">
+              {#each ab.lists as l}
+                <label class="item">
+                  <span class="grow"><b>{NAMES[l.name][0]}</b><small>{NAMES[l.name][1]} · updated {ago(l.age_hours)}</small></span>
+                  <input type="checkbox" class="sw" checked={l.enabled} onchange={(e) => toggleList(l.name, e.currentTarget.checked)} />
+                </label>
+              {/each}
+            </div>
+          {/if}
           <h2>Paused on</h2>
           <div class="chips">
             {#each st.cfg.allowlist as h}
               <button class="mono" onclick={() => call('toggle_allowlist', { host: h })}>{h} <span class="meta">×</span></button>
             {:else}<span class="meta">No sites.</span>{/each}
           </div>
+          <p class="meta">The shield in the address bar pauses blocking for the current site only.</p>
         {:else if nav === 'Search'}
           <h1>Search</h1>
           <div class="engines">
@@ -293,7 +329,18 @@
           <p class="meta">Searches follow the same site rules: if the search site is mapped to a profile, it opens there.</p>
         {:else}
           <h1>About</h1>
-          <div class="card about"><span class="logo big">A</span><span><b>Aditus 0.1.0</b><small>Open source, GPL-3.0</small></span></div>
+          <div class="card about">
+            <span class="logo big">A</span>
+            <span class="grow"><b>Aditus 0.1.0</b><small>Open source, GPL-3.0</small></span>
+            {#if upd && upd !== 'checking' && upd.newer}
+              <button class="solid" onclick={() => call('new_tab', { url: upd.url })}>Get {upd.latest}</button>
+            {:else}
+              <button class="ghost" onclick={checkUpdate} disabled={upd === 'checking'}>{upd === 'checking' ? 'Checking…' : 'Check for updates'}</button>
+            {/if}
+          </div>
+          {#if upd && upd !== 'checking'}
+            <p class="meta">{upd.latest === null ? 'No published release found.' : upd.newer ? `Version ${upd.latest} is available.` : "You're on the latest version."}</p>
+          {/if}
           <div class="card list2">
             <div class="kv"><span class="meta">Engine</span><span class="mono">System webview</span></div>
             <div class="kv"><span class="meta">Interface</span><span class="mono">Tauri 2 + Svelte</span></div>
@@ -381,6 +428,9 @@
   .segc { display: flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--bg); }
   .segc button { height: 26px; padding: 0 12px; border-radius: 7px; color: var(--dim); }
   .segc button.on { background: var(--accent); color: #120d1d; font-weight: 700; }
+  .tiles { display: flex; gap: 10px; }
+  .tile { flex: 1; padding: 14px; color: var(--dim); }
+  .tile b { display: block; font-size: 24px; letter-spacing: -.02em; color: var(--fg); }
   .kv { justify-content: space-between; padding: 11px 16px; }
   .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
   .pcard { padding: 14px; display: flex; flex-direction: column; gap: 12px; border-top: 3px solid; align-items: flex-start; }

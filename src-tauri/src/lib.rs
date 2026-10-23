@@ -107,8 +107,42 @@ fn dismiss_toast(app: AppHandle) {
 
 #[tauri::command(async)]
 fn save_settings(app: AppHandle, settings: Settings) {
+    let lists_changed = app.state::<Shared>().app.lock().unwrap().cfg.settings.disabled_lists != settings.disabled_lists;
     mutate_cfg(&app, |c| c.settings = settings);
+    if lists_changed {
+        adblock::rebuild(&app);
+    }
     adblock::refresh(&app);
+}
+
+#[tauri::command(async)]
+fn adblock_info(app: AppHandle) -> adblock::Info {
+    adblock::info(&app)
+}
+
+#[derive(serde::Serialize)]
+struct UpdateInfo {
+    current: String,
+    latest: Option<String>,
+    url: Option<String>,
+    newer: bool,
+}
+
+/// Latest GitHub release vs this build; `latest: None` when none is published (or offline).
+#[tauri::command(async)]
+fn check_update() -> UpdateInfo {
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    let res = ureq::get("https://api.github.com/repos/LorenzoMarchisio05/Aditus/releases/latest")
+        .set("User-Agent", "aditus")
+        .timeout(std::time::Duration::from_secs(10))
+        .call()
+        .ok()
+        .and_then(|r| r.into_string().ok())
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+    let tag = res.as_ref().and_then(|v| v["tag_name"].as_str()).map(|t| t.trim_start_matches('v').to_string());
+    let url = res.as_ref().and_then(|v| v["html_url"].as_str()).map(String::from);
+    let newer = tag.as_deref().is_some_and(|t| t != current);
+    UpdateInfo { current, latest: tag, url, newer }
 }
 
 #[tauri::command(async)]
@@ -407,7 +441,8 @@ pub fn run() {
             assign_mapping, skip_prompt, undo_swap, dismiss_toast, save_settings, add_profile,
             delete_profile, delete_mapping, toggle_allowlist, pin_tab, group_tab, find, find_clear,
             open_devtools, history_search, history_clear, downloads_list, show_palette, hide_palette,
-            reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile
+            reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile,
+            adblock_info, check_update
         ])
         .on_menu_event(|app, ev| on_menu(app, ev.id().as_ref()))
         .on_window_event(|win, ev| {

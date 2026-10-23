@@ -165,9 +165,10 @@ fn download(dir: &PathBuf) {
     }
 }
 
-fn load_texts(dir: &PathBuf) -> Vec<String> {
+fn load_texts(dir: &PathBuf, disabled: &[String]) -> Vec<String> {
     let mut texts: Vec<String> = LISTS
         .iter()
+        .filter(|(name, _)| !disabled.contains(&name.to_string()))
         .filter_map(|(name, _)| std::fs::read_to_string(dir.join(format!("{name}.txt"))).ok())
         .collect();
     if texts.is_empty() {
@@ -176,9 +177,43 @@ fn load_texts(dir: &PathBuf) -> Vec<String> {
     texts
 }
 
-fn rebuild(app: &AppHandle) {
+pub fn rebuild(app: &AppHandle) {
     let Some(b) = blocker(app) else { return };
-    install(app, &load_texts(&b.dir));
+    let disabled = app.state::<Shared>().inner().app.lock().unwrap().cfg.settings.disabled_lists.clone();
+    install(app, &load_texts(&b.dir, &disabled));
+}
+
+#[derive(serde::Serialize)]
+pub struct ListInfo {
+    name: &'static str,
+    enabled: bool,
+    /// Hours since the cached copy was fetched; None if never.
+    age_hours: Option<u64>,
+}
+
+#[derive(serde::Serialize)]
+pub struct Info {
+    lists: Vec<ListInfo>,
+    rules: usize,
+}
+
+pub fn info(app: &AppHandle) -> Info {
+    let disabled = app.state::<Shared>().inner().app.lock().unwrap().cfg.settings.disabled_lists.clone();
+    let Some(b) = blocker(app) else { return Info { lists: vec![], rules: 0 } };
+    let lists = LISTS
+        .iter()
+        .map(|(name, _)| ListInfo {
+            name,
+            enabled: !disabled.contains(&name.to_string()),
+            age_hours: std::fs::metadata(b.dir.join(format!("{name}.txt")))
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| SystemTime::now().duration_since(t).ok())
+                .map(|d| d.as_secs() / 3600),
+        })
+        .collect();
+    let rules = b.rules.read().unwrap().iter().map(|c| serde_json::from_str::<Vec<serde_json::Value>>(c).map(|v| v.len()).unwrap_or(0)).sum();
+    Info { lists, rules }
 }
 
 /// Swap in a new engine built from `texts` and push it to the platform backend.
