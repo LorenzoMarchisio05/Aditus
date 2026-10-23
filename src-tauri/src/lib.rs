@@ -257,6 +257,9 @@ fn show_palette(app: AppHandle) {
 
 #[tauri::command(async)]
 fn show_panel(app: AppHandle, view: String) {
+    if view != "newtab" {
+        return tabs::open_internal(&app, &view);
+    }
     let Some(window) = app.get_window("main") else { return };
     if let Some(wv) = app.get_webview("panel") {
         let _ = wv.close();

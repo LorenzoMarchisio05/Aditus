@@ -17,6 +17,10 @@
 
   const NAV = ['General', 'Profiles and sites', 'Ad blocker', 'Search', 'About'];
   const newtab = $derived(view === 'newtab');
+  $effect(() => {
+    if (!newtab) document.title = { history: 'History', downloads: 'Downloads', settings: 'Settings' }[view] ?? 'Aditus';
+  });
+  const closeTab = () => call('close_tab', { id: st.active });
   const library = $derived(view === 'history' || view === 'downloads');
 
   async function loadHistory() {
@@ -107,7 +111,7 @@
           <h1>History</h1>
           <span class="grow"></span>
           <button class="ghost" onclick={async () => { await call('history_clear'); loadHistory(); }}>Clear…</button>
-          <button class="x" onclick={() => call('hide_panel')} aria-label="Close">✕</button>
+          <button class="x" onclick={closeTab} aria-label="Close">✕</button>
         </header>
         <input class="search" placeholder="Search history" bind:value={q} oninput={loadHistory} />
         {#if st}
@@ -122,7 +126,7 @@
           {#each days as d}
             <div class="day">{d.day}</div>
             {#each d.rows as r}
-              <button class="hrow" onclick={() => { call('new_tab', { url: r.url }); call('hide_panel'); }}>
+              <button class="hrow" onclick={() => call('new_tab', { url: r.url })}>
                 <span class="time">{hm(r.visited_at)}</span>
                 <span class="pb" style="background:{color(r.profile)}"></span>
                 <span class="t">{r.title || r.url}</span>
@@ -188,7 +192,7 @@
           <button class="nav" class:on={nav === n} onclick={() => (nav = n)}>{n}</button>
         {/each}
         <span class="grow"></span>
-        <button class="nav" onclick={() => call('hide_panel')}>Close</button>
+        <button class="nav" onclick={closeTab}>Close</button>
       </aside>
 
       <main>

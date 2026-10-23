@@ -164,6 +164,34 @@ pub fn label(id: u32, gen: u32) -> String {
     format!("tab-{id}-{gen}")
 }
 
+/// Browser pages (settings, history, downloads) live in ordinary tabs as `aditus://<view>`.
+fn internal_view(url: &str) -> Option<String> {
+    let u = Url::parse(url).ok()?;
+    if u.scheme() == "aditus" {
+        return u.host_str().map(String::from);
+    }
+    let local = u.scheme() == "tauri" || matches!((u.host_str(), u.port()), (Some("tauri.localhost"), _) | (Some("localhost"), Some(1420)));
+    if !local || !matches!(u.path(), "/" | "/index.html") {
+        return None;
+    }
+    u.query_pairs().find(|(k, _)| k == "view").map(|(_, v)| v.into_owned())
+}
+
+fn normalize(url: String) -> String {
+    internal_view(&url).map(|v| format!("aditus://{v}")).unwrap_or(url)
+}
+
+pub fn open_internal(app: &AppHandle, view: &str) {
+    let url = format!("aditus://{view}");
+    let existing = shared(app).app.lock().unwrap().tabs.iter().find(|t| t.url() == url).map(|t| t.id);
+    match existing {
+        Some(id) => activate(app, id),
+        None => {
+            open_tab(app, Url::parse(&url).ok(), None, true);
+        }
+    }
+}
+
 fn is_blank(url: &str) -> bool {
     url.is_empty() || url.contains(NEWTAB)
 }
@@ -215,7 +243,7 @@ pub fn emit_state(app: &AppHandle) {
                 TabView {
                     id: t.id,
                     title: if t.title.is_empty() { if is_blank(&url) { "New Tab".into() } else { url.clone() } } else { t.title.clone() },
-                    host: parsed.as_ref().and_then(|u| u.host_str().map(String::from)).unwrap_or_default(),
+                    host: if internal_view(&url).is_some() { String::new() } else { parsed.as_ref().and_then(|u| u.host_str().map(String::from)).unwrap_or_default() },
                     url: if is_blank(&url) { String::new() } else { url },
                     profile: t.profile.clone(),
                     pinned: t.pinned,
@@ -341,7 +369,9 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
     let data_dir = config::Config::data_dir(&shared(app).data_dir, &cfg_profile);
     let _ = std::fs::create_dir_all(&data_dir);
 
-    let wurl = if is_blank(&url) {
+    let wurl = if let Some(view) = internal_view(&url) {
+        WebviewUrl::App(format!("index.html?view={view}").into())
+    } else if is_blank(&url) {
         WebviewUrl::App(NEWTAB.into())
     } else {
         WebviewUrl::External(Url::parse(&url).map_err(|e| e.to_string())?)
@@ -424,7 +454,7 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
 }
 
 fn on_navigation(app: &AppHandle, tab_id: u32, gen: u32, u: &Url) -> bool {
-    if !matches!(u.scheme(), "http" | "https") {
+    if !matches!(u.scheme(), "http" | "https") || internal_view(u.as_str()).is_some() {
         return true;
     }
     let host = u.host_str().unwrap_or_default().to_string();
@@ -478,6 +508,7 @@ fn on_navigation(app: &AppHandle, tab_id: u32, gen: u32, u: &Url) -> bool {
 }
 
 fn on_page_load(app: &AppHandle, tab_id: u32, gen: u32, url: String, started: bool) {
+    let url = normalize(url);
     let s = shared(app);
     let visit = {
         let mut g = s.app.lock().unwrap();
@@ -491,7 +522,7 @@ fn on_page_load(app: &AppHandle, tab_id: u32, gen: u32, url: String, started: bo
             None
         } else {
             record_entry(t, &url);
-            (!is_blank(&url)).then(|| (url, t.title.clone(), t.profile.clone()))
+            (!is_blank(&url) && internal_view(&url).is_none()).then(|| (url, t.title.clone(), t.profile.clone()))
         }
     };
     if let Some((url, title, profile)) = visit {
@@ -818,8 +849,16 @@ pub fn reload(app: &AppHandle, tab_id: u32) {
 }
 
 pub fn address_bar(app: &AppHandle, tab_id: u32, input: &str) {
-    let template = shared(app).app.lock().unwrap().cfg.settings.search_template.clone();
-    navigate(app, tab_id, search::resolve(input, &template), true);
+    let (template, internal) = {
+        let g = shared(app).app.lock().unwrap();
+        (g.cfg.settings.search_template.clone(), g.tabs.iter().find(|t| t.id == tab_id).is_some_and(|t| internal_view(&t.url()).is_some()))
+    };
+    let url = search::resolve(input, &template);
+    if internal {
+        open_tab(app, Some(url), None, true);
+    } else {
+        navigate(app, tab_id, url, true);
+    }
 }
 
 pub fn assign_mapping(app: &AppHandle, host: &str, profile: &str) {

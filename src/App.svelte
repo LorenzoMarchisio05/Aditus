@@ -250,18 +250,6 @@
     {/each}
   </div>
 
-  {#if st.prompt && !collapsed}
-    <div class="card">
-      <div>Profile for <b>{st.prompt}</b>?</div>
-      <div class="choices">
-        {#each cfg.profiles as p}
-          <button style="border-color:{color(p.name)}" onclick={() => call('assign_mapping', { host: st.prompt, profile: p.name })}>{p.name}</button>
-        {/each}
-        <button class="dim" onclick={() => call('skip_prompt')}>Skip</button>
-      </div>
-    </div>
-  {/if}
-
   {#if st.toast && !collapsed}
     <div class="card toast">
       <span>{st.toast.message}</span>
