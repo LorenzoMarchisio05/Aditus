@@ -8,13 +8,17 @@
 
   onMount(() => {
     const offs = [];
-    on('state', (s) => (url = s.tabs.find((t) => t.id === s.active)?.url ?? '')).then((f) => offs.push(f));
-    on('palette-open', () => {
-      text = url;
-      input.focus();
-      input.select();
-    }).then((f) => offs.push(f));
-    call('get_state');
+    (async () => {
+      offs.push(await on('state', (s) => (url = s.tabs.find((t) => t.id === s.active)?.url ?? '')));
+      offs.push(
+        await on('palette-open', () => {
+          text = url;
+          input.focus();
+          input.select();
+        })
+      );
+      call('get_state');
+    })();
     input.focus();
     return () => offs.forEach((f) => f());
   });

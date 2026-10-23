@@ -324,6 +324,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &item("close-tab", "Close Tab", "CmdOrCtrl+W")?,
             &item("focus-address", "Open Location", "CmdOrCtrl+L")?,
             &item("find", "Find in Page", "CmdOrCtrl+F")?,
+            &item("search-tabs", "Search Tabs", "CmdOrCtrl+Shift+A")?,
         ],
     )?;
     let edit = Submenu::with_items(

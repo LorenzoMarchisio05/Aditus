@@ -22,12 +22,16 @@
 
   onMount(() => {
     const offs = [];
-    on('state', (s) => {
-      st = s;
-      newHostProfile ||= s.cfg.profiles[0].name;
-    }).then((f) => offs.push(f));
-    on('downloads-changed', loadDownloads).then((f) => offs.push(f));
-    call('get_state');
+    (async () => {
+      offs.push(
+        await on('state', (s) => {
+          st = s;
+          newHostProfile ||= s.cfg.profiles[0].name;
+        })
+      );
+      offs.push(await on('downloads-changed', loadDownloads));
+      call('get_state'); // after listeners exist, or the reply is lost
+    })();
     if (view === 'history') loadHistory();
     if (view === 'downloads') loadDownloads();
     return () => offs.forEach((f) => f());

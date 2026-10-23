@@ -2,7 +2,19 @@
 
 A lightweight, open-source desktop browser with a vertical tab sidebar and per-site account isolation.
 
-> Status: planning. See [PLAN.md](PLAN.md) for the build plan.
+> Status: feature-complete v1, early. Verified on macOS (headless self-test + UI snapshots). Windows and Linux build in CI and pass unit tests, but runtime behavior there is untested. See [PLAN.md](PLAN.md).
+
+## Run
+
+```sh
+npm install
+npm run tauri dev      # needs Rust, Tauri prerequisites
+npm run tauri build    # unsigned bundle
+```
+
+Unsigned builds: on macOS right-click the app and choose Open (or `xattr -cr Aditus.app`); on Windows choose "More info" then "Run anyway" in SmartScreen.
+
+Shortcuts: Cmd/Ctrl+L address bar, Cmd/Ctrl+F find, Cmd/Ctrl+Shift+A search tabs.
 
 ## Why
 

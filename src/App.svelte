@@ -13,6 +13,8 @@
   let findOpen = $state(false);
   let findText = $state('');
   let menu = $state(null);
+  let tabQuery = $state(null); // null = closed
+  let tabSearchEl = $state();
   let dragId = $state(null);
   let addrEl, findEl;
   let toastTimer;
@@ -23,8 +25,10 @@
   const sidebarW = $derived(collapsed ? COLLAPSED : width);
   const top = $derived(topbar ? TOP + (findOpen ? FIND : 0) : 0);
   const tab = $derived(st.tabs.find((t) => t.id === st.active));
-  const pinned = $derived(st.tabs.filter((t) => t.pinned));
-  const rest = $derived(st.tabs.filter((t) => !t.pinned));
+  const matches = (t) =>
+    tabQuery === null || `${t.title} ${t.url} ${t.group ?? ''} ${t.profile}`.toLowerCase().includes(tabQuery.toLowerCase());
+  const pinned = $derived(st.tabs.filter((t) => t.pinned && matches(t)));
+  const rest = $derived(st.tabs.filter((t) => !t.pinned && matches(t)));
 
   $effect(() => {
     call('set_layout', { sidebar: sidebarW, top });
@@ -53,6 +57,22 @@
     }
   }
 
+  async function openTabSearch() {
+    if (collapsed) settings({ sidebar_collapsed: false });
+    tabQuery = '';
+    await tick();
+    tabSearchEl?.focus();
+  }
+
+  function tabSearchKey(e) {
+    if (e.key === 'Escape') tabQuery = null;
+    if (e.key === 'Enter') {
+      const first = [...pinned, ...rest][0];
+      if (first) call('activate_tab', { id: first.id });
+      tabQuery = null;
+    }
+  }
+
   async function openFind() {
     findOpen = true;
     await tick();
@@ -67,15 +87,20 @@
 
   onMount(() => {
     const offs = [];
-    on('state', (s) => (st = s)).then((f) => offs.push(f));
-    on('menu', (id) => {
-      if (id === 'focus-address') focusAddress();
-      else if (id === 'find') openFind();
-      else if (id === 'toggle-sidebar') settings({ sidebar_collapsed: !collapsed });
-      else if (id === 'toggle-topbar') settings({ topbar_visible: !cfg.settings.topbar_visible });
-      else if (['history', 'downloads', 'settings'].includes(id)) call('show_panel', { view: id });
-    }).then((f) => offs.push(f));
-    call('get_state');
+    (async () => {
+      offs.push(await on('state', (s) => (st = s)));
+      offs.push(
+        await on('menu', (id) => {
+          if (id === 'focus-address') focusAddress();
+          else if (id === 'find') openFind();
+          else if (id === 'search-tabs') openTabSearch();
+          else if (id === 'toggle-sidebar') settings({ sidebar_collapsed: !collapsed });
+          else if (id === 'toggle-topbar') settings({ topbar_visible: !cfg.settings.topbar_visible });
+          else if (['history', 'downloads', 'settings'].includes(id)) call('show_panel', { view: id });
+        })
+      );
+      call('get_state'); // after listeners exist, or the reply is lost
+    })();
     return () => offs.forEach((f) => f());
   });
 
@@ -160,6 +185,10 @@
     {#if !collapsed}<span class="brand">Aditus</span>{/if}
     <button onclick={() => { call('new_tab', {}); focusAddress(); }} title="New tab" aria-label="New tab">＋</button>
   </div>
+
+  {#if tabQuery !== null && !collapsed}
+    <input class="tabsearch" bind:this={tabSearchEl} bind:value={tabQuery} onkeydown={tabSearchKey} placeholder="Search tabs" spellcheck="false" />
+  {/if}
 
   <div class="tabs">
     {#each pinned as t (t.id)}{@render row(t)}{/each}
@@ -264,6 +293,7 @@
   .side { position: fixed; inset: 0 auto 0 0; background: var(--bg2); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
   .head { display: flex; align-items: center; gap: 4px; padding: 8px 8px 6px; }
   .brand { flex: 1; font-weight: 600; letter-spacing: .06em; color: var(--dim); }
+  .tabsearch { margin: 0 8px 4px; }
   .tabs { flex: 1; overflow-y: auto; padding: 4px 6px; }
   .tab { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 8px; cursor: default; position: relative; }
   .tab:hover { background: var(--bg3); }
