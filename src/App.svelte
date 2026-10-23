@@ -13,8 +13,6 @@
   let findOpen = $state(false);
   let findText = $state('');
   let menu = $state(null);
-  let picker = $state(false);
-  let remember = $state(false);
   let newtabOpen = false;
   let tabQuery = $state(null); // null = closed
   let tabSearchEl = $state();
@@ -180,19 +178,12 @@
     }
   });
 
-  async function moveTo(p) {
-    picker = false;
-    await call('activate_tab', { id: tab.id });
-    if (remember && tab.host) call('assign_mapping', { host: tab.host, profile: p });
-    else call('switch_profile', { profile: p });
-  }
-
   const mac = navigator.platform.includes('Mac'); // traffic lights overlay the sidebar top
 
   const initial = (n) => n.slice(0, 1).toUpperCase();
 </script>
 
-<svelte:window onclick={() => { menu = null; picker = false; }} />
+<svelte:window onclick={() => { menu = null; }} />
 
 {#snippet pin(t)}
   <button class="pin" class:active={t.id === st.active} title={t.title} onclick={() => call('activate_tab', { id: t.id })} oncontextmenu={(e) => ctx(e, t)}>
@@ -235,14 +226,6 @@
 <aside class="side" style="width:{sidebarW}px; padding-top:{mac ? 38 : 0}px">
   {#if collapsed}
     <button class="cbtn" onclick={() => settings({ sidebar_collapsed: false })} title="Expand sidebar" aria-label="Expand sidebar">☰</button>
-  {/if}
-
-  {#if tab && !collapsed}
-    <button class="pcard" onclick={(e) => { e.stopPropagation(); picker = !picker; }} aria-label="Switch profile">
-      <span class="pinit" style="background:{color(tab.profile)}">{initial(tab.profile)}</span>
-      <span class="pname">{tab.profile}</span>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-    </button>
   {/if}
 
   {#if tabQuery !== null && !collapsed}
@@ -360,23 +343,6 @@
   </header>
 {/if}
 
-{#if picker && tab}
-  <div class="picker" role="menu" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
-    <h6>Open this tab in</h6>
-    {#each cfg.profiles as p, i}
-      <button class:sel={tab.profile === p.name} onclick={() => moveTo(p.name)}>
-        <span class="pi" style="background:{color(p.name)}">{initial(p.name)}</span>
-        <span class="grow"><b>{p.name}</b><small>{tab.profile === p.name ? 'current · ' : ''}{cfg.mappings.filter((m) => m.profile === p.name).length} sites</small></span>
-        <kbd>{i + 1}</kbd>
-      </button>
-    {/each}
-    {#if tab.host}
-      <hr />
-      <label class="rem"><input type="checkbox" bind:checked={remember} /> Always use this profile for {tab.host}</label>
-    {/if}
-  </div>
-{/if}
-
 {#if menu}
   <div class="ctx" style="left:{menu.x}px; top:{menu.y}px">
     <button onclick={() => call('reload')}>Reload</button>
@@ -412,11 +378,6 @@
   .tab.active .pbar { opacity: 1; }
   .host { color: var(--dim); font-weight: 400; margin-left: 6px; }
   .tag { font-size: 9.5px; font-weight: 700; letter-spacing: .03em; flex: none; }
-  .pcard { width: calc(100% - 16px); text-align: left; display: flex; align-items: center; gap: 10px; margin: 0 8px 6px; padding: 4px 8px; border-radius: 8px; background: none; color: var(--fg); }
-  .pcard:hover { background: var(--bg3); }
-  .pinit { width: 22px; height: 22px; border-radius: 6px; font-size: 12px; color: #120d1d; display: grid; place-items: center; font-weight: 700; }
-  .pname { flex: 1; font-weight: 600; }
-  .pcard svg { color: var(--dim); }
   .seg { font-size: 12px; font-weight: 700; color: #120d1d; padding: 0 12px; height: 100%; border: 0; border-radius: 0; }
   .tab.discarded .title { opacity: .55; }
   .fav { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
@@ -456,14 +417,6 @@
   .pill kbd { padding-right: 12px; }
   .shield { height: 30px; background: #123a2c; color: #5dffb8; border-radius: 9px; padding: 0 10px; }
   .shield.off { background: #3a1620; color: var(--danger); }
-  .picker { position: fixed; left: 8px; top: 62px; width: 300px; z-index: 10; background: #1c1530; border-radius: 14px; padding: 8px; box-shadow: 0 18px 50px rgba(0,0,0,.45); display: flex; flex-direction: column; }
-  .picker h6 { margin: 0; padding: 6px 8px 8px; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
-  .picker button { height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 10px; border-radius: 10px; text-align: left; }
-  .picker .sel { background: var(--bg3); }
-  .picker .pi { width: 26px; height: 26px; border-radius: 8px; color: #120d1d; display: grid; place-items: center; font-weight: 700; }
-  .picker b { display: block; font-weight: 600; }
-  .picker small { color: var(--dim); font-size: 11px; }
-  .rem { display: flex; gap: 8px; align-items: center; padding: 6px 10px; color: #c9bfe6; }
   .grip { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; }
   .top { position: fixed; top: 0; right: 0; background: var(--bg2); border-bottom: 1px solid var(--line); }
   .bar { height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 8px; }
