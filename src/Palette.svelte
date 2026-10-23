@@ -1,10 +1,12 @@
 <script>
   import { onMount } from 'svelte';
   import { call, on, onState, applyTheme } from './lib/api.js';
+  import { createSuggest } from './lib/suggest.js';
 
   let text = $state('');
   let input;
   let url = '';
+  const sg = createSuggest({ palette: true, fill: (t) => (text = t) });
 
   onMount(() => {
     const offs = [];
@@ -28,6 +30,8 @@
     call('address', { input: text });
     call('hide_palette');
   }
+  // delayed so a press on a suggestion lands before the palette closes
+  const close = () => setTimeout(() => call('hide_palette'), 150);
 </script>
 
 <form onsubmit={submit}>
@@ -36,8 +40,9 @@
     bind:value={text}
     placeholder="Search or enter address"
     spellcheck="false"
-    onkeydown={(e) => e.key === 'Escape' && call('hide_palette')}
-    onblur={() => call('hide_palette')}
+    oninput={() => sg.input(text)}
+    onkeydown={(e) => !sg.key(e) && e.key === 'Escape' && call('hide_palette')}
+    onblur={close}
   />
 </form>
 

@@ -3,7 +3,7 @@
   "identifier": "ui",
   "description": "Browser chrome (sidebar, top bar, palette). Full app command access.",
   "windows": ["main", "w*"],
-  "webviews": ["ui", "ui-*", "palette", "palette-*", "panel", "panel-*"],
+  "webviews": ["ui", "ui-*", "palette", "palette-*", "suggest", "suggest-*", "panel", "panel-*"],
   "permissions": [
     "core:default", "core:window:allow-start-dragging",
     "allow-get-state",
@@ -33,7 +33,7 @@
     "allow-history-clear",
     "allow-downloads-list",
     "allow-show-palette",
-    "allow-hide-palette",
+    "allow-hide-palette", "allow-suggest-show", "allow-suggest-hide", "allow-suggest-get",
     "allow-reveal-path",
     "allow-reorder-tab",
     "allow-show-panel",

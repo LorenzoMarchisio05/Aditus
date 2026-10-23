@@ -57,6 +57,7 @@ fn activate_tab(app: AppHandle, id: u32) {
 
 #[tauri::command(async)]
 fn address(app: AppHandle, window: tauri::Window, input: String) {
+    close_suggest(&app, window.label());
     tabs::address_bar(&app, active_id(&app, &window), &input);
 }
 
@@ -312,20 +313,24 @@ fn reveal_path(path: String) {
         .spawn();
 }
 
-#[tauri::command(async)]
-fn show_palette(app: AppHandle, window: tauri::Window) {
-    let win = window.label().to_string();
+/// Where the palette sits: centred over the page area, a little below the top bar.
+fn palette_rect(app: &AppHandle, window: &tauri::Window) -> (LogicalPosition<f64>, LogicalSize<f64>) {
     let (sidebar, top) = {
         let mut g = app.state::<Shared>().inner().app.lock().unwrap();
-        let w = g.win(&win);
-        w.overlay_open = true;
+        let w = g.win(window.label());
         (w.sidebar, w.top)
     };
     let sf = window.scale_factor().unwrap_or(1.0);
     let w = window.inner_size().map(|s| s.width as f64 / sf).unwrap_or(1200.0);
     let pw = 640.0_f64.min(w - 40.0);
-    let pos = LogicalPosition::new(sidebar + ((w - sidebar - pw) / 2.0).max(0.0), top + 24.0);
-    let size = LogicalSize::new(pw, 72.0);
+    (LogicalPosition::new(sidebar + ((w - sidebar - pw) / 2.0).max(0.0), top + 24.0), LogicalSize::new(pw, 72.0))
+}
+
+#[tauri::command(async)]
+fn show_palette(app: AppHandle, window: tauri::Window) {
+    let win = window.label().to_string();
+    app.state::<Shared>().inner().app.lock().unwrap().win(&win).overlay_open = true;
+    let (pos, size) = palette_rect(&app, &window);
     let label = tabs::wv_label("palette", &win);
     let wv = match app.get_webview(&label) {
         Some(wv) => {
@@ -550,6 +555,63 @@ fn hide_palette(app: AppHandle, window: tauri::Window) {
     if let Some(wv) = app.get_webview(&tabs::wv_label("palette", window.label())) {
         let _ = wv.hide();
     }
+    close_suggest(&app, window.label());
+}
+
+// ---------- address suggestions ----------
+
+/// Rows last pushed to each window's suggestion list, for a list that is still loading.
+static SUGGEST: Mutex<Vec<(String, serde_json::Value)>> = Mutex::new(Vec::new());
+
+fn close_suggest(app: &AppHandle, win: &str) {
+    SUGGEST.lock().unwrap().retain(|(w, _)| w != win);
+    if let Some(wv) = app.get_webview(&tabs::wv_label("suggest", win)) {
+        let _ = wv.close();
+    }
+}
+
+/// Shows the list under an address input; `x`, `y`, `w` are in window coordinates, or ignored for the palette.
+#[tauri::command(async)]
+fn suggest_show(app: AppHandle, window: tauri::Window, webview: Webview, payload: serde_json::Value, palette: bool, x: f64, y: f64, w: f64) {
+    let win = window.label().to_string();
+    let rows = payload["rows"].as_array().map_or(0, |r| r.len().min(8)) as f64;
+    let (pos, width) = if palette {
+        let (p, s) = palette_rect(&app, &window);
+        (LogicalPosition::new(p.x + 12.0, p.y + s.height - 4.0), s.width - 24.0)
+    } else {
+        (LogicalPosition::new(x, y), w)
+    };
+    let size = LogicalSize::new(width.max(200.0), rows * 36.0 + 14.0);
+    {
+        let mut g = SUGGEST.lock().unwrap();
+        g.retain(|(w, _)| *w != win);
+        g.push((win.clone(), payload.clone()));
+    }
+    let label = tabs::wv_label("suggest", &win);
+    match app.get_webview(&label) {
+        Some(wv) => {
+            let _ = wv.set_bounds(tauri::Rect { position: pos.into(), size: size.into() });
+            let _ = app.emit_to(label, "suggest-rows", payload);
+        }
+        None => {
+            let b = WebviewBuilder::new(&label, WebviewUrl::App("index.html?view=suggest".into()));
+            if let Ok(wv) = window.add_child(b, pos, size) {
+                tabs::no_inset(&wv);
+                // the list never takes the keyboard from the input being typed in
+                let _ = webview.set_focus();
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn suggest_hide(app: AppHandle, window: tauri::Window) {
+    close_suggest(&app, window.label());
+}
+
+#[tauri::command]
+fn suggest_get(window: tauri::Window) -> Option<serde_json::Value> {
+    SUGGEST.lock().unwrap().iter().find(|(w, _)| w == window.label()).map(|(_, v)| v.clone())
 }
 
 /// Page webviews may call this: CSS hiding ads on the page's real (engine-reported) URL.
@@ -746,7 +808,7 @@ pub fn run() {
             get_state, new_tab, close_tab, activate_tab, address, back, forward, reload, set_layout,
             assign_mapping, skip_prompt, undo_swap, dismiss_toast, save_settings, add_profile,
             delete_profile, delete_mapping, toggle_allowlist, pin_tab, group_tab, find, find_clear,
-            open_devtools, history_search, history_clear, downloads_list, show_palette, hide_palette,
+            open_devtools, history_search, history_clear, downloads_list, show_palette, hide_palette, suggest_show, suggest_hide, suggest_get,
             reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile, profile_menu, tab_menu,
             adblock_info, check_update, default_browser_settings, set_profile_color, page_context, open_download, answer_permission, delete_permission
         ])

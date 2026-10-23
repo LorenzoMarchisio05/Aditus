@@ -3,6 +3,7 @@
   const setProfile = (t, profile) => (t.host ? call('assign_mapping', { host: t.host, profile }) : call('switch_profile', { profile }));
   import { onMount, tick } from 'svelte';
   import { call, on, onState, color, applyTheme, setProfileColors } from './lib/api.js';
+  import { createSuggest } from './lib/suggest.js';
 
   const COLLAPSED = 52;
   const TOP = 52;
@@ -14,6 +15,11 @@
   let checked = false;
   let resizing = false;
   let urlText = $state('');
+  let pillEl;
+  const sg = createSuggest({
+    anchor: () => { const r = pillEl.getBoundingClientRect(); return { x: r.left, y: r.bottom + 6, w: r.width }; },
+    fill: (t) => (urlText = t)
+  });
   let editing = $state(false);
   let findOpen = $state(false);
   let findText = $state('');
@@ -153,6 +159,7 @@
   // inline completion from history: fill the rest of the most recent matching URL, selected so Backspace drops it
   async function complete(e) {
     const el = e.currentTarget, typed = el.value;
+    sg.input(typed);
     if (e.inputType?.startsWith('delete') || !typed || typed.includes(' ')) return;
     const rows = await call('history_search', { q: typed });
     if (el.value !== typed || el.selectionStart !== typed.length) return;
@@ -358,7 +365,7 @@
           <i class="dot" style="background:{color(tab.profile)}"></i>{tab.profile}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
         </button>
       {/if}
-      <div class="pill" class:focus={editing}>
+      <div class="pill" class:focus={editing} bind:this={pillEl}>
         <form onsubmit={submitAddress}>
           <input
             class:ghost={!editing && tab?.url}
@@ -367,7 +374,8 @@
             oninput={complete}
             placeholder="Search or enter address"
             onfocus={(e) => { editing = true; e.currentTarget.select(); }}
-            onblur={() => (editing = false)}
+            onkeydown={sg.key}
+            onblur={() => { editing = false; setTimeout(sg.hide, 150); }}
             spellcheck="false"
             autocapitalize="off"
           />
