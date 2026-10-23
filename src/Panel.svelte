@@ -136,7 +136,23 @@
   });
   // Cone wanders the bottom of the new tab page, picking something to do every few seconds.
   let floorEl = $state(), x = $state(0), face = $state(1), mode = $state('idle'), dur = $state(0);
-  let hop = $state(false), said = $state(false), wake;
+  let hop = $state(false), said = $state(false), startled = $state(false), wake;
+  let mascotEl = $state(), gaze = $state([0, 0]), mouseX = 0, calm = 0;
+  // Eyes follow the pointer; coming close makes Cone jump (not more than every few seconds).
+  function track(e) {
+    if (!newtab || !mascotEl) return;
+    const r = mascotEl.getBoundingClientRect();
+    const dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + 22);
+    const d = Math.hypot(dx, dy) || 1;
+    const k = Math.min(2.6, d / 40);
+    gaze = [(dx / d) * k, (dy / d) * k];
+    mouseX = e.clientX;
+    if (d < 70 && mode !== 'sleep' && Date.now() > calm) {
+      calm = Date.now() + 5000;
+      startled = true;
+      setTimeout(() => (startled = false), 600);
+    }
+  }
   function poke() {
     hop = said = true;
     wake?.();
@@ -148,9 +164,11 @@
     let alive = true, timer;
     const wait = (ms) => new Promise((r) => { wake = r; timer = setTimeout(r, ms); });
     const doing = async (m, ms) => { mode = m; await wait(ms); mode = 'idle'; await wait(500 + Math.random() * 1200); };
+    let chase = false;
     const walk = async () => {
       const max = floorEl.clientWidth - 50;
       let to = Math.random() * max;
+      if (chase) to = Math.min(max, Math.max(0, mouseX - floorEl.getBoundingClientRect().left - 25));
       if (Math.abs(to - x) < 80) to = x < max / 2 ? max : 0;
       face = to > x ? 1 : -1;
       dur = Math.abs(to - x) / 70;
@@ -163,8 +181,8 @@
     (async () => {
       let last = '';
       while (alive) {
-        const acts = { walk, wave: () => doing('wave', 1900), jump: () => doing('jump', 700), spin: () => doing('spin', 950), look: () => doing('look', 2300), sleep: () => doing('sleep', 6500), rest: () => doing('idle', 2500) };
-        const bag = ['walk', 'walk', 'walk', 'walk', 'wave', 'jump', 'spin', 'look', 'sleep', 'rest'].filter((k) => k !== last);
+        const acts = { walk, wave: () => doing('wave', 1900), jump: () => doing('jump', 700), spin: () => doing('spin', 950), dance: () => doing('dance', 2600), stretch: () => doing('stretch', 1700), sit: () => doing('sit', 3200), sneeze: async () => { said = 'achoo'; setTimeout(() => (said = false), 1200); await doing('sneeze', 1300); }, follow: async () => { chase = true; await walk(); chase = false; }, sleep: () => doing('sleep', 6500), rest: () => doing('idle', 2500) };
+        const bag = ['walk', 'walk', 'walk', 'follow', 'follow', 'wave', 'jump', 'spin', 'dance', 'stretch', 'sit', 'sneeze', 'sleep', 'rest'].filter((k) => k !== last);
         last = bag[Math.floor(Math.random() * bag.length)];
         await acts[last]();
       }
@@ -177,6 +195,8 @@
   const count = (name) => st.tabs.filter((t) => t.profile === name).length;
   const sites = (name) => st.cfg.mappings.filter((m) => m.profile === name).length;
 </script>
+
+<svelte:window onpointermove={track} />
 
 <div class="panel">
   {#if library}
@@ -264,10 +284,10 @@
       </div>
       <div class="floor" bind:this={floorEl} aria-hidden="true">
         <div class="walker" style="left:{x}px; --d:{dur}s">
-          <button class="mascot m-{mode}" class:hop onclick={poke} tabindex="-1" aria-label="Cone">
-            {#if said}<span class="say">{st.incognito ? 'Shh. Nobody saw.' : 'Open the way.'}</span>{/if}
+          <button class="mascot m-{mode}" class:hop class:startle={startled} bind:this={mascotEl} onclick={poke} tabindex="-1" aria-label="Cone">
+            {#if said}<span class="say">{said === 'achoo' ? 'Achoo!' : st.incognito ? 'Shh. Nobody saw.' : 'Open the way.'}</span>{/if}
             {#if mode === 'sleep'}<span class="zzz">z<small>z</small></span>{/if}
-            <svg class="fig" style="transform: scaleX({face})" width="50" height="54" viewBox="0 0 50 54">
+            <svg class="fig" style="transform: scaleX({face})" width="50" height="52" viewBox="0 0 50 52">
               <defs><linearGradient id="mg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs>
               <rect class="leg l1" x="14" y="43" width="6" height="9" rx="3" fill="currentColor"/>
               <rect class="leg l2" x="28" y="43" width="6" height="9" rx="3" fill="currentColor"/>
@@ -278,7 +298,7 @@
                 {:else if mode === 'sleep'}
                   <path d="M16 24q2 2 4 0M28 24q2 2 4 0" fill="none" stroke="#111114" stroke-width="1.8" stroke-linecap="round"/>
                 {:else}
-                  <g class="eyes"><circle class="pupil" cx="20" cy="24" r="2.2" fill="#111114"/><circle class="pupil" cx="28" cy="24" r="2.2" fill="#111114"/></g>
+                  <g class="eyes"><circle class="pupil" style="transform: translate({gaze[0] * face}px, {gaze[1]}px)" cx="20" cy="24" r={startled ? 3.2 : 2.2} fill="#111114"/><circle class="pupil" style="transform: translate({gaze[0] * face}px, {gaze[1]}px)" cx="28" cy="24" r={startled ? 3.2 : 2.2} fill="#111114"/></g>
                 {/if}
                 <path d={mode === 'sleep' ? 'M22 31h4' : 'M21 31q3 3 6 0'} fill="none" stroke="#111114" stroke-width="1.8" stroke-linecap="round"/>
               </g>
@@ -579,7 +599,7 @@
   .ico img { position: absolute; inset: 0; width: 100%; height: 100%; padding: 16px; box-sizing: border-box; border-radius: 18px; background: var(--card); object-fit: contain; }
   .ico i { position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; border: 3px solid var(--bg); }
   .nt { position: relative; }
-  .floor { position: absolute; left: 40px; right: 40px; bottom: 14px; height: 70px; pointer-events: none; }
+  .floor { position: absolute; left: 40px; right: 40px; bottom: 0; height: 70px; pointer-events: none; }
   .walker { position: absolute; bottom: 0; transition: left var(--d) linear; }
   .mascot { position: relative; display: block; padding: 0; background: none; color: var(--fg); pointer-events: auto; cursor: pointer; transform-origin: 50% 100%; }
   .mascot:hover { background: none; }
@@ -595,7 +615,13 @@
   .m-wave .arm { animation: wave .45s ease-in-out 4; }
   .m-jump, .mascot.hop { animation: hop .6s ease-out; }
   .m-spin { animation: spin .9s ease-in-out; }
-  .m-look .pupil { animation: look 2.2s ease-in-out; }
+  .pupil { transition: transform .08s linear; }
+  .m-dance { animation: dance .5s ease-in-out 5; }
+  .m-stretch { animation: stretch 1.6s ease-in-out; }
+  .m-sit .l1, .m-sit .l2 { transform: scaleY(.3); }
+  .m-sit { animation: sit 3s ease-in-out; }
+  .m-sneeze { animation: sneeze 1.2s ease-in-out; }
+  .startle { animation: hop .45s ease-out; }
   .m-sleep { animation: sleep 2.4s ease-in-out infinite; }
   .m-sleep .body { transform-box: fill-box; transform-origin: 50% 100%; }
   .zzz { position: absolute; left: 34px; top: -4px; font: 700 14px 'Bricolage Grotesque Variable', system-ui, sans-serif; color: var(--dim); animation: float 2.4s ease-out infinite; }
@@ -608,7 +634,10 @@
   @keyframes wave { 0%, 100% { transform: rotate(-70deg); } 50% { transform: rotate(-120deg); } }
   @keyframes hop { 40% { transform: translateY(-34px) scaleY(1.08); } 55% { transform: translateY(-34px); } 100% { transform: none; } }
   @keyframes spin { 0%, 100% { transform: translateY(0) rotateY(0); } 40% { transform: translateY(-22px) rotateY(360deg); } }
-  @keyframes look { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-2.5px); } 70% { transform: translateX(2.5px); } }
+  @keyframes dance { 0%, 100% { transform: rotate(-9deg) translateY(0); } 50% { transform: rotate(9deg) translateY(-6px); } }
+  @keyframes stretch { 0%, 100% { transform: none; } 35% { transform: scale(.9, 1.15); } 60% { transform: scale(1.1, .88); } }
+  @keyframes sit { 0%, 100% { transform: translateY(0); } 15%, 85% { transform: translateY(5px) scaleY(.9); } }
+  @keyframes sneeze { 0%, 45% { transform: none; } 55% { transform: scale(1.1, .9) rotate(-5deg); } 65% { transform: scale(.95, 1.08) rotate(5deg); } 75% { transform: translateX(-3px); } 85% { transform: translateX(3px); } }
   @keyframes sleep { 50% { transform: scaleY(.96) translateY(1px); } }
   @keyframes float { from { opacity: 1; transform: translate(0, 0); } to { opacity: 0; transform: translate(8px, -16px); } }
   @keyframes blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(.1); } }
