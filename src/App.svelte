@@ -16,6 +16,7 @@
   let findOpen = $state(false);
   let findText = $state('');
   let menu = $state(null);
+  let pmenu = $state(null);
   let newtabOpen = false;
   let tabQuery = $state(null); // null = closed
   let tabSearchEl = $state();
@@ -194,7 +195,7 @@
 
 </script>
 
-<svelte:window onclick={() => { menu = null; }} />
+<svelte:window onclick={() => { menu = null; pmenu = null; }} />
 
 {#snippet pin(t)}
   <button class="pin" class:active={t.id === st.active} title={t.title} onclick={() => call('activate_tab', { id: t.id })} oncontextmenu={(e) => ctx(e, t)}>
@@ -292,9 +293,9 @@
       <button onclick={() => call('reload')} aria-label="Reload"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"/></svg></button>
       <div class="pill">
         {#if tab}
-          <select class="seg" style="background:{color(tab.profile)}" value={tab.profile} onchange={(e) => setProfile(tab, e.currentTarget.value)} title="Profile for this site">
-            {#each cfg.profiles as p}<option value={p.name}>{p.name}</option>{/each}
-          </select>
+          <button class="seg" style="background:{color(tab.profile)}" title="Profile for this site" onclick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); pmenu = pmenu ? null : { x: r.left, y: r.bottom + 6 }; }}>
+            {tab.profile}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
         {/if}
         <form onsubmit={submitAddress}>
           <input
@@ -342,6 +343,14 @@
   </header>
 {/if}
 
+{#if pmenu && tab}
+  <div class="ctx" style="left:{pmenu.x}px; top:{pmenu.y}px">
+    <h6>{tab.host ? 'Always open this site in' : 'Profile for this tab'}</h6>
+    {#each cfg.profiles as p}
+      <button class:sel={tab.profile === p.name} onclick={() => setProfile(tab, p.name)}><i style="background:{color(p.name)}"></i>{p.name}</button>
+    {/each}
+  </div>
+{/if}
 {#if menu}
   <div class="ctx" style="left:{menu.x}px; top:{menu.y}px">
     <button onclick={() => call('reload')}>Reload</button>
@@ -377,7 +386,7 @@
   .tab.active .pbar { opacity: 1; }
   .host { color: var(--dim); font-weight: 400; margin-left: 6px; }
   .tag { font-size: 9.5px; font-weight: 700; letter-spacing: .03em; flex: none; }
-  .seg { font-size: 12px; font-weight: 700; color: #120d1d; padding: 0 12px; height: 100%; border: 0; border-radius: 0; }
+  .seg { font-size: 12px; font-weight: 700; color: #120d1d; padding: 0 12px; height: 100%; border-radius: 0; display: flex; align-items: center; gap: 6px; cursor: pointer; flex: none; }
   .tab.discarded .title { opacity: .55; }
   .fav { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
   .fav img { width: 16px; height: 16px; border-radius: 3px; }

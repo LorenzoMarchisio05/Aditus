@@ -622,13 +622,7 @@ pub fn open_tab(app: &AppHandle, url: Option<Url>, profile: Option<String>, acti
         let mut g = shared(app).app.lock().unwrap();
         let profile = profile
             .filter(|p| g.cfg.profile(p).is_some())
-            .unwrap_or_else(|| {
-                g.tabs
-                    .iter()
-                    .find(|t| t.id == g.active)
-                    .map(|t| t.profile.clone())
-                    .unwrap_or_else(|| g.cfg.profiles[0].name.clone())
-            });
+            .unwrap_or_else(|| g.cfg.profiles[0].name.clone()); // new tabs start in the default profile
         let id = g.next_id;
         g.next_id += 1;
         let entries = url
