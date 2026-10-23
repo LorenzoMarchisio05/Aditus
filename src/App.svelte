@@ -47,15 +47,9 @@
     folded = new Set(folded);
   }
 
-  // Chrome takes the active profile's tint.
+  // Neutral theme; only the accent follows the active profile.
   $effect(() => {
-    const c = tab ? color(tab.profile) : '#6ea8fe';
-    const r = document.documentElement.style;
-    r.setProperty('--accent', c);
-    r.setProperty('--bg', `color-mix(in srgb, ${c} 7%, #0e0f12)`);
-    r.setProperty('--bg2', `color-mix(in srgb, ${c} 9%, #121317)`);
-    r.setProperty('--bg3', `color-mix(in srgb, ${c} 18%, #1a1b20)`);
-    r.setProperty('--line', `color-mix(in srgb, ${c} 16%, #23242a)`);
+    document.documentElement.style.setProperty('--accent', tab ? color(tab.profile) : '#6ea8fe');
   });
 
   $effect(() => {

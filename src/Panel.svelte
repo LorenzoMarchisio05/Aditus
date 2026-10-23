@@ -287,11 +287,11 @@
 
 <style>
   .panel {
-    --bg: color-mix(in srgb, var(--accent) 8%, #0e0d14);
-    --card: color-mix(in srgb, var(--accent) 12%, #16141d);
-    --hi: color-mix(in srgb, var(--accent) 22%, #1d1a28);
-    --line: color-mix(in srgb, var(--accent) 16%, #23212c);
-    --dim: #9d92b8;
+    --bg: #0f0f12;
+    --card: #1c1c23;
+    --hi: #2a2a33;
+    --line: #2a2a33;
+    --dim: #8f8fa0;
     height: 100vh; overflow: hidden; background: var(--bg); color: #f1eefb;
   }
   .grow { flex: 1; min-width: 0; }
@@ -350,7 +350,7 @@
   .logo.big { width: 56px; height: 56px; border-radius: 16px; background: var(--accent); color: #120d1d; font-size: 28px; font-weight: 800; }
   .nav { height: 32px; text-align: left; padding: 0 12px; border-radius: 8px; color: #c9bfe6; font-weight: 500; }
   .nav.on { background: var(--hi); color: #fff; font-weight: 600; }
-  main { flex: 1; min-width: 0; margin: 8px 8px 8px 0; border-radius: 12px; background: color-mix(in srgb, var(--accent) 6%, #131119); padding: 32px 44px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; align-content: start; }
+  main { flex: 1; min-width: 0; margin: 8px 8px 8px 0; border-radius: 12px; background: #15151a; padding: 32px 44px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; align-content: start; }
   .list2 { display: flex; flex-direction: column; }
   .item, .kv { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-top: 1px solid var(--line); }
   .item:first-child, .kv:first-child { border-top: 0; }
