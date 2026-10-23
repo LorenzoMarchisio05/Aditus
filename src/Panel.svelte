@@ -134,6 +134,12 @@
     }
     return [...m.values()].sort((a, b) => b.n - a.n).slice(0, 8);
   });
+  let hop = $state(false), said = $state(false);
+  function poke() {
+    hop = said = true;
+    setTimeout(() => (hop = false), 500);
+    setTimeout(() => (said = false), 2200);
+  }
   const now = new Date();
   const greeting = now.getHours() < 5 ? 'Still up' : now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
   const today = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
@@ -224,6 +230,29 @@
         <span><kbd>⌘T</kbd> new tab</span>
         <span><kbd>⇧⌘A</kbd> search tabs</span>
         <span><kbd>⇧⌘N</kbd> private window</span>
+      </div>
+      <div class="floor" aria-hidden="true">
+        <div class="walker">
+          <div>
+            <button class="mascot" class:hop onclick={poke} tabindex="-1" aria-label="Cone">
+              {#if said}<span class="say">{st.incognito ? 'Shh. Nobody saw.' : 'Open the way.'}</span>{/if}
+              <svg class="turn" width="44" height="54" viewBox="0 0 44 54">
+                <defs><linearGradient id="mg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs>
+                <rect class="leg l1" x="12" y="43" width="6" height="9" rx="3" fill="currentColor"/>
+                <rect class="leg l2" x="26" y="43" width="6" height="9" rx="3" fill="currentColor"/>
+                <g class="body">
+                  <path d="M18 4h8l13 40H5z" fill="url(#mg)" stroke="url(#mg)" stroke-width="4" stroke-linejoin="round"/>
+                  {#if st.incognito}
+                    <rect x="13" y="19" width="18" height="7" rx="3" fill="#111114"/>
+                  {:else}
+                    <g class="eyes"><circle cx="18" cy="24" r="2.2" fill="#111114"/><circle cx="26" cy="24" r="2.2" fill="#111114"/></g>
+                  {/if}
+                  <path d="M19 31q3 3 6 0" fill="none" stroke="#111114" stroke-width="1.8" stroke-linecap="round"/>
+                </g>
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   {:else if st}
@@ -516,6 +545,25 @@
   .site:hover .ico { transform: translateY(-3px); border-color: var(--accent); }
   .ico img { position: absolute; inset: 0; width: 100%; height: 100%; padding: 16px; box-sizing: border-box; border-radius: 18px; background: var(--card); object-fit: contain; }
   .ico i { position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; border: 3px solid var(--bg); }
+  .nt { position: relative; }
+  .floor { position: absolute; left: 40px; right: 40px; bottom: 44px; height: 56px; border-bottom: 1px solid var(--line); pointer-events: none; }
+  .walker { position: absolute; bottom: -1px; left: 0; animation: walk 40s linear infinite; }
+  .turn { display: block; animation: turn 40s step-end infinite; }
+  .mascot { position: relative; display: block; padding: 0; background: none; color: var(--fg); pointer-events: auto; cursor: pointer; animation: bob .5s ease-in-out infinite; transform-origin: 50% 100%; }
+  .mascot.hop { animation: hop .5s ease-out; }
+  .mascot:hover { background: none; }
+  .leg { transform-box: fill-box; transform-origin: 50% 0; }
+  .l1 { animation: step .5s ease-in-out infinite; }
+  .l2 { animation: step .5s ease-in-out infinite reverse; }
+  .eyes { transform-box: fill-box; transform-origin: 50% 50%; animation: blink 5s infinite; }
+  .say { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 12px; color: var(--fg); background: var(--bg3); border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; margin-bottom: 4px; }
+  @keyframes walk { from { left: 0; } 50% { left: calc(100% - 44px); } to { left: 0; } }
+  @keyframes turn { 0% { transform: scaleX(1); } 50% { transform: scaleX(-1); } }
+  @keyframes bob { 50% { transform: translateY(-3px) rotate(2deg); } }
+  @keyframes hop { 40% { transform: translateY(-26px) scaleY(1.08); } 100% { transform: none; } }
+  @keyframes step { 50% { transform: rotate(28deg); } }
+  @keyframes blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(.1); } }
+  @media (prefers-reduced-motion: reduce) { .walker, .turn, .mascot, .l1, .l2, .eyes { animation: none; } .walker { left: 50%; } }
   .keys { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 22px; color: var(--dim); font-size: 13px; }
   .keys span { display: inline-flex; align-items: center; gap: 8px; }
   .lib { display: flex; height: 100%; }
