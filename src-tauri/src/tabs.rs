@@ -314,7 +314,7 @@ pub fn open_internal(app: &AppHandle, win: &str, view: &str) {
     }
 }
 
-fn is_blank(url: &str) -> bool {
+pub fn is_blank(url: &str) -> bool {
     url.is_empty() || url.contains(NEWTAB)
 }
 

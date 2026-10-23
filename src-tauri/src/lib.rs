@@ -392,7 +392,7 @@ fn tab_menu(app: AppHandle, window: tauri::Window, id: u32) -> Result<(), String
         let g = state.app.lock().unwrap();
         let Some(t) = g.tabs.iter().find(|t| t.id == id) else { return Ok(()) };
         let url = t.url();
-        let host = if tabs::internal_view(&url).is_some() { false } else { url::Url::parse(&url).ok().is_some_and(|u| u.host_str().is_some()) };
+        let host = if tabs::is_blank(&url) || tabs::internal_view(&url).is_some() { false } else { url::Url::parse(&url).ok().is_some_and(|u| u.host_str().is_some()) };
         let tab = (t.pinned, t.group.clone(), t.profile.clone(), host, host); // pin only real sites, not new-tab or aditus:// pages
         let mut groups: Vec<String> = g.tabs.iter().filter_map(|t| t.group.clone()).collect();
         groups.sort();
