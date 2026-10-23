@@ -1,7 +1,7 @@
 <script>
-  let { incognito = false } = $props();
+  let { incognito = false, roam = false } = $props();
   // Cone wanders the bottom of the browser pages, picking something to do every few seconds.
-  let floorEl = $state(), x = $state(0), face = $state(1), mode = $state('idle'), dur = $state(0);
+  let floorEl = $state(), x = $state(0), face = $state(roam ? 1 : -1), mode = $state('idle'), dur = $state(0);
   let hop = $state(false), said = $state(false), startled = $state(false), wake;
   let mascotEl = $state(), gaze = $state([0, 0]), mouseX = 0, calm = 0;
   // Eyes follow the pointer; coming close makes Cone jump (not more than every few seconds).
@@ -13,7 +13,7 @@
     const k = Math.min(2.6, d / 40);
     gaze = [(dx / d) * k, (dy / d) * k];
     mouseX = e.clientX;
-    if (d < 70 && mode !== 'sleep' && Date.now() > calm) {
+    if (d < (roam ? 70 : 45) && mode !== 'sleep' && Date.now() > calm) {
       calm = Date.now() + 5000;
       startled = true;
       say('Whoa!', 1200);
@@ -39,7 +39,7 @@
     if (!floorEl) return;
     let alive = true, timer;
     const wait = (ms) => new Promise((r) => { wake = r; timer = setTimeout(r, ms); });
-    const doing = async (m, ms) => { mode = m; await wait(ms); mode = 'idle'; await wait(500 + Math.random() * 1200); };
+    const doing = async (m, ms) => { mode = m; await wait(ms); mode = 'idle'; await wait(roam ? 500 + Math.random() * 1200 : 6000 + Math.random() * 8000); };
     let chase = false;
     const walk = async () => {
       const max = floorEl.clientWidth - 50;
@@ -58,7 +58,7 @@
       let last = '';
       while (alive) {
         const acts = { walk, wave: () => { say('Hi!', 1800); return doing('wave', 1900); }, jump: () => doing('jump', 700), spin: () => doing('spin', 950), dance: () => { say('♪', 2400); return doing('dance', 2600); }, stretch: () => doing('stretch', 1700), sit: () => doing('sit', 3200), sneeze: async () => { say('Achoo!', 1500); await doing('sneeze', 1300); }, follow: async () => { chase = true; await walk(); chase = false; }, sleep: () => { say('Zzz…', 1600); return doing('sleep', 6500); }, rest: () => { say(line(), 2800); return doing('idle', 3000); } };
-        const bag = ['walk', 'walk', 'walk', 'follow', 'follow', 'wave', 'jump', 'spin', 'dance', 'stretch', 'sit', 'sneeze', 'sleep', 'rest'].filter((k) => k !== last);
+        const bag = (roam ? ['walk', 'walk', 'walk', 'follow', 'follow'] : []).concat(['wave', 'jump', 'spin', 'dance', 'stretch', 'sit', 'sneeze', 'sleep', 'rest']).filter((k) => k !== last);
         last = bag[Math.floor(Math.random() * bag.length)];
         await acts[last]();
       }
@@ -69,7 +69,7 @@
 
 <svelte:window onpointermove={track} />
 
-<div class="floor" bind:this={floorEl} aria-hidden="true">
+<div class="floor" class:corner={!roam} bind:this={floorEl} aria-hidden="true">
   <div class="walker" style="left:{x}px; --d:{dur}s">
     <button class="mascot m-{mode}" class:hop class:startle={startled} bind:this={mascotEl} onclick={poke} tabindex="-1" aria-label="Cone">
       {#if said}<span class="say">{said}</span>{/if}
@@ -96,6 +96,8 @@
 </div>
 
 <style>
+  .floor.corner { left: auto; right: 18px; width: 50px; }
+  .corner .say { left: auto; right: 0; transform: none; }
   .floor { position: fixed; left: 40px; right: 40px; z-index: 5; bottom: 0; height: 70px; pointer-events: none; }
   .walker { position: absolute; bottom: 0; transition: left var(--d) linear; }
   .mascot { position: relative; display: block; padding: 0; background: none; color: var(--fg); pointer-events: auto; cursor: pointer; transform-origin: 50% 100%; }
