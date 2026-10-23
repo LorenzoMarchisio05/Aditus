@@ -25,7 +25,9 @@ use url::Url;
 
 const LATE_WINDOW: Duration = Duration::from_millis(1500);
 const GESTURE_WINDOW: Duration = Duration::from_millis(2500);
-pub const NEWTAB: &str = "newtab.html";
+pub #[cfg(target_os = "macos")]
+const SAFARI_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+const NEWTAB: &str = "newtab.html";
 
 pub struct Shared {
     pub app: Mutex<App>,
@@ -380,7 +382,13 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
     let (a_nav, a_title, a_load, a_new, a_dl) =
         (app.clone(), app.clone(), app.clone(), app.clone(), app.clone());
 
-    let mut builder = WebviewBuilder::new(label(tab_id, gen), wurl)
+    let mut builder = WebviewBuilder::new(label(tab_id, gen), wurl);
+    // Embedded WKWebView omits the Safari token; YouTube serves a blank page without it.
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.user_agent(SAFARI_UA);
+    }
+    let mut builder = builder
         .initialization_script(PAGE_SCRIPT)
         .data_store_identifier(config::store_identifier(&cfg_profile))
         .data_directory(data_dir)
