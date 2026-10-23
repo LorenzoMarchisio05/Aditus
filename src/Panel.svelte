@@ -316,7 +316,8 @@
   .nsearch input { flex: 1; height: 100%; background: none; border: 0; font-size: 15px; color: #f1eefb; padding: 0; }
   kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
   .sites { display: flex; gap: 28px; }
-  .site { width: 84px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0; font-size: 12px; font-weight: 500; overflow: hidden; }
+  .site { width: 84px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0; font-size: 12px; font-weight: 500; }
+  .site > span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ico { width: 64px; height: 64px; border-radius: 18px; background: var(--card); display: grid; place-items: center; position: relative; font-size: 22px; }
   .ico i { position: absolute; left: 10px; right: 10px; bottom: 7px; height: 3px; border-radius: 2px; }
   .pcards { display: flex; gap: 12px; }

@@ -47,7 +47,9 @@
 
   // Neutral theme; only the accent follows the active profile.
   $effect(() => {
-    document.documentElement.style.setProperty('--accent', tab ? color(tab.profile) : '#6ea8fe');
+    const r = document.documentElement.style;
+    r.setProperty('--accent', tab ? color(tab.profile) : '#6ea8fe');
+    for (const v of ['--bg', '--bg2', '--bg3', '--line']) r.removeProperty(v); // stale tint from older builds
   });
 
   $effect(() => {
