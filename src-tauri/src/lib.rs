@@ -393,7 +393,7 @@ fn tab_menu(app: AppHandle, window: tauri::Window, id: u32) -> Result<(), String
         let Some(t) = g.tabs.iter().find(|t| t.id == id) else { return Ok(()) };
         let url = t.url();
         let host = if tabs::is_blank(&url) || tabs::internal_view(&url).is_some() { false } else { url::Url::parse(&url).ok().is_some_and(|u| u.host_str().is_some()) };
-        let tab = (t.pinned, t.group.clone(), t.profile.clone(), host, host); // pin only real sites, not new-tab or aditus:// pages
+        let tab = (t.pinned, t.group.clone(), t.profile.clone(), host && !t.private, host); // pin only real sites, not new-tab or aditus:// pages
         let mut groups: Vec<String> = g.tabs.iter().filter_map(|t| t.group.clone()).collect();
         groups.sort();
         groups.dedup();
@@ -480,6 +480,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         &[
             &item("new-tab", "New Tab", "CmdOrCtrl+T")?,
             &item("new-window", "New Window", "CmdOrCtrl+N")?,
+            &item("new-private-window", "New Private Window", "CmdOrCtrl+Shift+N")?,
             &item("close-tab", "Close Tab", "CmdOrCtrl+W")?,
             &item("reopen-tab", "Reopen Closed Tab", "CmdOrCtrl+Shift+T")?,
             &item("focus-address", "Open Location", "CmdOrCtrl+L")?,
@@ -533,7 +534,8 @@ fn on_menu(app: &AppHandle, id: &str) {
                 tabs::open_tab_in(&app, &win, None, None, true);
                 let _ = app.emit_to(ui, "menu", "focus-address");
             }
-            "new-window" => tabs::new_window(&app),
+            "new-window" => tabs::new_window(&app, false),
+            "new-private-window" => tabs::new_window(&app, true),
             "close-tab" => tabs::close_tab(&app, cur),
             "reopen-tab" => tabs::reopen_closed(&app),
             "reload" => tabs::reload(&app, cur),

@@ -271,7 +271,7 @@
   {#if !collapsed}
     <div class="brand">
       <svg width="24" height="24" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M46 18h8l15 60H31z" fill="url(#gc)" stroke="url(#gc)" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="var(--fg)" stroke-width="5" stroke-linecap="round"/></svg>
-      aditus
+      aditus{#if st.incognito}<span class="priv">private</span>{/if}
     </div>
   {/if}
   {#if collapsed}
@@ -343,7 +343,7 @@
       <button disabled={!tab?.can_back} onclick={() => call('back')} aria-label="Back"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
       <button disabled={!tab?.can_forward} onclick={() => call('forward')} aria-label="Forward"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
       <button onclick={() => call('reload')} aria-label="Reload"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"/></svg></button>
-      {#if tab && !tab.url?.startsWith('aditus://')}
+      {#if tab && tab.url && !tab.url.startsWith('aditus://') && !st.incognito}
         <button class="seg" title="Profile for this site" onclick={() => call('profile_menu')}>
           <i class="dot" style="background:{color(tab.profile)}"></i>{tab.profile}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
         </button>
@@ -399,6 +399,7 @@
 
 <style>
   .side { position: fixed; inset: 0 auto 0 0; background: var(--sb); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding-bottom: 4px; }
+  .priv { margin-left: auto; font: 500 10.5px/1 'JetBrains Mono Variable', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 6px; }
   .brand { display: flex; align-items: center; gap: 10px; padding: 8px 18px 12px; font: 800 20px/1 'Bricolage Grotesque Variable', system-ui, sans-serif; letter-spacing: -.02em; flex: none; }
   .lbl { font: 500 10.5px ui-monospace, 'SF Mono', monospace; letter-spacing: .1em; color: var(--dim); padding: 10px 18px 4px; }
   .tabsearch { margin: 0 10px 4px; }

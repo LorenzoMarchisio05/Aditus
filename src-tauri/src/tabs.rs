@@ -60,6 +60,8 @@ pub struct Tab {
     pub discarded: bool,
     pub loading: bool,
     pub audible: bool,
+    /// Private-window tab: no history, no saved session, no profile swaps, throwaway storage.
+    pub private: bool,
     pub gen: u32,
     pub last_active: Instant,
     mode: Mode,
@@ -84,6 +86,7 @@ pub struct Win {
     pub sidebar: f64,
     pub top: f64,
     pub overlay_open: bool,
+    pub incognito: bool,
 }
 
 pub struct App {
@@ -134,7 +137,7 @@ impl App {
     }
 
     pub fn win(&mut self, w: &str) -> &mut Win {
-        self.wins.entry(w.to_string()).or_insert(Win { active: 0, sidebar: 240.0, top: 52.0, overlay_open: false })
+        self.wins.entry(w.to_string()).or_insert(Win { active: 0, sidebar: 240.0, top: 52.0, overlay_open: false, incognito: false })
     }
 
     /// Selected tab of window `w`.
@@ -344,6 +347,7 @@ struct Snapshot<'a> {
     prompt: Option<String>,
     toast: Option<Toast>,
     adblock_site: bool,
+    incognito: bool,
 }
 
 pub fn emit_state(app: &AppHandle) {
@@ -391,6 +395,7 @@ fn emit(app: &AppHandle, save: bool) {
             prompt: g.prompt.clone(),
             toast: g.toast.clone(),
             adblock_site: !g.cfg.allowlist.contains(&active_host),
+            incognito: w.incognito,
         };
         let _ = app.emit("state", &snap);
     }
@@ -516,16 +521,18 @@ new MutationObserver(skip).observe(document,{subtree:true,attributes:true,attrib
 })();"#;
 
 fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String> {
-    let (profile_name, gen, url, cfg_profile, win) = {
+    let (profile_name, gen, url, cfg_profile, win, private) = {
         let g = shared(app).app.lock().unwrap();
         let t = g.tabs.iter().find(|t| t.id == tab_id).ok_or("no tab")?;
         let p = g.cfg.profile(&t.profile).or(g.cfg.profiles.first()).ok_or("no profile")?.clone();
-        (t.profile.clone(), t.gen, t.url(), p, t.win.clone())
+        (t.profile.clone(), t.gen, t.url(), p, t.win.clone(), t.private)
     };
     let window = app.get_window(&win).ok_or("no window")?;
     let adblock_on = shared(app).app.lock().unwrap().cfg.settings.adblock;
     let data_dir = config::Config::data_dir(&shared(app).data_dir, &cfg_profile);
-    let _ = std::fs::create_dir_all(&data_dir);
+    if !private {
+        let _ = std::fs::create_dir_all(&data_dir);
+    }
 
     let wurl = if let Some(view) = internal_view(&url) {
         WebviewUrl::App(format!("index.html?view={view}").into())
@@ -544,11 +551,15 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) -> Result<(), String>
     {
         builder = builder.user_agent(SAFARI_UA);
     }
+    // Private tabs get a throwaway store, never the profile's.
+    builder = if private {
+        builder.incognito(true)
+    } else {
+        builder.data_store_identifier(config::store_identifier(&cfg_profile)).data_directory(data_dir)
+    };
     let mut builder = builder
         .initialization_script(PAGE_SCRIPT)
         .initialization_script(if adblock_on { YT_SCRIPT } else { "" })
-        .data_store_identifier(config::store_identifier(&cfg_profile))
-        .data_directory(data_dir)
         .on_navigation(move |u| on_navigation(&a_nav, tab_id, gen, u))
         .on_document_title_changed(move |_, title| {
             let s = shared(&a_title);
@@ -643,17 +654,17 @@ fn on_navigation(app: &AppHandle, tab_id: u32, gen: u32, u: &Url) -> bool {
             .map(|t| t.elapsed() < GESTURE_WINDOW)
             .unwrap_or(false);
         let Some(t) = g.tabs.iter().find(|t| t.id == tab_id && t.gen == gen) else { return true };
-        let profile = t.profile.clone();
+        let (profile, private) = (t.profile.clone(), t.private);
         if cfg!(debug_assertions) {
             eprintln!("[nav] tab={tab_id} user={user} {u}");
         }
         g.late.remove(&tab_id);
-        if !user {
+        if !user && !private {
             if let Decision::Swap(p) = nav::decide(&g.cfg.mappings, &profile, &host, true) {
                 g.late.insert(tab_id, (p, u.to_string(), Instant::now()));
             }
         }
-        let mut d = nav::decide(&g.cfg.mappings, &profile, &host, user);
+        let mut d = if private { Decision::Allow } else { nav::decide(&g.cfg.mappings, &profile, &host, user) };
         if let Decision::Prompt(h) = &d {
             if g.skipped.contains(h) || g.prompt.is_some() {
                 d = Decision::Allow;
@@ -698,7 +709,7 @@ fn on_page_load(app: &AppHandle, tab_id: u32, gen: u32, url: String, started: bo
             None
         } else {
             record_entry(t, &url);
-            (!is_blank(&url) && internal_view(&url).is_none()).then(|| (url, t.title.clone(), t.profile.clone()))
+            (!t.private && !is_blank(&url) && internal_view(&url).is_none()).then(|| (url, t.title.clone(), t.profile.clone()))
         }
     };
     if let Some((url, title, profile)) = visit {
@@ -800,6 +811,7 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
             .unwrap_or_else(|| g.cfg.profiles[0].name.clone()); // new tabs start in the default profile
         let id = g.next_id;
         g.next_id += 1;
+        let private = g.wins.get(win).is_some_and(|w| w.incognito);
         let entries = url
             .map(|u| vec![Entry { url: u.to_string(), profile: profile.clone() }])
             .unwrap_or_default();
@@ -815,6 +827,7 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
             discarded: true,
             loading: false,
             audible: false,
+            private,
             gen: 0,
             last_active: Instant::now(),
             mode: Mode::Push,
@@ -862,7 +875,7 @@ pub fn close_tab(app: &AppHandle, id: u32) {
         let t = g.tabs.remove(pos);
         g.gestures.remove(&id);
         let url = t.url();
-        if !is_blank(&url) && internal_view(&url).is_none() {
+        if !t.private && !is_blank(&url) && internal_view(&url).is_none() {
             g.closed.push((url, t.profile.clone()));
             if g.closed.len() > 20 {
                 g.closed.remove(0);
@@ -912,6 +925,9 @@ pub fn swap(app: &AppHandle, tab_id: u32, profile: &str, url: &str, announce: bo
         let mut g = shared(app).app.lock().unwrap();
         let active = g.active(&g.win_of(tab_id));
         let Some(t) = g.tab(tab_id) else { return };
+        if t.private {
+            return;
+        }
         let previous = Undo { tab: tab_id, profile: t.profile.clone(), url: t.url() };
         let old = label(t.id, t.gen);
         t.gen += 1;
@@ -1196,7 +1212,7 @@ pub fn create_window(app: &AppHandle, label: &str) -> tauri::Result<()> {
 }
 
 /// New window with one blank tab; it takes focus.
-pub fn new_window(app: &AppHandle) {
+pub fn new_window(app: &AppHandle, incognito: bool) {
     let label = {
         let mut g = shared(app).app.lock().unwrap();
         let n = g.next_win;
@@ -1206,7 +1222,16 @@ pub fn new_window(app: &AppHandle) {
     if let Err(e) = create_window(app, &label) {
         return eprintln!("new window: {e}");
     }
-    shared(app).app.lock().unwrap().focused = label.clone();
+    {
+        let mut g = shared(app).app.lock().unwrap();
+        g.focused = label.clone();
+        g.win(&label).incognito = incognito;
+    }
+    if incognito {
+        if let Some(w) = app.get_window(&label) {
+            let _ = w.set_title("Aditus (Private)");
+        }
+    }
     open_tab_in(app, &label, None, None, true);
 }
 
@@ -1225,7 +1250,7 @@ pub fn window_closed(app: &AppHandle, label: &str) {
         }
         for t in &gone {
             let url = t.url();
-            if !is_blank(&url) && internal_view(&url).is_none() {
+            if !t.private && !is_blank(&url) && internal_view(&url).is_none() {
                 g.closed.push((url, t.profile.clone()));
             }
         }
@@ -1279,6 +1304,7 @@ pub fn save_session(app: &AppHandle) {
             tabs: g
                 .tabs
                 .iter()
+                .filter(|t| !t.private)
                 .map(|t| Saved {
                     url: t.url(),
                     profile: t.profile.clone(),
