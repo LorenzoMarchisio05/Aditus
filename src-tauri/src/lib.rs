@@ -12,7 +12,7 @@ use db::{Db, DownloadRow, HistoryRow};
 use std::{sync::Mutex, time::Duration};
 use tabs::{App, Shared};
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{CheckMenuItem, ContextMenu, Menu, MenuItem, PredefinedMenuItem, Submenu},
     window::WindowBuilder,
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Webview, WebviewBuilder, WebviewUrl,
     WindowEvent,
@@ -324,6 +324,29 @@ fn hide_panel(app: AppHandle) {
     }
 }
 
+/// Native popup (draws above the page webviews, unlike an HTML menu); picks arrive as `menu` events `profile:<name>`.
+#[tauri::command(async)]
+fn profile_menu(app: AppHandle) -> Result<(), String> {
+    let (names, cur) = {
+        let state = app.state::<Shared>();
+        let g = state.app.lock().unwrap();
+        let cur = g.tabs.iter().find(|t| t.id == g.active).map(|t| t.profile.clone()).unwrap_or_default();
+        (g.cfg.profiles.iter().map(|p| p.name.clone()).collect::<Vec<_>>(), cur)
+    };
+    let items = names
+        .iter()
+        .map(|n| CheckMenuItem::with_id(&app, format!("profile:{n}"), n, true, *n == cur, None::<&str>))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items.iter().map(|i| i as _).collect();
+    let menu = Menu::with_items(&app, &refs).map_err(|e| e.to_string())?;
+    let window = app.get_window("main").ok_or("no window")?;
+    app.run_on_main_thread(move || {
+        let _ = menu.popup(window);
+    })
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command(async)]
 fn switch_profile(app: AppHandle, profile: String) {
     tabs::switch_profile(&app, active_id(&app), &profile);
@@ -449,7 +472,7 @@ pub fn run() {
             assign_mapping, skip_prompt, undo_swap, dismiss_toast, save_settings, add_profile,
             delete_profile, delete_mapping, toggle_allowlist, pin_tab, group_tab, find, find_clear,
             open_devtools, history_search, history_clear, downloads_list, show_palette, hide_palette,
-            reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile,
+            reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile, profile_menu,
             adblock_info, check_update
         ])
         .on_menu_event(|app, ev| on_menu(app, ev.id().as_ref()))

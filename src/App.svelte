@@ -16,7 +16,6 @@
   let findOpen = $state(false);
   let findText = $state('');
   let menu = $state(null);
-  let pmenu = $state(null);
   let newtabOpen = false;
   let tabQuery = $state(null); // null = closed
   let tabSearchEl = $state();
@@ -130,6 +129,7 @@
         await on('menu', (id) => {
           if (id === 'focus-address') focusAddress();
           else if (id === 'find') openFind();
+          else if (id.startsWith('profile:')) setProfile(tab, id.slice(8));
           else if (id === 'search-tabs') openTabSearch();
           else if (id === 'toggle-sidebar') settings({ sidebar_collapsed: !collapsed });
           else if (id === 'toggle-topbar') settings({ topbar_visible: !cfg.settings.topbar_visible });
@@ -195,7 +195,7 @@
 
 </script>
 
-<svelte:window onclick={() => { menu = null; pmenu = null; }} />
+<svelte:window onclick={() => { menu = null; }} />
 
 {#snippet pin(t)}
   <button class="pin" class:active={t.id === st.active} title={t.title} onclick={() => call('activate_tab', { id: t.id })} oncontextmenu={(e) => ctx(e, t)}>
@@ -293,15 +293,9 @@
       <button onclick={() => call('reload')} aria-label="Reload"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"/></svg></button>
       <div class="pill">
         {#if tab && !tab.url?.startsWith('aditus://')}
-          {#if pmenu}
-            {#each cfg.profiles as p}
-              <button class="seg pick" class:cur={tab.profile === p.name} style="background:{color(p.name)}" title={tab.host ? `Always open ${tab.host} in ${p.name}` : p.name} onclick={() => setProfile(tab, p.name)}>{p.name}</button>
-            {/each}
-          {:else}
-            <button class="seg" style="background:{color(tab.profile)}" title="Profile for this site" onclick={(e) => { e.stopPropagation(); pmenu = { open: true }; }}>
-              {tab.profile}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-            </button>
-          {/if}
+          <button class="seg" style="background:{color(tab.profile)}" title="Profile for this site" onclick={() => call('profile_menu')}>
+            {tab.profile}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
         {/if}
         <form onsubmit={submitAddress}>
           <input
@@ -384,7 +378,6 @@
   .tab.active .pbar { opacity: 1; }
   .host { color: var(--dim); font-weight: 400; margin-left: 6px; }
   .tag { font-size: 9.5px; font-weight: 700; letter-spacing: .03em; flex: none; }
-  .seg.pick:not(.cur) { opacity: .5; }
   .seg { font-size: 12px; font-weight: 700; color: #120d1d; padding: 0 12px; height: 100%; border-radius: 0; display: flex; align-items: center; gap: 6px; cursor: pointer; flex: none; }
   .tab.discarded .title { opacity: .55; }
   .fav { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
