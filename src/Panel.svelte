@@ -143,7 +143,7 @@
 </script>
 
 <div class="panel">
-  {#if st}<Mascot incognito={st.incognito} roam={newtab || view === 'settings'} side={view === 'settings'} />{/if}
+  {#if st}<Mascot incognito={st.incognito} roam={newtab || view === 'settings' || view === 'history'} side={view === 'settings'} />{/if}
   {#if library}
     <div class="lib">
       <section class="hist">
