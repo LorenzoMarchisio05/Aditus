@@ -1061,6 +1061,22 @@ pub fn go_history(app: &AppHandle, tab_id: u32, delta: i32) {
     }
 }
 
+/// Links handed to the app from outside (default browser, second launch): http(s) only, each in a new tab.
+pub fn open_urls<S: AsRef<str>>(app: &AppHandle, urls: impl IntoIterator<Item = S>) {
+    let urls: Vec<Url> = urls.into_iter().filter_map(|u| Url::parse(u.as_ref()).ok()).filter(|u| matches!(u.scheme(), "http" | "https")).collect();
+    if urls.is_empty() {
+        return;
+    }
+    for u in urls {
+        open_tab(app, Some(u), None, true);
+    }
+    let win = shared(app).app.lock().unwrap().focused.clone();
+    if let Some(w) = app.get_window(&win) {
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
 /// Opens `url` with the OS handler. Callers pass only allow-listed schemes.
 pub fn open_external(url: &str) {
     #[cfg(target_os = "macos")]

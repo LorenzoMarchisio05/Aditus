@@ -657,7 +657,11 @@ fn on_menu(app: &AppHandle, id: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // A second launch (a link opened from another app) hands its arguments to the running one.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _| tabs::open_urls(app, argv.iter().skip(1))));
+    builder
         .invoke_handler(tauri::generate_handler![
             get_state, new_tab, close_tab, activate_tab, address, back, forward, reload, set_layout,
             assign_mapping, skip_prompt, undo_swap, dismiss_toast, save_settings, add_profile,
@@ -704,6 +708,8 @@ pub fn run() {
                 }
             }
             tabs::restore_session(&handle);
+            #[cfg(not(target_os = "macos"))]
+            tabs::open_urls(&handle, std::env::args().skip(1));
 
             #[cfg(debug_assertions)]
             if let Some(port) = std::env::var("ADITUS_SELFTEST_PORT").ok().and_then(|p| p.parse().ok()) {
@@ -726,11 +732,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Aditus")
         .run(|app, ev| {
-            if let tauri::RunEvent::Exit = ev {
-                let s = app.state::<Shared>();
-                if s.app.lock().unwrap().cfg.settings.clear_history_on_quit {
-                    s.db.clear_history();
+            match ev {
+                tauri::RunEvent::Exit => {
+                    let s = app.state::<Shared>();
+                    if s.app.lock().unwrap().cfg.settings.clear_history_on_quit {
+                        s.db.clear_history();
+                    }
                 }
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Opened { urls } => tabs::open_urls(app, urls.iter().map(|u| u.as_str())),
+                _ => {}
             }
         });
 }
