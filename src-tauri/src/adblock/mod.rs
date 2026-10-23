@@ -178,7 +178,13 @@ fn load_texts(dir: &PathBuf) -> Vec<String> {
 
 fn rebuild(app: &AppHandle) {
     let Some(b) = blocker(app) else { return };
-    let (engine, chunks) = build(&load_texts(&b.dir));
+    install(app, &load_texts(&b.dir));
+}
+
+/// Swap in a new engine built from `texts` and push it to the platform backend.
+pub fn install(app: &AppHandle, texts: &[String]) {
+    let Some(b) = blocker(app) else { return };
+    let (engine, chunks) = build(texts);
     *b.engine.write().unwrap() = Some(Arc::new(engine));
     *b.rules.write().unwrap() = Arc::new(chunks);
     native::reinstall(app);

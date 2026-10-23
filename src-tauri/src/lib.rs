@@ -4,6 +4,8 @@ pub mod db;
 pub mod nav;
 pub mod search;
 pub mod tabs;
+#[cfg(debug_assertions)]
+mod selftest;
 
 use config::{Config, Settings};
 use db::{Db, DownloadRow, HistoryRow};
@@ -406,7 +408,10 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            let dir = app.path().app_data_dir()?;
+            let dir = std::env::var_os("ADITUS_DATA_DIR")
+                .filter(|_| cfg!(debug_assertions))
+                .map(std::path::PathBuf::from)
+                .map_or_else(|| app.path().app_data_dir(), Ok)?;
             let cfg_path = dir.join("config.toml");
             let cfg = Config::load(&cfg_path);
             cfg.save(&cfg_path);
@@ -430,6 +435,12 @@ pub fn run() {
 
             adblock::init(&handle);
             tabs::restore_session(&handle);
+
+            #[cfg(debug_assertions)]
+            if let Some(port) = std::env::var("ADITUS_SELFTEST_PORT").ok().and_then(|p| p.parse().ok()) {
+                let h = handle.clone();
+                std::thread::spawn(move || selftest::run(&h, port));
+            }
 
             let h = handle.clone();
             std::thread::spawn(move || loop {
