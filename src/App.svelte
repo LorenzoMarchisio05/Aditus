@@ -42,6 +42,17 @@
     folded = new Set(folded);
   }
 
+  // Chrome takes the active profile's tint.
+  $effect(() => {
+    const c = tab ? color(tab.profile) : '#6ea8fe';
+    const r = document.documentElement.style;
+    r.setProperty('--accent', c);
+    r.setProperty('--bg', `color-mix(in srgb, ${c} 7%, #0e0f12)`);
+    r.setProperty('--bg2', `color-mix(in srgb, ${c} 9%, #121317)`);
+    r.setProperty('--bg3', `color-mix(in srgb, ${c} 18%, #1a1b20)`);
+    r.setProperty('--line', `color-mix(in srgb, ${c} 16%, #23242a)`);
+  });
+
   $effect(() => {
     call('set_layout', { sidebar: sidebarW, top });
   });
@@ -176,17 +187,17 @@
     onkeydown={(e) => e.key === 'Enter' && call('activate_tab', { id: t.id })}
     oncontextmenu={(e) => ctx(e, t)}
   >
+    <span class="pbar" style="background:{color(t.profile)}"></span>
     <span class="fav">
       {#if t.loading}<span class="spin"></span>{:else if favicon(t)}<img src={favicon(t)} alt="" onerror={(e) => (e.currentTarget.style.display = 'none')} />{/if}
     </span>
     {#if !collapsed}
-      <span class="title">{t.title}</span>
-      <span class="badge" style="background:{color(t.profile)}" title={t.profile}>{initial(t.profile)}</span>
+      <span class="title">{t.title}{#if t.host}<span class="host"> {t.host}</span>{/if}</span>
+      <span class="tag" style="color:{color(t.profile)}" title={t.profile}>{t.profile.slice(0, 3).toUpperCase()}</span>
       {#if !t.pinned}
         <button class="x" onclick={(e) => { e.stopPropagation(); call('close_tab', { id: t.id }); }} aria-label="Close tab">×</button>
       {/if}
     {:else}
-      <span class="dot" style="background:{color(t.profile)}"></span>
     {/if}
   </div>
 {/snippet}
@@ -197,6 +208,13 @@
     {#if !collapsed}<span class="brand">Aditus</span>{/if}
     <button onclick={() => { call('new_tab', {}); focusAddress(); }} title="New tab" aria-label="New tab">＋</button>
   </div>
+
+  {#if tab && !collapsed}
+    <div class="pcard" style="background:{color(tab.profile)}">
+      <span class="pinit" style="color:{color(tab.profile)}">{initial(tab.profile)}</span>
+      <span class="pname">{tab.profile}<small>{st.tabs.filter((x) => x.profile === tab.profile).length} tabs</small></span>
+    </div>
+  {/if}
 
   {#if tabQuery !== null && !collapsed}
     <input class="tabsearch" bind:this={tabSearchEl} bind:value={tabQuery} onkeydown={tabSearchKey} placeholder="Search tabs" spellcheck="false" />
@@ -250,6 +268,11 @@
       <button disabled={!tab?.can_back} onclick={() => call('back')} aria-label="Back">‹</button>
       <button disabled={!tab?.can_forward} onclick={() => call('forward')} aria-label="Forward">›</button>
       <button onclick={() => call('reload')} aria-label="Reload">↻</button>
+      {#if tab}
+        <select class="seg" style="background:{color(tab.profile)}" value={tab.profile} onchange={(e) => call('switch_profile', { profile: e.currentTarget.value })} title="Profile for this tab">
+          {#each cfg.profiles as p}<option value={p.name}>{p.name}</option>{/each}
+        </select>
+      {/if}
       <form onsubmit={submitAddress}>
         <input
           bind:this={addrEl}
@@ -262,9 +285,6 @@
         />
       </form>
       {#if tab}
-        <select class="pill" style="background:{color(tab.profile)}" value={tab.profile} onchange={(e) => call('switch_profile', { profile: e.currentTarget.value })} title="Profile for this tab">
-          {#each cfg.profiles as p}<option value={p.name}>{p.name}</option>{/each}
-        </select>
         {#if tab.host}
           <button
             class:off={!st.adblock_site}
@@ -314,13 +334,21 @@
   .tabs { flex: 1; overflow-y: auto; padding: 4px 6px; }
   .tab { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 8px; cursor: default; position: relative; }
   .tab:hover { background: var(--bg3); }
-  .tab.active { background: var(--bg3); box-shadow: inset 2px 0 0 var(--accent); }
+  .tab { padding-left: 0; overflow: hidden; }
+  .tab.active { background: var(--bg3); }
+  .pbar { width: 4px; align-self: stretch; flex: none; opacity: .5; }
+  .tab.active .pbar { opacity: 1; }
+  .host { color: var(--dim); font-weight: 400; margin-left: 6px; }
+  .tag { font-size: 9.5px; font-weight: 700; letter-spacing: .03em; flex: none; }
+  .pcard { display: flex; align-items: center; gap: 10px; margin: 0 8px 6px; padding: 7px 10px; border-radius: 12px; color: #120d1d; }
+  .pinit { width: 26px; height: 26px; border-radius: 8px; background: #120d1d; display: grid; place-items: center; font-weight: 700;}
+  .pname { display: flex; flex-direction: column; font-weight: 700; line-height: 1.15; }
+  .pname small { font-weight: 500; opacity: .7; font-size: 11px; }
+  .seg { font-size: 12px; font-weight: 700; color: #120d1d; padding: 0 12px; height: 34px; border: 0; border-radius: 10px 0 0 10px; margin-right: -4px; }
   .tab.discarded .title { opacity: .55; }
   .fav { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
   .fav img { width: 16px; height: 16px; border-radius: 3px; }
   .title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .badge { width: 16px; height: 16px; border-radius: 50%; font-size: 10px; font-weight: 700; color: #111; display: grid; place-items: center; flex: none; }
-  .dot { position: absolute; right: 6px; bottom: 6px; width: 7px; height: 7px; border-radius: 50%; }
   .x { padding: 0 6px; opacity: 0; line-height: 1.2; }
   .tab:hover .x { opacity: 1; }
   .spin { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s .7s linear infinite; }
@@ -338,7 +366,6 @@
   .bar { height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 8px; }
   form { flex: 1; }
   form input { width: 100%; }
-  .pill { font-size: 11px; font-weight: 600; color: #111; padding: 2px 6px; border: 0; border-radius: 10px; }
   .off { color: var(--danger); }
   .find { height: 36px; display: flex; align-items: center; gap: 4px; padding: 0 8px; border-top: 1px solid var(--line); }
   .find input { flex: 1; }
