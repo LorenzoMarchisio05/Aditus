@@ -196,6 +196,27 @@ fn check_update() -> UpdateInfo {
     UpdateInfo { current, latest: tag, url, newer }
 }
 
+/// Search-engine completions for what is being typed. Nothing is sent from private windows or when switched off.
+#[tauri::command(async)]
+fn search_suggest(app: AppHandle, window: tauri::Window, q: String) -> Vec<String> {
+    let (on, template, private) = {
+        let mut g = app.state::<Shared>().inner().app.lock().unwrap();
+        let private = g.win(window.label()).incognito;
+        (g.cfg.settings.search_suggestions, g.cfg.settings.search_template.clone(), private)
+    };
+    let q = q.trim();
+    let Some(url) = (on && !private && !q.is_empty()).then(|| search::suggest_url(&template, q)).flatten() else { return vec![] };
+    ureq::get(&url)
+        .set("User-Agent", "aditus")
+        .timeout(Duration::from_secs(3))
+        .call()
+        .ok()
+        .and_then(|r| r.into_string().ok())
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v[1].as_array().map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).take(6).collect()))
+        .unwrap_or_default()
+}
+
 #[tauri::command(async)]
 fn add_profile(app: AppHandle, name: String) {
     let name = name.trim().to_string();
@@ -808,7 +829,7 @@ pub fn run() {
             get_state, new_tab, close_tab, activate_tab, address, back, forward, reload, set_layout,
             assign_mapping, skip_prompt, undo_swap, dismiss_toast, save_settings, add_profile,
             delete_profile, delete_mapping, toggle_allowlist, pin_tab, group_tab, find, find_clear,
-            open_devtools, history_search, history_clear, downloads_list, show_palette, hide_palette, suggest_show, suggest_hide, suggest_get,
+            open_devtools, history_search, history_clear, downloads_list, show_palette, hide_palette, search_suggest, suggest_show, suggest_hide, suggest_get,
             reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile, profile_menu, tab_menu,
             adblock_info, check_update, default_browser_settings, set_profile_color, page_context, open_download, answer_permission, delete_permission
         ])

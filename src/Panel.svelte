@@ -293,6 +293,10 @@
               <input type="checkbox" class="sw" checked={st.cfg.settings.links_background} onchange={(e) => set({ links_background: e.currentTarget.checked })} />
             </label>
             <label class="item">
+              <span class="grow"><b>Search suggestions</b><small>Send what you type in the address bar to your search engine for completions. Never from private windows.</small></span>
+              <input type="checkbox" class="sw" checked={st.cfg.settings.search_suggestions} onchange={(e) => set({ search_suggestions: e.currentTarget.checked })} />
+            </label>
+            <label class="item">
               <span class="grow"><b>Sleep idle tabs after</b><small>Pinned and playing tabs stay awake.</small></span>
               <span><input type="number" min="1" max="1440" value={st.cfg.settings.idle_minutes} onchange={(e) => set({ idle_minutes: Math.max(1, +e.currentTarget.value) })} /> min</span>
             </label>

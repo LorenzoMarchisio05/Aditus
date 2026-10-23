@@ -26,8 +26,27 @@ pub fn resolve(input: &str, template: &str) -> Url {
     Url::parse(&template.replace("%s", &q)).unwrap_or_else(|_| Url::parse(&DDG.replace("%s", &q)).unwrap())
 }
 
+/// The engine's suggestion endpoint for the configured search template; None for a custom one.
+pub fn suggest_url(template: &str, q: &str) -> Option<String> {
+    let q = url::form_urlencoded::byte_serialize(q.as_bytes()).collect::<String>();
+    if template.contains("duckduckgo.com") {
+        Some(format!("https://duckduckgo.com/ac/?type=list&q={q}"))
+    } else if template.contains("google.com/search") {
+        Some(format!("https://suggestqueries.google.com/complete/search?client=firefox&q={q}"))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn suggest_url_per_engine() {
+        assert!(super::suggest_url(super::DDG, "a b").unwrap().ends_with("q=a+b"));
+        assert!(super::suggest_url(super::GOOGLE, "x").unwrap().contains("suggestqueries.google.com"));
+        assert!(super::suggest_url("https://example.com/?q=%s", "x").is_none());
+    }
+
     use super::*;
 
     #[test]

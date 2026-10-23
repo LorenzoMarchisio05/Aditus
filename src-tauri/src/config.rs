@@ -52,6 +52,9 @@ pub struct Settings {
     pub links_background: bool,
     #[serde(default = "yes")]
     pub auto_update: bool,
+    /// Ask the search engine for suggestions while typing in the address bar (not in private windows).
+    #[serde(default = "yes")]
+    pub search_suggestions: bool,
     /// Page zoom in percent.
     #[serde(default = "default_zoom")]
     pub page_zoom: u32,
@@ -101,6 +104,7 @@ impl Default for Settings {
             compact_tabs: false,
             links_background: false,
             auto_update: true,
+            search_suggestions: true,
             page_zoom: default_zoom(),
         }
     }

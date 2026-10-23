@@ -9,11 +9,12 @@ const urlish = (q) => /^(\w+:\/\/|[\w-]+(\.[\w-]+)+(:\d+)?(\/|$))/.test(q);
  * `anchor()` gives the input's {x, y, w} in window coordinates; `fill(text)` puts text in the input.
  */
 export function createSuggest({ anchor = () => ({ x: 0, y: 0, w: 0 }), palette = false, fill }) {
-  let rows = [], sel = -1, typed = '', seq = 0;
+  let rows = [], sel = -1, typed = '', seq = 0, timer;
   const push = () => call('suggest_show', { payload: { rows, sel }, palette, ...anchor() });
 
   function hide() {
     seq++;
+    clearTimeout(timer);
     rows = [];
     call('suggest_hide');
   }
@@ -33,8 +34,18 @@ export function createSuggest({ anchor = () => ({ x: 0, y: 0, w: 0 }), palette =
       hist.push({ kind: 'hist', url: r.url, title: r.title, score: k.toLowerCase().startsWith(lq) ? 0 : r.url.toLowerCase().includes(lq) ? 1 : 2 });
     }
     hist.sort((a, b) => a.score - b.score);
-    rows = [{ kind: urlish(q) ? 'go' : 'search', url: q, title: q }, ...hist.slice(0, 6)];
+    const head = { kind: urlish(q) ? 'go' : 'search', url: q, title: q };
+    rows = [head, ...hist.slice(0, 3)];
     push();
+    // the engine's completions arrive a moment later and slot in under the history matches
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const words = await call('search_suggest', { q }).catch(() => []);
+      if (mine !== seq || sel >= 0 || !words.length) return;
+      const more = words.filter((w) => w.toLowerCase() !== lq).slice(0, 4).map((w) => ({ kind: 'search', url: w, title: w }));
+      rows = [head, ...hist.slice(0, 3), ...more];
+      push();
+    }, 120);
   }
 
   /** Arrow keys move the highlight and fill the input; Escape closes. True when the key was used. */
