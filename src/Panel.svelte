@@ -306,15 +306,12 @@
           <h1>Profiles <small>Separate cookies and logins. Each tab runs in one profile.</small></h1>
           <div class="pgrid">
             {#each st.cfg.profiles as p}
-              <div class="card pcard" style="border-top-color:{color(p.name)}">
-                <div class="phead"><span class="pi" style="background:{color(p.name)}">{p.name[0].toUpperCase()}</span><b class="grow">{p.name}</b></div>
-                <div class="stats"><span><b>{sites(p.name)}</b>sites</span><span><b>{count(p.name)}</b>tabs</span></div>
-                <div class="row pcolor">
-                  <label class="swatch custom" title="Profile colour" style="background:{color(p.name)}">
+              <div class="card pcard">
+                <div class="phead"><label class="pi" title="Change colour" style="background:{color(p.name)}">
                     <input type="color" value={p.color ?? '#999999'} onchange={(e) => call('set_profile_color', { name: p.name, color: e.currentTarget.value })} />
-                  </label>
-                  {#if p.color}<button class="ghost" onclick={() => call('set_profile_color', { name: p.name, color: null })}>Reset</button>{/if}
-                </div>
+                  </label><b class="grow">{p.name}</b>
+                  {#if p.color}<button class="x" title="Reset colour" onclick={() => call('set_profile_color', { name: p.name, color: null })}>Reset</button>{/if}</div>
+                <div class="stats"><span><b>{sites(p.name)}</b>sites</span><span><b>{count(p.name)}</b>tabs</span></div>
                 <button class="ghost" onclick={() => call('delete_profile', { name: p.name })} disabled={st.cfg.profiles.length < 2 || count(p.name) > 0}>Delete</button>
               </div>
             {/each}
@@ -530,7 +527,6 @@
   .sw:checked { background: var(--accent); }
   .sw:checked::after { left: 21px; background: #111114; }
   .wide { width: 280px; height: 34px; background: var(--bg3); border: 0; }
-  .pcolor { align-items: center; }
   .swatches { display: flex; gap: 8px; }
   .swatch { width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 2px solid transparent; outline: 1.5px solid transparent; outline-offset: 2px; }
   .swatch.custom { background: conic-gradient(#ff5f5f, #ffd24a, #5ad19a, #6ea8fe, #b79cff, #ff5f5f); position: relative; overflow: hidden; cursor: pointer; }
@@ -548,7 +544,10 @@
   .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
   .pcard { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
   .phead { display: flex; align-items: center; gap: 10px; width: 100%; font: 600 20px 'Bricolage Grotesque Variable', system-ui, sans-serif; }
-  .pi { width: 14px; height: 14px; border-radius: 50%; font-size: 0; display: block; flex: none; }
+  .pi { width: 18px; height: 18px; border-radius: 50%; display: block; flex: none; position: relative; overflow: hidden; cursor: pointer; }
+  .pi:hover { outline: 2px solid var(--line); outline-offset: 2px; }
+  .pi input { position: absolute; inset: -8px; width: 40px; height: 40px; opacity: 0; cursor: pointer; padding: 0; border: 0; }
+  .phead .x { font: 500 12px 'Instrument Sans Variable', system-ui, sans-serif; padding: 2px 8px; }
   .stats { display: flex; gap: 18px; color: var(--dim); font-size: 13px; }
   .stats b { display: block; color: var(--fg); font-size: 16px; }
   .add { border: 1.5px dashed var(--line); background: none; display: grid; place-items: center; min-height: 100px; padding: 12px; border-radius: 18px; color: var(--dim); }
