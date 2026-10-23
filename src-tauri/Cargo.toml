@@ -21,6 +21,7 @@ uuid = { version = "1", features = ["v4"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 adblock = { version = "0.13", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling", "content-blocking"] }
 ureq = "2"
+arboard = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"

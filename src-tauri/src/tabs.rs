@@ -496,6 +496,7 @@ addEventListener('keydown',e=>{if(e.key==='Enter')ping('g')},true);
 addEventListener('submit',()=>ping('g'),true);
 for(const m of ['pushState','replaceState']){const o=history[m];history[m]=function(){const r=o.apply(this,arguments);ping('u');return r}}
 addEventListener('popstate',()=>ping('u'));addEventListener('hashchange',()=>ping('u'));
+addEventListener('contextmenu',e=>{if(e.defaultPrevented)return;const el=e.target;if(!el||!el.closest)return;const ed=el.closest('input,textarea,[contenteditable=""],[contenteditable="true"]');if(ed&&!/Mac/.test(navigator.platform))return;const a=el.closest('a[href]'),im=el.closest('img');e.preventDefault();try{window.__TAURI_INTERNALS__.invoke('page_context',{link:a&&typeof a.href==='string'?a.href:null,image:im?im.currentSrc||im.src:null,selection:String(getSelection()||'').slice(0,2000),editable:!!ed})}catch(_){}});
 addEventListener('playing',()=>ping('p1'),true);
 addEventListener('pause',()=>ping('p0'),true);
 addEventListener('ended',()=>ping('p0'),true);
@@ -773,7 +774,7 @@ pub fn page_ping(app: &AppHandle, webview_label: &str, kind: &str) {
     }
 }
 
-fn parse_label(l: &str) -> Option<(u32, u32)> {
+pub fn parse_label(l: &str) -> Option<(u32, u32)> {
     let mut it = l.strip_prefix("tab-")?.split('-');
     Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
 }

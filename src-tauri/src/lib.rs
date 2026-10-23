@@ -433,6 +433,94 @@ fn tab_menu(app: AppHandle, window: tauri::Window, id: u32) -> Result<(), String
     .map_err(|e| e.to_string())
 }
 
+struct PageCtx {
+    tab: u32,
+    link: Option<url::Url>,
+    image: Option<url::Url>,
+    selection: String,
+}
+
+static PAGE_CTX: Mutex<Option<PageCtx>> = Mutex::new(None);
+
+/// Right-click inside a page. Pages call this with arbitrary args, so it only keeps http(s) URLs and
+/// text, and the menu has fixed ids; nothing from the page reaches a path or a command line.
+#[tauri::command(async)]
+fn page_context(app: AppHandle, window: tauri::Window, webview: Webview, link: Option<String>, image: Option<String>, selection: String, editable: bool) -> Result<(), String> {
+    use tauri::menu::PredefinedMenuItem as P;
+    let web = |s: Option<String>| s.filter(|s| s.len() < 8192).and_then(|s| url::Url::parse(&s).ok()).filter(|u| matches!(u.scheme(), "http" | "https"));
+    let Some((tab, _)) = tabs::parse_label(webview.label()) else { return Ok(()) };
+    let (link, image) = (web(link), web(image));
+    let selection: String = selection.chars().take(2000).collect();
+    let (can_back, can_forward) = {
+        let state = app.state::<Shared>();
+        let g = state.app.lock().unwrap();
+        let Some(t) = g.tabs.iter().find(|t| t.id == tab) else { return Ok(()) };
+        (t.idx > 0, t.idx + 1 < t.entries.len())
+    };
+    let e = |r: tauri::Result<MenuItem<tauri::Wry>>| r.map_err(|e| e.to_string());
+    let it = |id: &str, text: &str, on: bool| e(MenuItem::with_id(&app, format!("ctx:{id}"), text, on, None::<&str>));
+    let sep = || PredefinedMenuItem::separator(&app).map_err(|e| e.to_string());
+    let menu = Menu::new(&app).map_err(|e| e.to_string())?;
+    let m = |r: tauri::Result<()>| r.map_err(|e| e.to_string());
+    if editable {
+        for p in [P::cut(&app, None), P::copy(&app, None), P::paste(&app, None), P::select_all(&app, None)] {
+            m(menu.append(&p.map_err(|e| e.to_string())?))?;
+        }
+    } else {
+        if link.is_some() {
+            m(menu.append(&it("link-tab", "Open Link in New Tab", true)?))?;
+            m(menu.append(&it("link-copy", "Copy Link Address", true)?))?;
+            m(menu.append(&sep()?))?;
+        }
+        if image.is_some() {
+            m(menu.append(&it("img-tab", "Open Image in New Tab", true)?))?;
+            m(menu.append(&it("img-copy", "Copy Image Address", true)?))?;
+            m(menu.append(&sep()?))?;
+        }
+        if !selection.trim().is_empty() {
+            let short: String = selection.trim().chars().take(24).collect();
+            m(menu.append(&it("sel-copy", "Copy", true)?))?;
+            m(menu.append(&it("sel-search", &format!("Search for “{short}”"), true)?))?;
+            m(menu.append(&sep()?))?;
+        }
+        m(menu.append(&it("back", "Back", can_back)?))?;
+        m(menu.append(&it("forward", "Forward", can_forward)?))?;
+        m(menu.append(&it("reload", "Reload", true)?))?;
+    }
+    *PAGE_CTX.lock().unwrap() = Some(PageCtx { tab, link, image, selection });
+    app.run_on_main_thread(move || {
+        let _ = menu.popup(window);
+    })
+    .map_err(|e| e.to_string())
+}
+
+fn page_ctx_action(app: &AppHandle, act: &str) {
+    let Some(c) = PAGE_CTX.lock().unwrap().take() else { return };
+    let copy = |s: &str| {
+        if let Ok(mut cb) = arboard::Clipboard::new() {
+            let _ = cb.set_text(s);
+        }
+    };
+    let (win, profile, tpl) = {
+        let state = app.state::<Shared>();
+        let g = state.app.lock().unwrap();
+        let Some(t) = g.tabs.iter().find(|t| t.id == c.tab) else { return };
+        (t.win.clone(), t.profile.clone(), g.cfg.settings.search_template.clone())
+    };
+    match act {
+        "link-tab" => drop(c.link.map(|u| tabs::open_tab_in(app, &win, Some(u), Some(profile), true))),
+        "img-tab" => drop(c.image.map(|u| tabs::open_tab_in(app, &win, Some(u), Some(profile), true))),
+        "link-copy" => c.link.iter().for_each(|u| copy(u.as_str())),
+        "img-copy" => c.image.iter().for_each(|u| copy(u.as_str())),
+        "sel-copy" => copy(&c.selection),
+        "sel-search" => drop(tabs::open_tab_in(app, &win, Some(search::resolve(c.selection.trim(), &tpl)), Some(profile), true)),
+        "back" => tabs::go_history(app, c.tab, -1),
+        "forward" => tabs::go_history(app, c.tab, 1),
+        "reload" => tabs::reload(app, c.tab),
+        _ => {}
+    }
+}
+
 #[tauri::command(async)]
 fn switch_profile(app: AppHandle, window: tauri::Window, profile: String) {
     tabs::switch_profile(&app, active_id(&app, &window), &profile);
@@ -548,6 +636,7 @@ fn on_menu(app: &AppHandle, id: &str) {
                     tabs::open_inspector(&wv);
                 }
             }
+            other if other.starts_with("ctx:") => page_ctx_action(&app, &other[4..]),
             other => {
                 let _ = app.emit_to(ui, "menu", other);
             }
@@ -566,7 +655,7 @@ pub fn run() {
             delete_profile, delete_mapping, toggle_allowlist, pin_tab, group_tab, find, find_clear,
             open_devtools, history_search, history_clear, downloads_list, show_palette, hide_palette,
             reveal_path, reorder_tab, page_ping, cosmetic_css, show_panel, hide_panel, switch_profile, profile_menu, tab_menu,
-            adblock_info, check_update, default_browser_settings, set_profile_color
+            adblock_info, check_update, default_browser_settings, set_profile_color, page_context
         ])
         .on_menu_event(|app, ev| on_menu(app, ev.id().as_ref()))
         .on_window_event(|win, ev| match ev {
