@@ -107,6 +107,11 @@ impl App {
         }
     }
 
+    #[cfg(debug_assertions)]
+    pub fn prompt_host(&self) -> Option<String> {
+        self.prompt.clone()
+    }
+
     fn tab(&mut self, id: u32) -> Option<&mut Tab> {
         self.tabs.iter_mut().find(|t| t.id == id)
     }

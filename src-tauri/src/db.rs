@@ -89,7 +89,7 @@ impl Db {
 
     pub fn finish_download(&self, url: &str, path: &str, ok: bool) {
         let _ = self.0.lock().unwrap().execute(
-            "UPDATE downloads SET status=?3, path=?2 WHERE id=(SELECT MAX(id) FROM downloads WHERE url=?1 AND status='active')",
+            "UPDATE downloads SET status=?3, path=CASE WHEN ?2='' THEN path ELSE ?2 END WHERE id=(SELECT MAX(id) FROM downloads WHERE url=?1 AND status='active')",
             params![url, path, if ok { "done" } else { "failed" }],
         );
     }
@@ -120,8 +120,9 @@ mod tests {
         assert_eq!(db.search_history("renam", 10).len(), 1);
         assert_eq!(db.search_history("zzz", 10).len(), 0);
         db.add_download("https://a.com/f.zip", "/tmp/f.zip");
-        db.finish_download("https://a.com/f.zip", "/tmp/f.zip", true);
+        db.finish_download("https://a.com/f.zip", "", true);
         assert_eq!(db.downloads()[0].status, "done");
+        assert_eq!(db.downloads()[0].path, "/tmp/f.zip");
         db.clear_history();
         assert!(db.search_history("", 10).is_empty());
     }

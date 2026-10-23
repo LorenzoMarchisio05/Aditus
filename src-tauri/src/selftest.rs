@@ -23,6 +23,13 @@ fn url_of(app: &AppHandle, id: u32) -> String {
 pub fn run(app: &AppHandle, port: u16) {
     wait(5);
     let base = format!("http://127.0.0.1:{port}");
+    if std::env::var("ADITUS_SELFTEST_ONLY").as_deref() == Ok("download") {
+        tabs::open_tab(app, Some(Url::parse(&format!("{base}/download")).unwrap()), Some("Default".into()), true);
+        wait(6);
+        let dl = app.state::<Shared>().inner().db.downloads();
+        eprintln!("[selftest] downloads={:?}", dl.iter().map(|d| format!("{}:{}", d.path, d.status)).collect::<Vec<_>>());
+        return;
+    }
     let local = format!("http://localhost:{port}");
     {
         let mut g = app.state::<Shared>().inner().app.lock().unwrap();
@@ -95,7 +102,60 @@ pub fn run(app: &AppHandle, port: u16) {
     crate::adblock::refresh(app);
     wait(6);
     eprintln!("[selftest] adblock_paused t7={t7} (server log should now show /ads/banner.js)");
+    // 8. popups open as tabs in the opener's profile
+    let before = tab_count(app);
+    let t8 = tabs::open_tab(app, Some(u(&format!("{base}/popup"))), Some("Default".into()), true);
+    wait(6);
+    eprintln!("[selftest] popup tabs {} -> {} (want +2: opener and popup) opener_profile={}", before, tab_count(app), profile_of(app, t8));
+
+    // 9. downloads + history
+    tabs::open_tab(app, Some(u(&format!("{base}/download"))), Some("Default".into()), true);
+    wait(6);
+    let shared = app.state::<Shared>();
+    let dl = shared.inner().db.downloads();
+    eprintln!("[selftest] downloads={:?}", dl.iter().map(|d| format!("{}:{}", d.path, d.status)).collect::<Vec<_>>());
+    let hist = shared.inner().db.search_history("127.0.0.1", 50);
+    eprintln!("[selftest] history_rows={} first={:?}", hist.len(), hist.first().map(|h| (&h.url, &h.profile)));
+
+    // 10. unmapped host prompts; answering stores a mapping
+    {
+        app.state::<Shared>().inner().app.lock().unwrap().cfg.mappings.retain(|m| m.pattern != "127.0.0.1");
+    }
+    let t10 = tabs::open_tab(app, None, Some("Default".into()), true);
+    tabs::address_bar(app, t10, &format!("{base}/report?step=prompt_host"));
+    wait(4);
+    let prompt = app.state::<Shared>().inner().app.lock().unwrap().prompt_host();
+    eprintln!("[selftest] prompt={prompt:?} (want Some(\"127.0.0.1\"))");
+    tabs::assign_mapping(app, "127.0.0.1", "Work");
+    wait(5);
+    eprintln!("[selftest] after assign: profile={} (want Work) prompt={:?}", profile_of(app, t10), app.state::<Shared>().inner().app.lock().unwrap().prompt_host());
+
+    // 11. pin, group, reorder
+    tabs::with_tab(app, t10, |t| {
+        t.pinned = true;
+        t.group = Some("g1".into());
+    });
+    tabs::reorder(app, t10, 0);
+    let order: Vec<u32> = app.state::<Shared>().inner().app.lock().unwrap().tabs.iter().map(|t| t.id).collect();
+    eprintln!("[selftest] reorder first={} (want {t10}) ", order[0]);
+
+    // 12. overlay webviews + devtools + find do not error
+    crate::show_palette(app.clone());
+    wait(3);
+    eprintln!("[selftest] palette webview exists={}", app.get_webview("palette").is_some());
+    crate::hide_palette(app.clone());
+    crate::show_panel(app.clone(), "settings".into());
+    wait(3);
+    eprintln!("[selftest] panel webview exists={}", app.get_webview("panel").is_some());
+    crate::hide_panel(app.clone());
+    crate::find(app.clone(), "report".into(), true);
+    crate::open_devtools(app.clone());
+    wait(2);
     eprintln!("[selftest] done");
+}
+
+fn tab_count(app: &AppHandle) -> usize {
+    app.state::<Shared>().inner().app.lock().unwrap().tabs.len()
 }
 
 fn uuid_str() -> String {

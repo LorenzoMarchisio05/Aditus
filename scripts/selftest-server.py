@@ -6,7 +6,7 @@ class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def send(self, body, headers=()):
         self.send_response(200)
-        self.send_header('Content-Type', 'text/html')
+        self.send_header('Content-Type', getattr(self, 'ctype', 'text/html'))
         for k, v in headers: self.send_header(k, v)
         self.end_headers(); self.wfile.write(body.encode())
     def do_GET(self):
@@ -27,6 +27,10 @@ class H(http.server.BaseHTTPRequestHandler):
             self.send('<a id=l href="http://localhost:%d/report?step=link_target">go</a><script>setTimeout(()=>document.getElementById("l").click(),800)</script>' % PORT)
         elif u.path == '/redirect':
             self.send_response(302); self.send_header('Location', 'http://localhost:%d/report?step=redirect_target' % PORT); self.end_headers()
+        elif u.path == '/download':
+            log('DOWNLOAD'); self.ctype = 'application/octet-stream'; self.send('file-body', [('Content-Disposition', 'attachment; filename="aditus-selftest.txt"')])
+        elif u.path == '/popup':
+            self.send('<a id=l target=_blank href="/report?step=popup_target">x</a><script>setTimeout(()=>document.getElementById("l").click(),600)</script>')
         elif u.path == '/adpage':
             log('ADPAGE')
             self.send('<script src="/ads/banner.js"></script><script src="/ok.js"></script><div class="sponsor" id="s">ad</div><script>setTimeout(()=>fetch("/adresult?hidden="+(getComputedStyle(document.getElementById("s")).display==="none")),1500)</script>')
