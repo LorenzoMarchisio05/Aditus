@@ -292,7 +292,7 @@
       <button disabled={!tab?.can_forward} onclick={() => call('forward')} aria-label="Forward"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
       <button onclick={() => call('reload')} aria-label="Reload"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"/></svg></button>
       <div class="pill">
-        {#if tab}
+        {#if tab && !tab.url?.startsWith('aditus://')}
           <button class="seg" style="background:{color(tab.profile)}" title="Profile for this site" onclick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); pmenu = pmenu ? null : { x: r.left, y: r.bottom + 6 }; }}>
             {tab.profile}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
           </button>
