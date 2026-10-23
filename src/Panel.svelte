@@ -194,7 +194,7 @@
     </div>
   {:else if newtab && st}
     <div class="nt">
-      <div class="hero"><svg width="72" height="72" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M46 18h8l15 60H31z" fill="url(#gc)" stroke="url(#gc)" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg><h1>aditus</h1><span class="meta big">One window. A different account for every site.</span></div>
+      <div class="hero"><svg width="72" height="72" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE3A3"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs><path d="M46 18h8l15 60H31z" fill="url(#gc)" stroke="url(#gc)" stroke-width="4" stroke-linejoin="round"/><path d="M20 85h60" stroke="currentColor" stroke-width="5" stroke-linecap="round"/></svg><h1>aditus</h1><span class="meta big">{st.incognito ? "Private window. Nothing is saved: no history, cookies or session." : "One window. A different account for every site."}</span></div>
       <form class="nsearch" onsubmit={(e) => { e.preventDefault(); call('address', { input: ntq }); call('hide_panel'); }}>
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
         <!-- svelte-ignore a11y_autofocus -->
@@ -202,7 +202,7 @@
         <kbd>⌘L</kbd>
       </form>
       <div class="sites">
-        {#each topSites as s}
+        {#each st.incognito ? [] : topSites as s}
           <button class="site" onclick={() => { call('new_tab', { url: s.url }); call('hide_panel'); }}>
             <span class="ico"><b>{s.host[0].toUpperCase()}</b><i style="background:{color(s.profile)}"></i></span>
             <span>{s.host.replace(/^www\./, '')}</span>
