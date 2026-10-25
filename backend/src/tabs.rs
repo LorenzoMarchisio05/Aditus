@@ -1001,11 +1001,12 @@ pub fn dismiss_toast(app: &AppHandle) {
 /// Load a URL in a tab, honoring profile mappings. Address-bar loads are user-initiated.
 pub fn navigate(app: &AppHandle, tab_id: u32, url: Url, mode_push: bool) {
     let s = shared(app);
-    let (decision, lbl, was_discarded) = {
+    let (decision, lbl, was_discarded, fresh_view) = {
         let mut g = s.app.lock().unwrap();
         let host = url.host_str().unwrap_or_default().to_string();
         let Some(t) = g.tabs.iter().find(|t| t.id == tab_id) else { return };
         let (profile, lbl, disc) = (t.profile.clone(), label(t.id, t.gen), t.discarded);
+        let was_blank = is_blank(&t.url());
         let mut d = nav::decide(&g.cfg.mappings, &profile, &host, mode_push);
         if let Decision::Prompt(h) = &d {
             if g.skipped.contains(h) || g.prompt.is_some() {
@@ -1015,7 +1016,9 @@ pub fn navigate(app: &AppHandle, tab_id: u32, url: Url, mode_push: bool) {
         if let Some(t) = g.tab(tab_id) {
             t.mode = if mode_push { Mode::Push } else { Mode::Traverse };
         }
-        (d, lbl, disc)
+        // The new-tab view is an app page: its renderer never gets the page scripts, so web content needs a fresh view.
+        let fresh = was_blank && !disc && matches!(d, Decision::Allow | Decision::Prompt(_));
+        (d, lbl, disc, fresh.then_some(profile))
     };
     match decision {
         Decision::Swap(p) => swap(app, tab_id, &p, url.as_str(), true),
@@ -1037,6 +1040,8 @@ pub fn navigate(app: &AppHandle, tab_id: u32, url: Url, mode_push: bool) {
                     }
                 }
                 activate(app, tab_id);
+            } else if let Some(p) = fresh_view {
+                swap(app, tab_id, &p, url.as_str(), false);
             } else {
                 engine::navigate(&lbl, url.as_str());
             }
