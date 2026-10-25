@@ -5,9 +5,9 @@ Order: kill the riskiest unknowns first, then build features on proven foundatio
 ## Decisions (frozen)
 
 - Desktop only: macOS 14+, Windows, Linux.
-- Rust + Tauri 2 system webviews. Multi-webview via the `unstable` feature, version pinned. Fallback: raw `wry`.
+- Rust + CEF (Chromium) via raw `cef-rs`, Views framework. Ported from Tauri system webviews.
 - UI: Svelte. Config: TOML. Bulk data: SQLite. License: GPL-3.0.
-- No extensions. Keep the engine behind a thin Rust interface so CEF stays possible.
+- No extensions. Engine sits behind `backend/src/engine.rs`.
 - Profile = storage isolation. Mapping key = exact host, optional `*.` wildcard. Auth hosts exempt.
 - Swap only on user-initiated top-level navigation. Silent, with undo toast.
 - Ad blocker: `adblock-rust`, daily list refresh, per-site allowlist.
@@ -17,7 +17,7 @@ Order: kill the riskiest unknowns first, then build features on proven foundatio
 
 Goal: prove the risky parts work before building around them.
 
-1. **Multi-webview:** one window, a Svelte UI webview (sidebar + top bar) plus N page webviews positioned by Rust. Resize correctly. Pin Tauri version.
+1. **Multi-webview:** one window, a Svelte UI webview (sidebar + top bar) plus N page webviews positioned by Rust. Resize correctly. Pin the cef-rs version.
 2. **Per-webview storage isolation** on all three OSes: log into the same site with two accounts in two webviews, confirm cookies don't leak. macOS: `WKWebsiteDataStore` by identifier. Windows: WebView2 profile or separate user-data folder. Linux: separate `WebKitWebsiteDataManager`.
 3. **Navigation interception:** catch top-level navigations, distinguish user-initiated from redirect and JS-driven. Document what each engine exposes.
 4. **Overlay palette:** draw a floating input above a page webview. Confirm focus and keyboard handling.

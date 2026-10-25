@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Can't open page</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { color-scheme: light dark; --bg: #14161a; --fg: #e6e8ec; --dim: #8a93a1; --line: #2a2f37; --accent: #f5a524; }
+  @media (prefers-color-scheme: light) { :root { --bg: #f4f5f7; --fg: #1d2127; --dim: #667080; --line: #d9dde3; } }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+  main { max-width: 520px; padding: 24px; }
+  h1 { margin: 0 0 8px; font-size: 22px; }
+  p { margin: 0 0 12px; color: var(--dim); }
+  .url { word-break: break-all; font: 13px ui-monospace, 'SF Mono', monospace; }
+  ul { margin: 0 0 20px; padding-left: 18px; color: var(--dim); }
+  button { font: inherit; padding: 7px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--accent); color: #1a1205; font-weight: 600; cursor: pointer; }
+  code { font: 12px ui-monospace, 'SF Mono', monospace; color: var(--dim); }
+</style>
+<main>
+  <h1 id="title"></h1>
+  <p class="url" id="url"></p>
+  <ul id="hints"></ul>
+  <button id="retry">Try again</button>
+  <p style="margin-top:16px"><code id="code"></code></p>
+</main>
+<script>
+  const q = new URLSearchParams(location.search);
+  const failed = q.get('u') || '', code = q.get('e') || '';
+  const kinds = [
+    [/NAME_NOT_RESOLVED|DNS/, "Server not found", ['Check the address for typos.', 'Make sure you are connected to the internet.']],
+    [/INTERNET_DISCONNECTED|NETWORK_CHANGED|ADDRESS_UNREACHABLE/, "You're offline", ['Check your network connection, then try again.']],
+    [/CONNECTION_REFUSED|CONNECTION_RESET|CONNECTION_CLOSED|EMPTY_RESPONSE/, "The site refused the connection", ['The server may be down or busy. Try again in a moment.']],
+    [/TIMED_OUT/, "The site took too long to respond", ['The server may be slow or unreachable. Try again.']],
+    [/^ERR_CERT|SSL|CERTIFICATE/, "Your connection isn't private", ['The site’s security certificate could not be verified.', 'Aditus does not offer a way around this. Someone could be intercepting your traffic, or the site is misconfigured.']],
+    [/^CRASHED$/, "This tab crashed", ['The page stopped working. Reload to try again.']],
+  ];
+  const [, title, hints] = kinds.find(([re]) => re.test(code)) || [0, "Can't open this page", ['Something went wrong loading it.']];
+  document.getElementById('title').textContent = title;
+  document.getElementById('url').textContent = failed;
+  document.getElementById('code').textContent = code;
+  for (const h of hints) { const li = document.createElement('li'); li.textContent = h; document.getElementById('hints').append(li); }
+  try { document.title = new URL(failed).host || title; } catch { document.title = title; }
+  document.getElementById('retry').onclick = () => { if (/^https?:\/\//i.test(failed)) location.href = failed; else location.reload(); };
+</script>

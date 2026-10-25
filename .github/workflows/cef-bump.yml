@@ -1,0 +1,33 @@
+name: cef-bump
+# Chromium security fixes ship through new cef crate releases. Weekly: if one is out, open a PR that pins it.
+# Needs the repo setting "Allow GitHub Actions to create and approve pull requests". Merging the PR and tagging a release (bump `version` in backend/Cargo.toml first) is still manual.
+on:
+  schedule: [{cron: '0 6 * * 1'}]
+  workflow_dispatch:
+
+jobs:
+  bump:
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Bump
+        id: v
+        run: |
+          new=$(curl -fsS -A "aditus-ci (github.com/${{ github.repository }})" https://crates.io/api/v1/crates/cef | python3 -c 'import json,sys; print(json.load(sys.stdin)["crate"]["max_stable_version"])')
+          old=$(grep -o 'cef = { version = "=[^"]*' backend/Cargo.toml | grep -o '[0-9][^"]*')
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+          [ "$new" = "$old" ] && echo "bump=no" >> "$GITHUB_OUTPUT" && exit 0
+          echo "bump=yes" >> "$GITHUB_OUTPUT"
+          sed -i "s/=$old/=$new/g" backend/Cargo.toml .github/workflows/ci.yml .github/workflows/release.yml
+          cd backend && cargo update -p cef
+      - if: steps.v.outputs.bump == 'yes'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: cef-bump
+          title: "chore: cef ${{ steps.v.outputs.new }}"
+          body: "Chromium update. CI does not run on this PR automatically: build and test locally after re-running `export-cef-dir --force ~/.local/share/cef`, then bump the app version and tag."
+          commit-message: "chore: cef ${{ steps.v.outputs.new }}"

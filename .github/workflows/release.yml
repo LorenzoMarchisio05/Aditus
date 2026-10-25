@@ -4,34 +4,64 @@ on:
     tags: ['v*']
 
 jobs:
-  build:
+  macos:
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest, ubuntu-22.04]
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
+    env:
+      CEF_PATH: ${{ github.workspace }}/cef
+      # Optional: "Developer ID Application: Name (TEAMID)". Unsigned build when unset.
+      SIGN_IDENTITY: ${{ secrets.SIGN_IDENTITY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: ui/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
-      - name: Linux deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev patchelf
+          workspaces: backend
+      - run: |
+          cargo install export-cef-dir --version =156.1.0
+          export-cef-dir --force "$CEF_PATH"
+          brew install ninja
+          cargo install cef --version =156.1.0 --features build-util --bin bundle-cef-app
       - run: npm ci
-      - uses: tauri-apps/tauri-action@v0
+        working-directory: ui
+      - name: Tag matches app version
+        run: '[ "${GITHUB_REF_NAME#v}" = "$(grep -m1 "^version" backend/Cargo.toml | cut -d\" -f2)" ]'
+      - name: Bundle
+        working-directory: backend
+        run: ./bundle-mac.sh release
+      # Secrets: SIGN_IDENTITY, SIGN_CERT_P12 (base64 .p12), SIGN_CERT_PASSWORD; optional notarization:
+      # NOTARY_KEY (base64 App Store Connect .p8), NOTARY_KEY_ID, NOTARY_ISSUER. Untested without a certificate.
+      - name: Import certificate
+        if: env.SIGN_IDENTITY != ''
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          P12: ${{ secrets.SIGN_CERT_P12 }}
+          P12_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+        run: |
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p ci "$RUNNER_TEMP/ci.keychain"
+          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/ci.keychain"
+          security unlock-keychain -p ci "$RUNNER_TEMP/ci.keychain"
+          security import "$RUNNER_TEMP/cert.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$RUNNER_TEMP/ci.keychain"
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$RUNNER_TEMP/ci.keychain"
+          security list-keychains -d user -s "$RUNNER_TEMP/ci.keychain" login.keychain
+      - name: Sign
+        if: env.SIGN_IDENTITY != ''
+        working-directory: backend
+        env:
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+        run: ./sign-mac.sh
+      - name: Zip
+        run: ditto -c -k --keepParent backend/target/bundle/Aditus.app Aditus-macos-arm64.zip
+      - uses: softprops/action-gh-release@v2
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Aditus ${{ github.ref_name }}
-          releaseDraft: true
+          # Published, not a draft: the in-app updater only sees published releases.
+          draft: false
+          files: Aditus-macos-arm64.zip

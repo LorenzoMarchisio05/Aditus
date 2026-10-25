@@ -1,0 +1,59 @@
+[package]
+name = "aditus"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+name = "aditus_lib"
+
+[[bin]]
+name = "aditus"
+
+[[bin]]
+name = "aditus_helper"
+
+[features]
+default = ["sandbox"]
+sandbox = ["cef/sandbox"]
+
+[package.metadata.cef.bundle]
+helper_name = "aditus_helper"
+resources_path = "resources"
+
+[dependencies]
+cef = { version = "=156.1.0", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+adblock = { version = "0.13", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
+ureq = "2"
+arboard = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+base64 = "0.22"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.3"
+objc2-foundation = "0.3.2"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSApplication", "NSEvent", "NSResponder", "NSUserInterfaceValidation", "NSView", "NSWindow", "NSMenu", "NSMenuItem"] }
+muda = "0.17"
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
