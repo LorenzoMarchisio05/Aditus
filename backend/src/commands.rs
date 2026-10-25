@@ -50,7 +50,16 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             ok(Value::Null)
         }
         "new_tab" => {
-            tabs::open_tab_in(&APP, win, a["url"].as_str().and_then(|u| Url::parse(u).ok()), None, true);
+            let url = a["url"].as_str().and_then(|u| Url::parse(u).ok());
+            let id = active_id(win);
+            // From a blank tab, a link (top site, history row) loads in place instead of piling up tabs.
+            let blank = shared(&APP).app.lock().unwrap().tabs.iter().any(|t| t.id == id && tabs::is_blank(&t.url()));
+            match url {
+                Some(u) if blank => tabs::navigate(&APP, id, u, true),
+                u => {
+                    tabs::open_tab_in(&APP, win, u, None, true);
+                }
+            }
             ok(Value::Null)
         }
         "reader" => {

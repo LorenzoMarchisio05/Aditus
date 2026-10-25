@@ -12,7 +12,7 @@ FLAGS=; [ "$PROFILE" = release ] && FLAGS=--release
 cargo build $FLAGS
 OUT=target/bundle
 rm -rf "$OUT/Aditus.app"; mkdir -p "$OUT"
-${BUNDLER:-bundle-cef-app} aditus -o "$OUT" -i dev.aditus.browser -d Aditus -v 0.1.0
+${BUNDLER:-bundle-cef-app} aditus -o "$OUT" -i dev.aditus.browser -d Aditus -v 0.1.1
 APP=$OUT/aditus.app
 [ -d "$APP" ] && mv "$APP" "$OUT/Aditus.app"
 APP=$OUT/Aditus.app
@@ -27,6 +27,10 @@ put() { $B -c "Delete :$1" "$PL" 2>/dev/null || true; $B -c "Add :$1 $2" "$PL"; 
 put CFBundleURLTypes array
 $B -c 'Add :CFBundleURLTypes:0 dict' -c 'Add :CFBundleURLTypes:0:CFBundleURLName string "Web site URL"' \
    -c 'Add :CFBundleURLTypes:0:CFBundleURLSchemes array' -c 'Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string http' -c 'Add :CFBundleURLTypes:0:CFBundleURLSchemes:1 string https' "$PL"
+# Default-browser pickers also want an HTML document type, like Chrome and Safari have.
+put CFBundleDocumentTypes array
+$B -c 'Add :CFBundleDocumentTypes:0 dict' -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeName string "HTML document"' -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeRole string Viewer' \
+   -c 'Add :CFBundleDocumentTypes:0:LSItemContentTypes array' -c 'Add :CFBundleDocumentTypes:0:LSItemContentTypes:0 string public.html' -c 'Add :CFBundleDocumentTypes:0:LSItemContentTypes:1 string public.xhtml' "$PL"
 put NSCameraUsageDescription 'string "A website you opened in Aditus wants to use your camera."'
 put NSMicrophoneUsageDescription 'string "A website you opened in Aditus wants to use your microphone."'
 put NSLocationWhenInUseUsageDescription 'string "A website you opened in Aditus wants to know your location."'

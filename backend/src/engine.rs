@@ -959,12 +959,12 @@ wrap_life_span_handler! {
         fn on_before_popup(
             &self,
             _browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
+            frame: Option<&mut Frame>,
             _popup_id: i32,
             target_url: Option<&CefString>,
             _target_frame_name: Option<&CefString>,
             _target_disposition: WindowOpenDisposition,
-            _user_gesture: i32,
+            user_gesture: i32,
             _popup_features: Option<&PopupFeatures>,
             _window_info: Option<&mut WindowInfo>,
             _client: Option<&mut Option<Client>>,
@@ -974,6 +974,11 @@ wrap_life_span_handler! {
         ) -> i32 {
             // Never a native popup window: it becomes a tab beside the opener.
             let url = target_url.map(|u| u.to_string()).unwrap_or_default();
+            // Ad popups: scripted `window.open` without a click, or a target the filter lists block.
+            let source = frame.map(|f| CefString::from(&f.url()).to_string()).unwrap_or_default();
+            if user_gesture == 0 || crate::adblock::check(&url, &source, "document") {
+                return 1;
+            }
             let label = self.label.clone();
             defer(move || tabs::on_popup(&tabs::AppHandle, &label, &url));
             1
