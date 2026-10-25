@@ -4,6 +4,10 @@ A lightweight, open-source desktop browser with a vertical tab sidebar and per-s
 
 > Status: early, daily-usable on macOS. Runs on Chromium (CEF). Windows and Linux build in CI but are untested.
 
+## The name
+
+*Aditus* is Latin for "a way in": an approach, an entrance, access. It comes from *adire*, "to go toward". A browser is the door to the web, so that is what it is called.
+
 ## Run
 
 ```sh
