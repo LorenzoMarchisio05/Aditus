@@ -34,11 +34,20 @@ try{if(sessionStorage.getItem('__aditus_off'))return}catch(e){}
 const K=['adPlacements','playerAds','adSlots','adBreakParams','adBreakHeartbeatParams','adSafetyReason'];
 const strip=(o,d=0)=>{if(o&&typeof o==='object'&&d<5){for(const k of K)if(k in o){try{delete o[k]}catch(e){}console.debug('[aditus] stripped',k)}for(const k in o)if(o[k]&&typeof o[k]==='object')strip(o[k],d+1)}return o};
 let v;try{Object.defineProperty(window,'ytInitialPlayerResponse',{configurable:true,get:()=>v,set:x=>{v=strip(x)}})}catch(e){}
-const p=JSON.parse;JSON.parse=function(){return strip(p.apply(this,arguments))};
-const rj=Response.prototype.json;Response.prototype.json=function(){return rj.call(this).then(strip)};
+JSON.parse=new Proxy(JSON.parse,{apply:(t,th,a)=>strip(Reflect.apply(t,th,a))});
+Response.prototype.json=new Proxy(Response.prototype.json,{apply:(t,th,a)=>Reflect.apply(t,th,a).then(strip)});
+// uBO's trick: YouTube holds the video back for the length of an ad it still schedules server-side. Player requests are
+// rewritten (V=0 channel screen, then other variants) and, if the video stalls with nothing playing, reloaded with the next one.
+let V=0,stall=0;
+JSON.stringify=new Proxy(JSON.stringify,{apply(t,th,a){try{const o=a[0],cp=o&&o.attestationRequest&&o.playbackContext&&o.playbackContext.contentPlaybackContext,c=cp&&o.context&&o.context.client;
+if(c&&c.clientName==='WEB'&&!/[?&]list=/.test(location.href)&&!location.pathname.startsWith('/shorts/')){if(V===0)c.clientScreen='CHANNEL';if(V<2)cp.lactMilliseconds=String(Date.now());if(V===1)o.params='8AUB';if(V===2)o.params='YAHI';if(V===3)cp.referer=String(cp.referer||'').replace(/(#reloadxhr)?$/,'#reloadxhr')}}catch(e){}return Reflect.apply(t,th,a)}});
+addEventListener('yt-navigate-finish',()=>{V=0;stall=0});
+setInterval(()=>{try{if(document.hidden||!location.pathname.startsWith('/watch'))return;const p=document.getElementById('movie_player'),s=p&&p.getStatsForNerds&&p.getStatsForNerds();if(!s)return;const st=p.getPlayerState();
+if(s.buffer_health_seconds==='0.00 s'&&s.resolution==='0x0'&&(st===3||st===-1)&&!p.classList.contains('ad-showing')&&!String(s.debug_info||'').startsWith('SSAP, AD'))stall++;else stall=0;
+if(stall>=2&&V<3){const r=p.getPlayerResponse&&p.getPlayerResponse();if(r&&r.videoDetails){V++;stall=0;console.debug('[aditus] stalled, retrying variant',V);p.loadVideoById(r.videoDetails.videoId,(r.playerConfig&&r.playerConfig.playbackStartConfig&&r.playerConfig.playbackStartConfig.startSeconds)||0)}}}catch(e){}},1000);
 const st=document.createElement('style');st.textContent='#movie_player.ad-showing video{opacity:0!important}.video-ads,.ytp-ad-module,.ytp-ad-overlay-container,#player-ads,ytd-ad-slot-renderer,ytd-in-feed-ad-layout-renderer,ytd-display-ad-renderer,ytd-promoted-sparkles-web-renderer{display:none!important}';
 const add=()=>(document.head||document.documentElement).appendChild(st);document.documentElement?add():addEventListener('DOMContentLoaded',add);
-let was=0;const skip=()=>{const m=document.querySelector('#movie_player.ad-showing');if(m&&!was)console.debug('[aditus] ad playing, skipping');if(!m){if(was){was=0;const pl=document.querySelector('#movie_player');if(pl&&pl.playVideo)pl.playVideo()}return}was=1;const vd=m.querySelector('video');if(vd&&isFinite(vd.duration)){vd.muted=true;vd.playbackRate=16;vd.currentTime=vd.duration}const b=document.querySelector('.ytp-skip-ad-button,.ytp-ad-skip-button-modern,.ytp-ad-skip-button');if(b)b.click()};
+let was=0;const skip=()=>{const m=document.querySelector('#movie_player.ad-showing');if(m&&!was)console.debug('[aditus] ad playing, skipping');if(!m){if(was){was=0;const v0=document.querySelector('#movie_player video');if(v0){v0.muted=false;v0.playbackRate=1}const pl=document.querySelector('#movie_player');if(pl&&pl.playVideo)pl.playVideo()}return}was=1;const vd=m.querySelector('video');if(vd&&isFinite(vd.duration)){vd.muted=true;vd.playbackRate=16;vd.currentTime=vd.duration}const b=document.querySelector('.ytp-skip-ad-button,.ytp-ad-skip-button-modern,.ytp-ad-skip-button');if(b)b.click()};
 new MutationObserver(skip).observe(document,{subtree:true,attributes:true,attributeFilter:['class']});for(const ev of ['loadstart','loadedmetadata','durationchange','playing'])document.addEventListener(ev,skip,true);setInterval(skip,100);
 })();"#;
 
