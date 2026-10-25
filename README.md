@@ -47,7 +47,7 @@ Most browsers spend screen space and memory on things I don't use. Aditus aims f
 - **Profiles:** a profile is an isolated storage area (cookies, localStorage, logins). Every tab runs in one profile. You map hosts to profiles (`photos.google.com` → A, `youtube.com` → B). Navigating a tab to a host mapped to another profile swaps the tab to that profile's browser, with an undo toast. Redirects, login flows, and OAuth popups never swap.
 - **Ad blocker:** [`adblock-rust`](https://github.com/brave/adblock-rust) with EasyList, EasyPrivacy, and uBlock filters, refreshed in the background. Per-site allowlist from the top bar.
 - **Memory:** background tabs idle for 15 minutes (configurable) are discarded and reloaded on click. Pinned and audio-playing tabs are exempt.
-- **Extensions:** Settings → Extensions installs Manifest V3 extensions from a Chrome Web Store link or id. Content scripts, background workers and declarativeNetRequest work (Dark Reader tested). They are shared by all profiles, don't run in private windows and don't auto-update. Popups that need the current tab (password-manager autofill) don't work yet.
+- **Extensions:** Settings → Extensions installs Manifest V3 extensions from a Chrome Web Store link or id. Content scripts, background workers and declarativeNetRequest work (Dark Reader tested). They are shared by all profiles, don't run in private windows. They update themselves every 6 hours (new code runs after a restart) unless a new version asks for more permissions. Popups that need the current tab (password-manager autofill) don't work yet.
 - **Updates:** the app checks GitHub releases and, on macOS, installs a new version after a click. It verifies GitHub's sha256 digest, the code signature and the bundle id first. Chromium security fixes arrive by bumping the pinned `cef` crate; a weekly workflow opens that PR.
 
 ## Features
@@ -74,7 +74,7 @@ Rust, CEF 156 via `cef-rs` (Views framework), Svelte 5, SQLite for history and d
 
 - Ad blocking is good, not uBlock Origin parity.
 - No H.264/AAC, no Widevine (needs a custom CEF build).
-- Extensions: no auto-update, no tab-aware popups, shared across profiles.
+- Extensions: updates need a restart, no tab-aware popups, shared across profiles.
 - Release builds are signed and notarized only when signing secrets are set in CI; otherwise unsigned (right-click → Open).
 
 ## License

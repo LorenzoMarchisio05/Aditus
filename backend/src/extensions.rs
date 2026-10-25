@@ -21,8 +21,10 @@ pub fn parse_id(input: &str) -> Option<String> {
     input.split(|c: char| !c.is_ascii_alphanumeric()).find(|t| t.len() == 32 && t.bytes().all(|b| (b'a'..=b'p').contains(&b))).map(str::to_string)
 }
 
-fn fetch(id: &str) -> Result<Vec<u8>, String> {
-    let url = format!("https://clients2.google.com/service/update2/crx?response=redirect&prodversion=156.0.0.0&acceptformat=crx2,crx3&x=id%3D{id}%26uc");
+/// `have`: the installed version; the store then answers with nothing when it is current.
+fn fetch(id: &str, have: Option<&str>) -> Result<Vec<u8>, String> {
+    let v = have.map(|v| format!("%26v%3D{}", v.replace(|c: char| !(c.is_ascii_digit() || c == '.'), ""))).unwrap_or_default();
+    let url = format!("https://clients2.google.com/service/update2/crx?response=redirect&prodversion=156.0.0.0&acceptformat=crx2,crx3&x=id%3D{id}{v}%26uc");
     let mut buf = Vec::new();
     ureq::get(&url).call().map_err(|e| e.to_string())?.into_reader().take(MAX_CRX).read_to_end(&mut buf).map_err(|e| e.to_string())?;
     Ok(buf)
@@ -149,8 +151,12 @@ fn describe(dir: &Path, id: &str) -> Option<Value> {
 /// Downloads `input` (a Web Store URL or id) into a staging folder and says what it asks for.
 pub fn stage(input: &str) -> Result<Value, String> {
     let id = parse_id(input).ok_or("That is not a Chrome Web Store link or extension id.")?;
-    let (zip, key) = split_crx3(&fetch(&id)?, &id)?;
-    let dir = staging(&id);
+    stage_id(&id, None)
+}
+
+fn stage_id(id: &str, have: Option<&str>) -> Result<Value, String> {
+    let (zip, key) = split_crx3(&fetch(id, have)?, id)?;
+    let dir = staging(id);
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let done = (|| {
@@ -167,7 +173,7 @@ pub fn stage(input: &str) -> Result<Value, String> {
         let _ = fs::remove_dir_all(&dir);
         return Err(e);
     }
-    describe(&dir, &id).ok_or_else(|| "The extension has no readable manifest.".to_string())
+    describe(&dir, id).ok_or_else(|| "The extension has no readable manifest.".to_string())
 }
 
 fn valid_id(id: &str) -> bool {
@@ -187,6 +193,32 @@ pub fn discard(id: &str) {
     if valid_id(id) {
         let _ = fs::remove_dir_all(staging(id));
     }
+}
+
+/// Installed extensions that have a newer store version with no new permissions are replaced on disk;
+/// Chromium reads them at start-up, so the new code runs after the next restart.
+fn update_all() {
+    let perms = |d: &Value| -> Vec<String> { ["permissions", "hosts"].iter().flat_map(|k| d[k].as_array().cloned().unwrap_or_default()).filter_map(|v| v.as_str().map(String::from)).collect() };
+    for id in ids() {
+        let Some(old) = describe(&root().join(&id), &id) else { continue };
+        let have = text(&old, "version");
+        // An up-to-date extension makes the store answer with nothing, which fails to parse: no update.
+        let Ok(new) = stage_id(&id, Some(&have)) else { discard(&id); continue };
+        if text(&new, "version") != have && perms(&new).iter().all(|p| perms(&old).contains(p)) {
+            let _ = commit(&id);
+        } else {
+            discard(&id);
+        }
+    }
+}
+
+/// A minute after start-up, then every 6 hours; never blocks anything.
+pub fn init_updates() {
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(60));
+        update_all();
+        std::thread::sleep(std::time::Duration::from_secs(6 * 3600));
+    });
 }
 
 fn disabled() -> Vec<String> {

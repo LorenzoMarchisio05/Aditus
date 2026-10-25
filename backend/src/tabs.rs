@@ -1573,6 +1573,7 @@ pub fn startup(app: &AppHandle) {
     create_window(app, "main", false);
     crate::menu::install();
     crate::adblock::init(s.data_dir.join("filters"));
+    crate::extensions::init_updates();
     {
         let days = s.app.lock().unwrap().cfg.settings.history_days;
         if days > 0 {
