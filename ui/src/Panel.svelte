@@ -117,6 +117,7 @@
       loadHistory();
       loadDownloads();
     }
+    if (newtab) loadMarks();
     return () => offs.forEach((f) => f());
   });
 
@@ -224,18 +225,8 @@
   const mapped = $derived(
     (st?.cfg.mappings ?? []).filter((m) => m.pattern.includes(hostQuery.trim().toLowerCase()))
   );
-  // Most visited sites, one per domain; sign-in and consent hosts are noise here.
-  const topSites = $derived.by(() => {
-    const m = new Map();
-    for (const r of rows) {
-      const h = host(r.url);
-      if (!h || /^(127\.|localhost)/.test(h) || /^(accounts|consent|gds|auth|sso|login|id|myaccount)\./.test(h)) continue;
-      const root = h.split('.').slice(-2).join('.');
-      if (!m.has(root)) m.set(root, { host: h.replace(/^www\./, ''), url: r.url, profile: r.profile, n: 0 });
-      m.get(root).n++;
-    }
-    return [...m.values()].sort((a, b) => b.n - a.n).slice(0, 8);
-  });
+  // New-tab tiles are the bookmarks.
+  const topSites = $derived(marks.map((m) => ({ host: host(m.url).replace(/^www\./, ''), url: m.url, profile: m.profile })));
   const now = new Date();
   const greeting = now.getHours() < 5 ? 'Still up' : now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
   const today = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });

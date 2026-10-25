@@ -373,7 +373,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
                 let label = tabs::wv_label("panel", win);
                 engine::close(&label);
                 engine::create(overlay(&label, win, &view, tabs::content_rect(&APP, win)));
-                engine::focus(&label);
+                engine::focus(&tabs::wv_label("ui", win)); // the address bar takes the keys on a new tab
             } else {
                 tabs::open_internal(&APP, win, &view);
             }

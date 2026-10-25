@@ -124,6 +124,14 @@
     newtabOpen = blank;
   });
 
+  // A new (blank) tab starts with the address bar ready to type.
+  let focusedBlank;
+  $effect(() => {
+    const id = blank ? tab?.id : null;
+    if (id != null && id !== focusedBlank && cfg) focusAddress();
+    focusedBlank = id;
+  });
+
   $effect(() => {
     call('set_layout', { sidebar: sidebarW, top });
   });

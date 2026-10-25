@@ -1250,15 +1250,25 @@ wrap_keyboard_handler! {
         // Windows and Linux have no menu bar to carry accelerators, so keys are matched here.
         fn on_pre_key_event(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             event: Option<&KeyEvent>,
             _os_event: *mut u8,
             _is_keyboard_shortcut: Option<&mut i32>,
         ) -> i32 {
+            let Some(e) = event else { return 0 };
+            // CEF has no browser chrome to leave HTML fullscreen (YouTube, any video): Esc does it.
+            if e.type_ == KeyEventType::RAWKEYDOWN && e.windows_key_code == 0x1B {
+                if let Some(b) = browser {
+                    let label = reg(|r| r.by_browser.get(&b.identifier()).cloned());
+                    if let Some(l) = label.filter(|l| reg(|r| r.fullscreen.values().any(|v| v == l))) {
+                        defer(move || eval(&l, "document.exitFullscreen()"));
+                        return 1;
+                    }
+                }
+            }
             if cfg!(target_os = "macos") {
                 return 0;
             }
-            let Some(e) = event else { return 0 };
             if e.type_ != KeyEventType::RAWKEYDOWN {
                 return 0;
             }
