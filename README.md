@@ -2,7 +2,7 @@
 
 A lightweight, open-source desktop browser with a vertical tab sidebar and per-site account isolation.
 
-> Status: feature-complete v1, early. Runs on Chromium (CEF). Tested on macOS only; Windows and Linux are untested (keyboard shortcuts are wired but unproven). See [PLAN.md](PLAN.md).
+> Status: early, daily-usable on macOS. Runs on Chromium (CEF). Windows and Linux build in CI but are untested.
 
 ## Run
 
@@ -35,7 +35,7 @@ Most browsers spend screen space and memory on things I don't use. Aditus aims f
 - A minimal UI with the tab bar on the side, collapsible to an icon strip.
 - Small binary, fast startup, low memory.
 - Different accounts per website in the same window. Example: Google Photos on account A, YouTube on account B, side by side, without separate windows.
-- A built-in ad blocker. No extension system.
+- A built-in ad blocker, plus Chrome extensions when you want more.
 
 ## How it works
 
@@ -43,12 +43,14 @@ Most browsers spend screen space and memory on things I don't use. Aditus aims f
 - **Profiles:** a profile is an isolated storage area (cookies, localStorage, logins). Every tab runs in one profile. You map hosts to profiles (`photos.google.com` → A, `youtube.com` → B). Navigating a tab to a host mapped to another profile swaps the tab to that profile's browser, with an undo toast. Redirects, login flows, and OAuth popups never swap.
 - **Ad blocker:** [`adblock-rust`](https://github.com/brave/adblock-rust) with EasyList, EasyPrivacy, and uBlock filters, refreshed in the background. Per-site allowlist from the top bar.
 - **Memory:** background tabs idle for 15 minutes (configurable) are discarded and reloaded on click. Pinned and audio-playing tabs are exempt.
+- **Extensions:** Settings → Extensions installs Manifest V3 extensions from a Chrome Web Store link or id. Content scripts, background workers and declarativeNetRequest work (Dark Reader tested). They are shared by all profiles, don't run in private windows and don't auto-update. Popups that need the current tab (password-manager autofill) don't work yet.
+- **Updates:** the app checks GitHub releases and, on macOS, installs a new version after a click. It verifies GitHub's sha256 digest, the code signature and the bundle id first. Chromium security fixes arrive by bumping the pinned `cef` crate; a weekly workflow opens that PR.
 
-## Features (v1)
+## Features
 
-Address bar with search (DuckDuckGo default, Google, custom), back/forward/reload, history, downloads, find in page, native DevTools, session restore, settings, tab pinning/grouping/search, toggleable top bar with a Cmd/Ctrl+L palette.
+Address bar with autocomplete (history, search suggestions), tabs in a sidebar (pinning, grouping, search, idle discard), multiple windows and private windows, session restore, per-site profiles, ad blocker, bookmarks, history, downloads, find in page, reader mode, saved passwords, Chrome extensions, native DevTools, a Cmd/Ctrl+L palette, and Swing, a small mascot that lives in the sidebar.
 
-Not in v1: bookmarks, password manager, extensions, mobile, sync.
+Not here: sync, mobile.
 
 ## Platforms
 
@@ -56,7 +58,7 @@ macOS 14+ (tested), Windows, Linux (untested).
 
 ## Stack
 
-Rust, CEF 156 via `cef-rs` (Views framework), Svelte, SQLite for history and downloads, TOML for config.
+Rust, CEF 156 via `cef-rs` (Views framework), Svelte 5, SQLite for history and downloads, TOML for config.
 
 ## Performance (macOS, Apple silicon, measured once)
 
@@ -67,9 +69,9 @@ Rust, CEF 156 via `cef-rs` (Views framework), Svelte, SQLite for history and dow
 ## Known limits
 
 - Ad blocking is good, not uBlock Origin parity.
-- DevTools open in a separate window (docking crashes CEF).
 - No H.264/AAC, no Widevine (needs a custom CEF build).
-- WebKit-era profile data is not migrated.
+- Extensions: no auto-update, no tab-aware popups, shared across profiles.
+- Release builds are signed and notarized only when signing secrets are set in CI; otherwise unsigned (right-click → Open).
 
 ## License
 
