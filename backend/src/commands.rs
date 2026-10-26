@@ -464,6 +464,13 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             tabs::page_state(&APP, &ctx.label, &str_arg(&a, "s"));
             ok(Value::Null)
         }
+        "address_selection" => {
+            shared(&APP).app.lock().unwrap().win(win).address_sel = str_arg(&a, "text");            ok(Value::Null)
+        }
+        "page_link" => {
+            tabs::page_link(&APP, &ctx.label, &str_arg(&a, "u"));
+            ok(Value::Null)
+        }
         "page_ping" => {
             tabs::page_ping(&APP, &ctx.label, &str_arg(&a, "kind"), num(&a, "x"), num(&a, "y"));
             ok(Value::Null)

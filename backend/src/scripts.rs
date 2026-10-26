@@ -1,7 +1,7 @@
 //! Scripts injected into page contexts by the renderer process (see `app.rs`).
 //! Pings are the only IPC page contexts may use; Rust never trusts their payload.
 
-/// Click/keyboard gesture pings, SPA navigation pings, media state, cosmetic ad-hiding CSS.
+/// Click/keyboard gesture pings, SPA navigation pings, media state, the selected link, cosmetic ad-hiding CSS.
 pub const PAGE: &str = r#"(()=>{
 if(window.__aditus)return;window.__aditus=1;
 const q=window.cefQuery;if(!q)return;
@@ -21,6 +21,8 @@ const snap=()=>{try{const f=[];document.querySelectorAll('input,textarea,select'
 const lazy=()=>{clearTimeout(t);t=setTimeout(snap,1000)};
 addEventListener('scroll',lazy,{passive:true,capture:true});for(const ev of ['input','change','pause','seeked'])addEventListener(ev,lazy,true);
 addEventListener('visibilitychange',()=>{if(document.hidden)snap()});setInterval(()=>{if(!document.hidden)snap()},5000)}
+if(window===top){let ll='';const el=n=>n&&(n.nodeType===1?n:n.parentElement);
+document.addEventListener('selectionchange',()=>{let u='';try{const s=getSelection();if(s&&!s.isCollapsed){const a=[s.anchorNode,s.focusNode].map(n=>el(n)&&el(n).closest('a[href]')).find(Boolean),all=a?[]:s.getRangeAt(0).cloneContents().querySelectorAll('a[href]'),t=s.toString().trim();u=a?a.href:all.length===1?all[0].href:/^https?:\/\/\S+$/i.test(t)?t:/^www\.\S+\.\S+$/i.test(t)?'https://'+t:''}}catch(e){}if(u!==ll){ll=u;send('page_link',{u}).catch(()=>{})}})}
 if(window.top===window){send('cosmetic_css',{}).then(r=>{const css=r&&JSON.parse(r);if(!css)return;const s=document.createElement('style');s.textContent=css;(document.head||document.documentElement).appendChild(s)}).catch(()=>{})}
 })();"#;
 

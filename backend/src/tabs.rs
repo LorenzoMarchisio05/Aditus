@@ -84,6 +84,8 @@ pub struct Tab {
     pid: Option<u32>,
     mem_mb: u32,
     mode: Mode,
+    /// Link inside the page's text selection, reported by the page script: Cmd+T / Cmd+Shift+N open it.
+    link: Option<Url>,
 }
 
 #[derive(Clone, Serialize)]
@@ -106,6 +108,8 @@ pub struct Win {
     pub top: f64,
     pub overlay_open: bool,
     pub incognito: bool,
+    /// Text selected in the focused address bar; beats a link selected in the page.
+    pub address_sel: String,
 }
 
 pub struct App {
@@ -160,7 +164,7 @@ impl App {
     }
 
     pub fn win(&mut self, w: &str) -> &mut Win {
-        self.wins.entry(w.to_string()).or_insert(Win { active: 0, sidebar: 250.0, top: 52.0, overlay_open: false, incognito: false })
+        self.wins.entry(w.to_string()).or_insert(Win { active: 0, sidebar: 250.0, top: 52.0, overlay_open: false, incognito: false, address_sel: String::new() })
     }
 
     /// Selected tab of window `w`.
@@ -620,6 +624,7 @@ pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool) {
         }
         t.loading = started;
         if started {
+            t.link = None;
             // Keep the old title while a page on the same site reloads (a login click often does),
             // so the tab label doesn't flash its address.
             let host = |u: &str| Url::parse(u).ok().and_then(|u| u.host_str().map(String::from));
@@ -795,6 +800,25 @@ pub fn page_ping(app: &AppHandle, view_label: &str, kind: &str, x: f64, y: f64) 
     }
 }
 
+/// The page says which link its selection holds ("" = none). Only web addresses are kept.
+pub fn page_link(app: &AppHandle, view_label: &str, url: &str) {
+    let Some((id, gen)) = parse_label(view_label) else { return };
+    let link = Url::parse(url).ok().filter(|u| matches!(u.scheme(), "http" | "https"));    if let Some(t) = shared(app).app.lock().unwrap().tab(id).filter(|t| t.gen == gen) {
+        t.link = link;
+    }
+}
+
+/// What a new tab or private window should open, and in which profile: the address bar's selected
+/// text (read as if Enter was pressed there), else the link selected in the active tab's page.
+pub fn selected_link(app: &AppHandle, win: &str, id: u32) -> Option<(Url, String)> {
+    let mut g = shared(app).app.lock().unwrap();
+    let typed = g.win(win).address_sel.clone();
+    let template = g.cfg.settings.search_template.clone();
+    let t = g.tabs.iter().find(|t| t.id == id)?;
+    let typed = (!typed.is_empty()).then(|| search::resolve(&typed, &template)).filter(|u| matches!(u.scheme(), "http" | "https"));
+    Some((typed.or_else(|| t.link.clone())?, t.profile.clone()))
+}
+
 // ---------- tab operations ----------
 
 fn hide_all_except(app: &AppHandle, win: &str, keep: Option<(u32, u32)>) {
@@ -856,6 +880,7 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
             pid: None,
             mem_mb: 0,
             mode: Mode::Push,
+            link: None,
         });
         id
     };

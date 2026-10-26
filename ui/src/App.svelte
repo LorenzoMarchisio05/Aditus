@@ -216,6 +216,7 @@
       offs.push(
         await on('menu', (id) => {
           if (id === 'focus-address') focusAddress();
+          else if (id === 'blur-address') addrEl?.blur();
           else if (id === 'find') openFind();
           else if (id.startsWith('profile:')) setProfile(tab, id.slice(8));
           else if (id.startsWith('tabm:')) tabAction(id);
@@ -246,6 +247,14 @@
     urlText = typed + hit.slice(typed.length);
     await tick();
     el.setSelectionRange(typed.length, urlText.length);
+  }
+
+  // Cmd+T / Cmd+Shift+N open the text selected here (menu.rs); tell Rust whenever it changes.
+  let selSent = '';
+  function reportSel(e) {
+    const i = e.currentTarget;
+    const t = e.type === 'blur' ? '' : i.value.slice(i.selectionStart, i.selectionEnd).trim();
+    if (t !== selSent) call('address_selection', { text: (selSent = t) });
   }
 
   function submitAddress(e) {
@@ -483,7 +492,10 @@
             placeholder="Search or enter address"
             onfocus={(e) => { editing = true; e.currentTarget.select(); }}
             onkeydown={sg.key}
-            onblur={() => { editing = false; setTimeout(sg.hide, 150); }}
+            onselect={reportSel}
+            onkeyup={reportSel}
+            onmouseup={reportSel}
+            onblur={(e) => { editing = false; reportSel(e); setTimeout(sg.hide, 150); }}
             spellcheck="false"
             autocapitalize="off"
           />

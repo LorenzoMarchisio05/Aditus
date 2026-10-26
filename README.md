@@ -20,7 +20,7 @@ node scripts/smoke.mjs backend/target/bundle/Aditus.app/Contents/MacOS/aditus
 
 Unsigned builds: right-click the app and choose Open (or `xattr -cr Aditus.app`). Release builds ask for Keychain access once (Chromium cookie key); a signed build keeps the answer.
 
-Shortcuts: Cmd/Ctrl+L address bar, Cmd/Ctrl+F find, Cmd/Ctrl+Shift+A search tabs.
+Shortcuts: Cmd/Ctrl+L address bar, Cmd/Ctrl+F find, Cmd/Ctrl+Shift+A search tabs. With a link selected in the page or text selected in the address bar, Cmd/Ctrl+T opens it in a new tab and Cmd/Ctrl+Shift+N in a private window.
 
 ## Layout
 

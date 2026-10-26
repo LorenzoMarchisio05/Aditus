@@ -11,18 +11,26 @@ const APP: AppHandle = AppHandle;
 pub fn picked(id: &str) {
     let (win, cur) = shared(&APP).app.lock().unwrap().focused_active_with_win();
     let ui = tabs::wv_label("ui", &win);
+    // A link selected in the address bar or the page is what a new tab or private window opens.
+    let link = matches!(id, "new-tab" | "new-private-window").then(|| tabs::selected_link(&APP, &win, cur)).flatten();
     // The page usually holds keyboard focus; an input in the UI can't take it otherwise.
-    if matches!(id, "focus-address" | "new-tab" | "find" | "search-tabs") {
+    if matches!(id, "focus-address" | "new-tab" | "find" | "search-tabs") && link.is_none() {
         engine::focus(&ui);
     }
     let to_ui = |what: &str| engine::emit_to(&ui, "menu", &serde_json::to_string(what).unwrap());
     match id {
-        "new-tab" => {
-            tabs::open_tab_in(&APP, &win, None, None, true);
-            to_ui("focus-address");
-        }
+        "new-tab" => match link {
+            Some((u, profile)) => {
+                tabs::open_tab_in(&APP, &win, Some(u), Some(profile), true);
+                to_ui("blur-address"); // a focused bar would keep showing the old tab's text
+            }
+            None => {
+                tabs::open_tab_in(&APP, &win, None, None, true);
+                to_ui("focus-address");
+            }
+        },
         "new-window" => tabs::new_window(&APP, false, None),
-        "new-private-window" => tabs::new_window(&APP, true, None),
+        "new-private-window" => tabs::new_window(&APP, true, link.map(|(u, _)| u)),
         "close-tab" => tabs::close_tab(&APP, cur),
         "reopen-tab" => tabs::reopen_closed(&APP),
         "reload" => tabs::reload(&APP, cur),
