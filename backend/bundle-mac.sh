@@ -12,7 +12,7 @@ FLAGS=; [ "$PROFILE" = release ] && FLAGS=--release
 cargo build $FLAGS
 OUT=target/bundle
 rm -rf "$OUT/Aditus.app"; mkdir -p "$OUT"
-${BUNDLER:-bundle-cef-app} aditus -o "$OUT" -i dev.aditus.browser -d Aditus -v 0.1.1
+${BUNDLER:-bundle-cef-app} aditus -o "$OUT" -i dev.aditus.browser -d Aditus -v 0.1.2
 APP=$OUT/aditus.app
 [ -d "$APP" ] && mv "$APP" "$OUT/Aditus.app"
 APP=$OUT/Aditus.app
