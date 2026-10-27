@@ -145,8 +145,11 @@ mod tests {
     fn resolve_stays_inside_dist() {
         assert!(resolve("aditus://app/assets/x.js").unwrap().starts_with(dist_dir()));
         assert!(resolve("aditus://app/").unwrap().ends_with("index.html"));
-        assert!(resolve("aditus://app/../secret").is_none() || resolve("aditus://app/../secret").unwrap().starts_with(dist_dir()));
-        assert!(resolve("aditus://app/a/%2e%2e/b").map_or(true, |p| p.starts_with(dist_dir())));
+        // The url crate folds `..` and `%2e%2e` away before resolve sees them, so both land inside dist.
+        assert_eq!(resolve("aditus://app/../secret").unwrap(), dist_dir().join("secret"));
+        assert_eq!(resolve("aditus://app/a/%2e%2e/b").unwrap(), dist_dir().join("b"));
+        assert!(resolve(r"aditus://app/a\b").is_none());
+        assert!(resolve("aditus://app/a//b").is_none());
     }
 
     #[test]

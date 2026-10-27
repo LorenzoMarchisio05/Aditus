@@ -17,7 +17,7 @@ cd ui && npm install && cd ..
 backend/bundle-mac.sh            # debug build: backend/target/bundle/Aditus.app
 ```
 
-macOS 14+ is the only tested platform. Windows and Linux build in CI but are untested; reports and fixes for them are welcome.
+macOS 14+ is the only tested platform. CI only builds and tests macOS. Windows and Linux are untested and may not build; reports and fixes for them are welcome.
 
 ## Layout
 
@@ -64,3 +64,7 @@ Security issues: don't file a public issue. Contact the maintainer privately thr
 ## License
 
 By contributing you agree your work is licensed under [GPL-3.0](LICENSE).
+
+## Releases
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which uploads `Aditus-macos-arm64.zip`. That name is also `ASSET` in `backend/src/update.rs` (the in-app updater looks the zip up by it): change both together.

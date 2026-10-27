@@ -31,9 +31,14 @@ jobs:
         working-directory: ui
       - name: Tag matches app version
         run: '[ "${GITHUB_REF_NAME#v}" = "$(grep -m1 "^version" backend/Cargo.toml | cut -d\" -f2)" ]'
+      - name: Test
+        working-directory: backend
+        run: cargo test --lib
       - name: Bundle
         working-directory: backend
         run: ./bundle-mac.sh release
+      - name: Smoke test
+        run: node scripts/smoke.mjs backend/target/bundle/Aditus.app/Contents/MacOS/aditus
       # Secrets: SIGN_IDENTITY, SIGN_CERT_P12 (base64 .p12), SIGN_CERT_PASSWORD; optional notarization:
       # NOTARY_KEY (base64 App Store Connect .p8), NOTARY_KEY_ID, NOTARY_ISSUER. Untested without a certificate.
       - name: Import certificate
