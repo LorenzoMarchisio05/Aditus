@@ -24,8 +24,7 @@ jobs:
         with:
           workspaces: backend
       - run: |
-          cargo install export-cef-dir --version =156.1.0
-          export-cef-dir --force "$CEF_PATH"
+          scripts/fetch-cef.sh "$CEF_PATH"
           brew install ninja
           cargo install cef --version =156.1.0 --features build-util --bin bundle-cef-app
       - run: npm ci

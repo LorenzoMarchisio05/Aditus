@@ -29,5 +29,5 @@ jobs:
         with:
           branch: cef-bump
           title: "chore: cef ${{ steps.v.outputs.new }}"
-          body: "Chromium update. CI does not run on this PR automatically: build and test locally after re-running `export-cef-dir --force ~/.local/share/cef`, then bump the app version and tag."
+          body: "Chromium update. CI does not run on this PR automatically: the prebuilt CEF (H.264) is pinned in `scripts/fetch-cef.sh`: it keeps the OLD Chromium until you update it there. Build and test locally with `scripts/fetch-cef.sh ~/.local/share/cef`, then bump the app version and tag."
           commit-message: "chore: cef ${{ steps.v.outputs.new }}"

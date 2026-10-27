@@ -23,8 +23,7 @@ jobs:
           workspaces: backend
       - name: Prebuilt CEF
         run: |
-          cargo install export-cef-dir --version =156.1.0
-          export-cef-dir --force "$CEF_PATH"
+          scripts/fetch-cef.sh "$CEF_PATH"
       - run: brew install ninja
       - run: npm ci
         working-directory: ui
