@@ -99,7 +99,7 @@ fn split_crx3(crx: &[u8], want_id: &str) -> Result<(Vec<u8>, String), String> {
     if crx.get(..4) != Some(b"Cr24") || crx.get(4..8) != Some(&3u32.to_le_bytes()[..]) {
         return Err(bad());
     }
-    let hl = u32::from_le_bytes(crx.get(8..12).ok_or_else(bad)?.try_into().unwrap()) as usize;
+    let hl = u32::from_le_bytes(crx.get(8..12).and_then(|b| b.try_into().ok()).ok_or_else(bad)?) as usize;
     let header = crx.get(12..12usize.checked_add(hl).ok_or_else(bad)?).ok_or_else(bad)?;
     let zip = crx[12 + hl..].to_vec();
     let top = fields(header).ok_or_else(bad)?;
@@ -362,17 +362,36 @@ mod tests {
         let kp = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng).unwrap();
         let mut spki = hex_prefix();
         spki.extend(kp.public_key().as_ref());
-        let crx_id = Sha256::digest(&spki)[..16].to_vec();
+        crx_from(3, &spki, zip, tamper, |msg| kp.sign(&rng, msg).unwrap().as_ref().to_vec())
+    }
+
+    /// Test-only 2048-bit RSA key (PKCS#8) and its SubjectPublicKeyInfo, both base64; ring can load but not generate RSA keys.
+    const RSA_PKCS8: &str = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC+XoH0KGWGepHaSYWkkdpcoiZ+gUSS2UKq66bBcsSpp94WMTJhXTslT/xAi8P4ADrtNnliFDIbCi2TdxkH4TggNK3gTthvAznAQ0iefTpV10KOl47+lNag3KH1FFvvpnNTuUPwjFoiy1Q3RS1qro6ErLYmwnkzvwTH28wbrWM80IKSym+Z3/5Fg5/nST2L+773aOrl7p/UMX9v6dBorQ4IDDGLukjZx4HAcB1Z1DU0K5tlh0BpU4Wa0u8B+grwHvi8lCcWQ+Ha0uRzzm+TP8Hyct7H6o75fjppP1p8H1Jj2dFns5skVqDbXFtPW94K7dmlNjS95vcLg+S5eVAX8DAzAgMBAAECggEAD3gjjEEaGubr4jaWPwzBF0Tv5ti/R0WTVstGZjLay0SCVgBSbToDu+D3iREyb/0ozKzgCTnF5o+Zq4GCjbLd+jP9qxwNF1xGPZraFFLtwhr3ZBnpu0NB+5liKcWpQNygQ33rCOmGy4wFQGaFLcWYfCyCsryb17oee9UfDWK2DTNqb7vWi5xiS6yRDPGL1PbgpGjcoWvwzafe9wntwZoYI0bqbPPq/WBjGQ7hKkTUfluMq8BKOfKtqdvhTQ19xy++T6j0MJygob+1qpiRPsZHRDCaSCD3YxdR2xev4hI99yqfDxXYQKsDQBBcvlCYdIlYsoe8456H8APXj/jMQtvIFQKBgQDqVQwPpjSnc9AxOuzOnRQAUdi7MIRXTgYSkCw56fIl+/myo+0+EzfYNQaQ6YEUUzP7hZWllutSm8tu86IWcoKd1pcar+HC6QJgqqmrElImDjBfVsWYNwFTCz8LRECTv9jXPlCIkSJwtqVN24BrL0rb0X8Uofd6Efn4EcD4QB5xJwKBgQDP+MwV5souUR5g7LLsUyujqlJwD8KsoGI+d1YaCez8BtR5k3HOjZRTjITdserTnsvIYkPayt1RYAJ4GoPyoaN+YQ99oIiQzkYfo9RgjGRRPVEc1omTLb9dKx3NS4Zjn5O//H5ia2/MroEHy7bIJyQfN80rb8ZD0QzE1m1p9UjYFQKBgFVtc9wwp3l0iy2nYbVhJm2HaQ+0/Eons6cI0Fa8pv6aAcnSYScEMpOroR0rQ1d5jbXgWVHo1xlimqN0Rl8Ql/WaybN88zzvXWKIVRp8r14YRiI7rAV16BGyQ+WDmFdE1XSCzzE6V+fnbhQYNZTdxNimY0HOWj4yV4LMViEqnu55AoGATEzPM0nU62E/b/fnPOTWodkfHZXqqkK9SIWnxS3XEC/BTElX+5vdyzlGlb9sk+8yfHXwxxieUfiTb1TrC91Zikg50rFO6TGEcJ8+j51yQIvqclYTazfheWEUMfl/eJVXM5yDEcCw57suA5otmQkjK4DheQotBzxvHtg8lB81dnECgYEAsh3ZhX7jFTSIb8FEgn0ZWBEmV/xn9mLskr0TlwldMSV2gk5L1iA1CnpUKQ7HLBUyVmW8/+qFrbOEeApBD9gQlCAZqmiVIDP/YkE/N8Iaz78sdION0E5kmT+cWr6Vbwu4kqbxPsOJL5pRt5ERjbWO2pynwxMtIzScfBvttJDCkho=";
+    const RSA_SPKI: &str = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvl6B9ChlhnqR2kmFpJHaXKImfoFEktlCquumwXLEqafeFjEyYV07JU/8QIvD+AA67TZ5YhQyGwotk3cZB+E4IDSt4E7YbwM5wENInn06VddCjpeO/pTWoNyh9RRb76ZzU7lD8IxaIstUN0Utaq6OhKy2JsJ5M78Ex9vMG61jPNCCkspvmd/+RYOf50k9i/u+92jq5e6f1DF/b+nQaK0OCAwxi7pI2ceBwHAdWdQ1NCubZYdAaVOFmtLvAfoK8B74vJQnFkPh2tLkc85vkz/B8nLex+qO+X46aT9afB9SY9nRZ7ObJFag21xbT1veCu3ZpTY0veb3C4PkuXlQF/AwMwIDAQAB";
+
+    /// Same, but RSA-signed (proof field 2), the kind the Web Store mostly ships.
+    fn signed_crx_rsa(zip: &[u8], tamper: &[u8]) -> (Vec<u8>, String) {
+        let kp = ring::signature::RsaKeyPair::from_pkcs8(&STANDARD.decode(RSA_PKCS8).unwrap()).unwrap();
+        let rng = ring::rand::SystemRandom::new();
+        crx_from(2, &STANDARD.decode(RSA_SPKI).unwrap(), zip, tamper, |msg| {
+            let mut sig = vec![0; kp.public().modulus_len()];
+            kp.sign(&ring::signature::RSA_PKCS1_SHA256, &rng, msg, &mut sig).unwrap();
+            sig
+        })
+    }
+
+    fn crx_from(proof_field: u64, spki: &[u8], zip: &[u8], tamper: &[u8], sign: impl Fn(&[u8]) -> Vec<u8>) -> (Vec<u8>, String) {
+        let crx_id = Sha256::digest(spki)[..16].to_vec();
         let id: String = crx_id.iter().flat_map(|b| [b >> 4, b & 15]).map(|n| (b'a' + n) as char).collect();
         let signed = field(1, &crx_id);
         let mut msg = b"CRX3 SignedData\0".to_vec();
         msg.extend((signed.len() as u32).to_le_bytes());
         msg.extend(&signed);
         msg.extend(zip);
-        let sig = kp.sign(&rng, &msg).unwrap();
-        let mut proof = field(1, &spki);
-        proof.extend(field(2, sig.as_ref()));
-        let mut header = field(3, &proof);
+        let sig = sign(&msg);
+        let mut proof = field(1, spki);
+        proof.extend(field(2, &sig));
+        let mut header = field(proof_field, &proof);
         header.extend(field(10000, &signed));
         let mut crx = b"Cr24".to_vec();
         crx.extend(3u32.to_le_bytes());
@@ -397,6 +416,14 @@ mod tests {
         assert!(split_crx3(b"Cr24\x02\0\0\0", &id).is_err());
         // Zip swapped after signing: rejected.
         let (bad, id) = signed_crx(b"PKzipbytes", b"PKevilbytes");
+        assert!(split_crx3(&bad, &id).unwrap_err().contains("signature"));
+    }
+
+    #[test]
+    fn crx3_rsa() {
+        let (crx, id) = signed_crx_rsa(b"PKzipbytes", b"PKzipbytes");
+        assert_eq!(split_crx3(&crx, &id).unwrap().0, b"PKzipbytes");
+        let (bad, id) = signed_crx_rsa(b"PKzipbytes", b"PKevilbytes");
         assert!(split_crx3(&bad, &id).unwrap_err().contains("signature"));
     }
 

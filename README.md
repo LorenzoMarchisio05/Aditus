@@ -93,8 +93,19 @@ Rust, CEF 156 via `cef-rs` (Views framework), Svelte 5, SQLite for history and d
 
 - Ad blocking is good, not uBlock Origin parity.
 - No H.264/AAC, no Widevine (needs a custom CEF build).
-- Extensions: updates need a restart, no tab-aware popups, shared across profiles.
+- Extensions: updates need a restart, no tab-aware popups, shared across profiles (Chromium loads them once per process; per-profile isolation would need a separate engine context per profile, not done).
 - Release builds are signed and notarized only when signing secrets are set in CI; otherwise unsigned (right-click → Open).
+
+## Release signing
+
+The in-app updater only installs a release zip whose detached ed25519 signature (`<zip>.sig`, over the zip's sha256 hex) verifies against `UPDATE_PUBKEY` in `backend/src/update.rs`. The shipped value is a placeholder, so installing updates is refused until you set it:
+
+```sh
+# one-time: prints the public key to paste into UPDATE_PUBKEY; store key.pem as the GitHub secret UPDATE_SIGNING_KEY
+openssl genpkey -algorithm ed25519 -out key.pem && openssl pkey -in key.pem -pubout -outform DER | tail -c 32 | base64
+```
+
+`release.yml` signs with that secret and fails the release if it is missing. It needs OpenSSL 3 (macOS's LibreSSL can't sign ed25519). The Developer ID Team ID is still pinned when the installed app has one.
 
 ## License
 

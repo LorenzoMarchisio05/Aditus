@@ -475,7 +475,9 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             let list = |k: &str| a[k].as_array().map(|v| v.iter().filter_map(|x| x.as_str().filter(|s| s.len() <= 200).map(String::from)).take(2000).collect::<Vec<_>>()).unwrap_or_default();
             let mut css = Url::parse(&ctx.frame_url).map(|u| adblock::generic_css(&u, &list("c"), &list("i"))).unwrap_or_default();
             if css.len() > GENERIC_CSS_MAX {
-                css.truncate(css[..GENERIC_CSS_MAX].rfind('\n').unwrap_or(0)); // whole rules only
+                // Page-derived selectors can be non-ASCII: cut on a char boundary (slicing mid-char would panic = abort), whole rules only.
+                let end = (0..=GENERIC_CSS_MAX).rev().find(|&i| css.is_char_boundary(i)).unwrap_or(0);
+                css.truncate(css[..end].rfind('\n').unwrap_or(0));
             }
             ok(Value::String(css))
         }

@@ -29,7 +29,7 @@ Open decisions: #8 (who builds CEF with H.264). Skipped on purpose: #18, #22. Ne
    - Temp dir also leaks on every failed install.
    - **Status: Fixed.** Script only restores `$2.old` if it exists; temp dir removed on failure.
 4. **`panic = "abort"` plus `unwrap()` means one panic kills every tab.** Many `lock().unwrap()`, and `prepare(...).unwrap()` / `query_map(...).unwrap()` in `db.rs`. A locked, full or corrupt DB aborts the whole browser. Corrupt DB at startup means the app won't launch (`Db::open` error), no recovery path.
-   - **Status: Mostly fixed.** Panicking unwraps/indexing in `tabs.rs` and `db.rs` replaced; a corrupt DB is moved to `aditus.db.bak` and recreated. `lock().unwrap()` remains by design (`panic = "abort"`, so mutexes never poison).
+   - **Status: Mostly fixed.** Panicking unwraps/indexing in `tabs.rs` and `db.rs` replaced; a corrupt DB is moved to `aditus.db.bak` and recreated. `lock().unwrap()` remains by design (`panic = "abort"`, so mutexes never poison). Second pass: fixed a char-boundary slice in `cosmetic_generic` (page-derived text could abort); remaining non-test unwraps are infallible (`serde_json::to_string` of str/Value, `split().next()`, the DDG fallback URL, `Option::take` invariants in `engine.rs`) or fatal-at-startup (`current_exe`, main-thread checks in `mac.rs`).
 5. **Deleting a profile leaves its cookies and storage on disk** (`commands.rs:202-213` edits config only). Privacy leak, orphaned data.
    - **Status: Fixed.** `delete_profile` removes the data dir.
 6. **Profiles keyed by name, not id**, in mappings, tabs, history and session. A hand-edit rename silently breaks mappings and restore.
@@ -42,7 +42,7 @@ Open decisions: #8 (who builds CEF with H.264). Skipped on purpose: #18, #22. Ne
    - For ad-hoc/unsigned builds, `codesign --verify` only checks the bundle is self-consistent; the bundle-id comparison is trivially forgeable. Whoever controls the release gets code execution on every install.
    - Updater strips quarantine to get around Gatekeeper.
    - Once there is a Developer ID, pin the Team ID in the updater.
-   - **Status: Partly fixed.** Updater pins the Team ID. Digest still comes from the same GitHub API as the zip; ad-hoc builds remain forgeable.
+   - **Status: Fixed once a key is set.** Updater pins the Team ID and verifies a detached ed25519 signature (`.sig` over the zip sha256) against `UPDATE_PUBKEY`; release.yml signs with secret `UPDATE_SIGNING_KEY` and fails without it. `UPDATE_PUBKEY` is a placeholder (updater refuses to install) until you generate a key (README, Release signing).
 8. **Engine is a prebuilt binary from a third party.** `fetch-cef.sh` pulls `obs-rust/cef`, built "on a contributor's Mac", pinned by hash. Chromium security patches arrive only when that person rebuilds. The `cef-bump` PR does not run CI, and bumps the crate while the binary stays old. Biggest long-term risk for a browser.
    - **Status: Open (decision).** Kept `obs-rust` pin for now. Official CEF + separate ffmpeg is **not feasible** (ffmpeg is statically linked; see `docs/cef-ffmpeg.md`). Remaining options: scheduled release check on `obs-rust`, or build CEF ourselves with `proprietary_codecs=true ffmpeg_branding=Chrome`.
 9. **Hostile pages can forge "user gestures".** `cefQuery` exists in every page context and `page_ping` is allowed for untrusted pages. The `isTrusted` check lives only in the injected JS. A page can call `cefQuery` with `{"cmd":"page_ping","args":{"kind":"g"}}` directly. That:
@@ -55,7 +55,7 @@ Open decisions: #8 (who builds CEF with H.264). Skipped on purpose: #18, #22. Ne
     - `unzip` limits total size by declared `f.size()`, which a hostile zip can understate.
     - Extensions are shared across all profiles, breaking profile isolation. MV3 only (uBlock Origin is MV2, excluded).
     - Silent auto-update when permissions are a subset.
-   - **Status: Mostly fixed.** CRX3 proof signature verified (`ring`; only the ECDSA path has a test), unzip counts real bytes (400MB / 20,000 entries). Extensions are still shared across profiles; MV3 only.
+   - **Status: Mostly fixed.** CRX3 proof signature verified (`ring`; ECDSA and RSA paths tested), unzip counts real bytes (400MB / 20,000 entries). Extensions are still shared across profiles; MV3 only.
 11. **Saved passwords break profile isolation.** Keychain entries keyed by `origin + user`, not profile.
     - `login_fill` takes `.next()`, so no choice between multiple accounts on one origin.
     - Fill works in the top frame only.
