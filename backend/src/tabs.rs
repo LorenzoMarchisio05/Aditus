@@ -675,7 +675,7 @@ pub fn on_navigation(app: &AppHandle, label: &str, u: &Url, user_gesture: bool, 
             }
         }
         // A popup and its opener live in one profile: a sign-in that lands on a mapped site must not rebuild either view.
-        if matches!(d, Decision::Swap(_)) && g.linked(tab_id) {
+        if matches!(d, Decision::Swap(_) | Decision::Prompt(_)) && g.linked(tab_id) {
             d = Decision::Allow;
         }
         d
@@ -1812,7 +1812,11 @@ pub fn discard_idle(app: &AppHandle) {
             .flat_map(|t| {
                 t.discarded = true;
                 t.loading = false;
-                [Some(label(t.id, t.gen)), t.retiring.take()]
+                // New generation: a view that is parked instead of destroyed (`engine::close`) must not
+                // report its blank page, title or visits on the sleeping tab.
+                let old = label(t.id, t.gen);
+                t.gen += 1;
+                [Some(old), t.retiring.take()]
             })
             .flatten()
             .collect()
@@ -1909,7 +1913,9 @@ fn sleep_for_memory_with(app: &AppHandle, rows: &[(u32, u32, u64)]) {
         g.tabs.iter_mut().filter(|t| !actives.contains(&t.id) && !t.pinned && !t.audible && !t.discarded && !nav::linked(&links, t.id)).min_by_key(|t| t.last_active).map(|t| {
             t.discarded = true;
             t.loading = false;
-            [Some(label(t.id, t.gen)), t.retiring.take()]
+            let old = label(t.id, t.gen); // new generation, as in `discard_idle`
+            t.gen += 1;
+            [Some(old), t.retiring.take()]
         })
     };
     if let Some(ls) = victim {

@@ -598,6 +598,8 @@ pub fn close(label: &str) {
     // hidden, too. Its browser id leaves the registry so a parked view can't keep the app from quitting.
     let related = RELATED.with(|r| r.borrow_mut().remove(label));
     if related && docked.is_none() {
+        // A parked popup keeps its window name: a later `window.open(url, name)` would drive the hidden view.
+        eval(label, "window.name=''");
         navigate(label, "about:blank");
     }
     let parked = docked.is_some() || related;
@@ -1217,7 +1219,15 @@ wrap_life_span_handler! {
         // handle it, so CEF does not send the close on to the window; the browser is not destroyed inside this
         // callback. A window being closed (`can_close`) asks the same question and gets the default answer.
         fn do_close(&self, _browser: Option<&mut Browser>) -> i32 {
-            if WIN_CLOSING.with(|c| c.get()) || !tabs::is_popup_view(&tabs::AppHandle, &self.label) {
+            if WIN_CLOSING.with(|c| c.get()) {
+                return 0;
+            }
+            // A parked popup (already closed as a tab) asked to close again: nothing left to do, and the default
+            // would act on a view that is in no window.
+            if tabs::parse_label(&self.label).is_some() && !has_view(&self.label) {
+                return 1;
+            }
+            if !tabs::is_popup_view(&tabs::AppHandle, &self.label) {
                 return 0;
             }
             let label = self.label.clone();
