@@ -19,9 +19,9 @@ addEventListener('wheel',e=>{const n=Date.now();if(n<until||Math.abs(e.deltaX)<M
 addEventListener('submit',e=>{if(e.isTrusted)ping('g',e.target.action);try{const f=e.target,p=f.querySelector&&f.querySelector('input[type=password]');if(p&&p.value){const all=[...f.querySelectorAll('input')],u=all.slice(0,all.indexOf(p)).reverse().find(x=>/^(text|email|tel|)$/.test(x.type)&&x.value);send('page_login',{u:u?u.value:'',p:p.value}).catch(()=>{})}}catch(_){}},true);
 for(const m of ['pushState','replaceState']){const o=history[m];history[m]=function(){const r=o.apply(this,arguments);ping('u');return r}}
 addEventListener('popstate',()=>ping('u'));addEventListener('hashchange',()=>ping('u'));
-addEventListener('playing',()=>ping('p1'),true);
-addEventListener('pause',()=>ping('p0'),true);
-addEventListener('ended',()=>ping('p0'),true);
+// Audible = some media element here is playing unmuted. CEF has no audio-state callback (its AudioHandler diverts the sound), so this stays a page-side guess.
+{const pl=new Set();let pa=false;const pu=e=>{const m=e.target;if(!(m instanceof HTMLMediaElement))return;pl[m.paused||m.ended||m.muted||!m.volume?'delete':'add'](m);const a=pl.size>0;if(a!==pa){pa=a;ping(a?'p1':'p0')}};
+for(const ev of ['playing','pause','ended','volumechange','emptied'])addEventListener(ev,pu,true)}
 if(window.top===window){let t,last='';
 const snap=()=>{try{const f=[];document.querySelectorAll('input,textarea,select').forEach((e,i)=>{const ty=(e.type||'').toLowerCase();if(['password','hidden','file','submit','button','image','reset'].includes(ty)||/^cc-/.test(e.autocomplete))return;const v=ty==='checkbox'||ty==='radio'?e.checked:e.value;if(v===''||v===false||v==null||(typeof v==='string'&&v.length>5000))return;f.push([i,v])});const m=[];document.querySelectorAll('video,audio').forEach((e,i)=>{if(e.currentTime>1)m.push([i,e.currentTime])});const s=JSON.stringify({x:scrollX,y:scrollY,f:f.slice(0,100),m:m.slice(0,4)});if(s!==last&&s.length<60000){last=s;send('page_state',{s}).catch(()=>{})}}catch(e){}};
 const lazy=()=>{clearTimeout(t);t=setTimeout(snap,1000)};

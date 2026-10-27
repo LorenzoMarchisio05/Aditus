@@ -46,7 +46,17 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
     let ok = |v: Value| reply.done(Ok(v));
     match cmd {
         "get_state" => {
-            tabs::emit_state(&APP);
+            tabs::resend_state(&APP);
+            let waiting = {
+                let mut p = PALETTE_PENDING.lock().unwrap();
+                let n = p.len();
+                p.retain(|l| *l != ctx.label);
+                n != p.len()
+            };
+            if waiting {
+                engine::focus(&ctx.label);
+                engine::emit_to(&ctx.label, "palette-open", "null");
+            }
             ok(Value::Null)
         }
         "new_tab" => {
@@ -591,14 +601,13 @@ fn show_palette(ctx: &Ctx) {
         engine::emit_to(&label, "palette-open", "null");
     } else {
         engine::create(overlay(&label, win, "palette", bounds));
-        // The page is still loading: tell it to open once it can listen.
-        let l = label.clone();
-        engine::defer_after(250, move || {
-            engine::focus(&l);
-            engine::emit_to(&l, "palette-open", "null");
-        });
+        // The page is still loading: it asks for the state once its listeners exist, and `get_state` opens it then.
+        PALETTE_PENDING.lock().unwrap().push(label);
     }
 }
+
+/// Palette views created but not yet listening.
+static PALETTE_PENDING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Rows last pushed to each window's suggestion list, for a list that is still loading.
 static SUGGEST: Mutex<Vec<(String, Value)>> = Mutex::new(Vec::new());
@@ -631,7 +640,8 @@ fn suggest_show(ctx: &Ctx, a: &Value) {
         engine::emit_to(&label, "suggest-rows", &payload.to_string());
     } else {
         engine::create(overlay(&label, win, "suggest", bounds));
-        // The list never takes the keyboard from the input being typed in.
+        // The list never takes the keyboard from the input being typed in. CEF grabs focus when the new view
+        // attaches and when its page finishes loading, with no callback for either, hence two timed re-focuses.
         let from = ctx.label.clone();
         let again = from.clone();
         engine::defer_after(60, move || engine::focus(&from));
