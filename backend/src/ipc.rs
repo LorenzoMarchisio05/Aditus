@@ -21,6 +21,8 @@ pub struct Ctx {
     pub win: String,
     pub trusted: bool,
     pub frame_url: String,
+    /// The engine's id of the calling frame (not from the payload).
+    pub frame: String,
 }
 
 /// Answers one query; usable from any thread.

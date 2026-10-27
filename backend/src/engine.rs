@@ -10,6 +10,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -176,6 +177,18 @@ pub fn defer_after(ms: i64, f: impl FnOnce() + 'static) {
 pub fn start() {
     scheme::register(None);
     tabs::startup(&tabs::AppHandle);
+}
+
+thread_local! {
+    /// Windows whose close was refused (a page's beforeunload dialog is up), and when.
+    static CLOSE_ASKED: RefCell<HashMap<String, Instant>> = RefCell::new(HashMap::new());
+}
+
+const CLOSE_FORCE: Duration = Duration::from_secs(3);
+
+/// A close request right after a refused one (user insists) must go through.
+fn force_close(asked: Option<Instant>, now: Instant) -> bool {
+    asked.is_some_and(|t| now.duration_since(t) < CLOSE_FORCE)
 }
 
 fn maybe_quit() {
@@ -383,7 +396,8 @@ pub fn place_window_buttons(win: &str) {
         let p = h.window_handle() as usize;
         let place = move || crate::mac::place_window_buttons(p as *mut std::ffi::c_void, collapsed, w);
         place();
-        // AppKit re-lays the buttons out after resizes and focus changes; win the race.
+        // Timer on purpose: AppKit re-lays the buttons out after resizes and focus changes with no callback
+        // we can hook, so place them again once it has settled.
         defer_after(120, place);
     }
     #[cfg(not(target_os = "macos"))]
@@ -552,6 +566,7 @@ pub fn stop_find(label: &str) {
 
 /// Download `url` through the normal downloads flow (Save Image As…).
 pub fn download(label: &str, url: &str) {
+    tabs::allow_download(&tabs::AppHandle, label);
     if let Some(h) = host(label) {
         h.start_download(Some(&s(url)));
     }
@@ -642,7 +657,8 @@ pub fn ctx(browser: &Browser, frame: &Frame) -> Option<ipc::Ctx> {
     let (win, app_page) = reg(|r| r.views.get(&label).map(|v| (v.win.clone(), v.app_page || v.kind != Kind::Page)))?;
     let frame_url = CefString::from(&frame.url()).to_string();
     let trusted = app_page && frame.is_main() != 0 && frame_url.starts_with(&format!("{SCHEME}://{}/", scheme::HOST));
-    Some(ipc::Ctx { label, win, trusted, frame_url })
+    let frame = CefString::from(&frame.identifier()).to_string();
+    Some(ipc::Ctx { label, win, trusted, frame_url, frame })
 }
 
 pub fn win_of(label: &str) -> Option<String> {
@@ -824,14 +840,27 @@ wrap_window_delegate! {
             }
         }
 
+        // CEF's flow: ask each page browser (this is what runs beforeunload and shows its dialog) and
+        // refuse while any says no; when the user accepts, CEF closes the window again by itself.
+        // A second request within CLOSE_FORCE of the first closes regardless, so a window can never get stuck.
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
-            let bvs: Vec<BrowserView> = reg(|r| r.views.values().filter(|v| v.win == self.label).map(|v| v.bv.clone()).collect());
+            let now = Instant::now();
+            let asked = CLOSE_ASKED.with(|c| c.borrow().get(&self.label).copied());
+            if force_close(asked, now) {
+                CLOSE_ASKED.with(|c| c.borrow_mut().remove(&self.label));
+                return 1;
+            }
+            let bvs: Vec<BrowserView> = reg(|r| r.views.values().filter(|v| v.win == self.label && v.kind == Kind::Page && !v.app_page).map(|v| v.bv.clone()).collect());
+            let mut all = true;
             for bv in bvs {
                 if let Some(h) = bv.browser().and_then(|b| b.host()) {
-                    h.try_close_browser();
+                    all &= h.try_close_browser() != 0;
                 }
             }
-            1
+            if !all {
+                CLOSE_ASKED.with(|c| c.borrow_mut().insert(self.label.clone(), now));
+            }
+            all as i32
         }
 
         fn is_frameless(&self, _window: Option<&mut Window>) -> i32 {
@@ -954,6 +983,7 @@ wrap_life_span_handler! {
             let Some(b) = browser else { return };
             reg(|r| r.by_browser.insert(b.identifier(), self.label.clone()));
             tabs::on_view_ready(&tabs::AppHandle, &self.label);
+            crate::commands::suggest_ready(&self.label);
         }
 
         fn on_before_popup(
@@ -1124,6 +1154,8 @@ wrap_load_handler! {
             let Some(f) = frame else { return };
             if f.is_main() != 0 {
                 tabs::on_load(&tabs::AppHandle, &self.label, CefString::from(&f.url()).to_string(), true);
+            } else {
+                tabs::frame_reset(&tabs::AppHandle, &self.label, &CefString::from(&f.identifier()).to_string());
             }
         }
 
@@ -1131,6 +1163,7 @@ wrap_load_handler! {
             let Some(f) = frame else { return };
             if f.is_main() != 0 {
                 tabs::on_load(&tabs::AppHandle, &self.label, CefString::from(&f.url()).to_string(), false);
+                crate::commands::suggest_ready(&self.label);
             }
         }
 
@@ -1221,6 +1254,10 @@ wrap_download_handler! {
             callback: Option<&mut BeforeDownloadCallback>,
         ) -> i32 {
             let (Some(item), Some(cb)) = (item, callback) else { return 0 };
+            // No user gesture behind it (drive-by download): not calling `cont` cancels it.
+            if !tabs::download_allowed(&tabs::AppHandle, &self.label) {
+                return 0;
+            }
             let custom = tabs::download_dir();
             let dir = custom.filter(|d| std::fs::create_dir_all(d).is_ok()).unwrap_or_else(downloads_dir);
             let name = suggested_name.map(|n| n.to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| "download".into());
@@ -1583,4 +1620,17 @@ pub fn popup(win: &str, items: Vec<Item>, at: (i32, i32)) {
     let mut model_ref = model.clone();
     w.show_menu(Some(&mut model_ref), Some(&Point { x: origin.x + at.0, y: origin.y + at.1 }), MenuAnchorPosition::TOPLEFT);
     reg(|r| r.popup = Some((model, delegate)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn second_close_forces() {
+        let t = Instant::now();
+        assert!(!force_close(None, t));
+        assert!(force_close(Some(t), t + Duration::from_secs(1)));
+        assert!(!force_close(Some(t), t + CLOSE_FORCE + Duration::from_secs(1)));
+    }
 }

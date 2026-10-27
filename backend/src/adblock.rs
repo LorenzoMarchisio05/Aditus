@@ -113,8 +113,7 @@ fn generic_css_for(engine: &Engine, url: &str, classes: &[String], ids: &[String
 
 pub fn enabled_for(host: &str) -> bool {
     let g = CFG.read().unwrap();
-    // An entry also covers its subdomains (example.com -> www.example.com).
-    g.0 && !g.1.iter().any(|h| host == h || host.strip_suffix(h.as_str()).is_some_and(|p| p.ends_with('.')))
+    g.0 && !g.1.iter().any(|h| covers(h, host))
 }
 
 fn engine() -> Option<Arc<Engine>> {
@@ -177,6 +176,30 @@ pub fn refresh(app: &AppHandle) {
         let host = url::Url::parse(&url).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
         let off = !enabled_for(&host);
         let pre = if off { "try{sessionStorage.setItem('__aditus_off','1')}catch(e){}" } else { "try{sessionStorage.removeItem('__aditus_off')}catch(e){}" };
+        tabs::reload_with(app, id, pre);
+    }
+}
+
+/// Does an allowlist entry for `entry` cover `host` (the site itself or any subdomain)?
+fn covers(entry: &str, host: &str) -> bool {
+    !entry.is_empty() && (host == entry || host.strip_suffix(entry).is_some_and(|p| p.ends_with('.')))
+}
+
+/// `host`'s allowlist entry was toggled: reload every awake tab (any window) it covers, so each is re-filtered.
+pub fn refresh_host(app: &AppHandle, toggled: &str) {
+    let hit: Vec<(u32, String)> = {
+        let g = tabs::shared(app).app.lock().unwrap();
+        g.tabs
+            .iter()
+            .filter(|t| !t.discarded && tabs::internal_view(&t.url()).is_none())
+            .filter_map(|t| {
+                let host = url::Url::parse(&t.url()).ok()?.host_str()?.to_string();
+                covers(toggled, &host).then_some((t.id, host))
+            })
+            .collect()
+    };
+    for (id, host) in hit {
+        let pre = if enabled_for(&host) { "try{sessionStorage.removeItem('__aditus_off')}catch(e){}" } else { "try{sessionStorage.setItem('__aditus_off','1')}catch(e){}" };
         tabs::reload_with(app, id, pre);
     }
 }
@@ -337,6 +360,14 @@ mod tests {
         assert!(is_blocked(&engine, "https://securepubads.g.doubleclick.net/tag/js/gpt.js", "https://example.com/", "script"));
         assert!(!is_blocked(&engine, "https://example.com/app.js", "https://example.com/", "script"));
         assert!(rules > 0);
+    }
+
+    #[test]
+    fn allowlist_covers_subdomains() {
+        assert!(covers("example.com", "example.com"));
+        assert!(covers("example.com", "www.example.com"));
+        assert!(!covers("example.com", "badexample.com"));
+        assert!(!covers("", "example.com"));
     }
 
     #[test]
