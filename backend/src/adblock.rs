@@ -48,10 +48,35 @@ pub fn build(texts: &[String]) -> (Engine, usize) {
     let mut set = FilterSet::new(false);
     let mut rules = 0;
     for t in texts {
-        set.add_filter_list(t.clone(), ParseOptions::default());
+        set.add_filter_list(popup_as_document(t), ParseOptions::default());
         rules += t.lines().filter(|l| !l.is_empty() && !l.starts_with('!') && !l.starts_with('[')).count();
     }
     (Engine::new_with_filter_set(set), rules)
+}
+
+/// adblock-rust ignores `$popup`, and only popups are ever checked as "document" (main-frame loads skip the filter),
+/// so block rules become `$document`. Exceptions are dropped: `@@...$document` would mean "unfiltered page".
+fn popup_as_document(list: &str) -> String {
+    if !list.contains("popup") {
+        return list.to_string();
+    }
+    let mut out = String::with_capacity(list.len());
+    for line in list.lines() {
+        match line.rsplit_once('$') {
+            Some((rule, opts)) if !line.starts_with('!') && opts.split(',').any(|o| o == "popup") => {
+                if line.starts_with("@@") {
+                    continue;
+                }
+                let opts: Vec<&str> = opts.split(',').map(|o| if o == "popup" { "document" } else { o }).collect();
+                out.push_str(&format!("{rule}${}\n", opts.join(",")));
+            }
+            _ => {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    out
 }
 
 pub fn is_blocked(engine: &Engine, url: &str, source: &str, kind: &str) -> bool {
@@ -100,6 +125,20 @@ pub fn check(url: &str, source: &str, kind: &str) -> bool {
         Some(e) if enabled_for(&host) => is_blocked(&e, url, source, kind),
         _ => false,
     }
+}
+
+/// Click-hijacking ads (popunders, tab-unders) fire inside a real click, so the gesture check lets them through,
+/// and their domains rotate faster than the lists (animeworld's loader generates one with WebAssembly when its
+/// listed script is blocked). A page-started popup or navigation passes if it stays on the page's site or goes
+/// to the site of the link the click landed on (`link`, empty when the click wasn't on one).
+pub fn hijack(url: &str, source: &str, link: &str) -> bool {
+    let host = url::Url::parse(source).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
+    enabled_for(&host) && is_hijack(url, source, link)
+}
+
+fn is_hijack(url: &str, source: &str, link: &str) -> bool {
+    let third = |from: &str| Request::new(url, from, "document", "GET").map_or(true, |r| r.is_third_party);
+    third(source) && (link.is_empty() || third(link))
 }
 
 /// Settings or allowlist changed: reload the active tab so it is re-filtered.
@@ -230,8 +269,17 @@ mod tests {
         assert!(!is_blocked(&engine, "https://ads.example.com/allowed", "https://example.org/", "script"));
         assert!(!is_blocked(&engine, "https://cdn.example.org/app.js", "https://example.org/", "script"));
         assert!(css_for(&engine, "https://example.org/page").contains(".banner-ad"));
+        let (e, _) = build(&["||pop.example^$popup,third-party\n@@||ok.pop.example^$popup\n".to_string()]);
+        assert!(is_blocked(&e, "https://pop.example/x", "https://site.com/", "document"));
+        assert!(!is_blocked(&e, "https://pop.example/x", "https://site.com/", "script"));
         assert!(css_for(&engine, "https://other.net/").is_empty());
         assert!(rules > 0);
+        let page = "https://www.animeworld.ac/play/x";
+        assert!(is_hijack("https://ocbwmegh.in/ad", page, ""));
+        assert!(is_hijack("https://ocbwmegh.in/ad", page, "https://www.animeworld.ac/news/y"));
+        assert!(!is_hijack("https://t.me/AnimeWorldITA2", page, "https://t.me/AnimeWorldITA2"));
+        assert!(!is_hijack("https://static.animeworld.ac/sfondi", page, ""));
+        assert!(is_hijack("about:blank", page, ""));
     }
 
     /// Network + slow: `cargo test real_lists -- --ignored --nocapture`

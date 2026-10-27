@@ -102,14 +102,14 @@ fn default_theme() -> String {
 }
 
 fn default_sidebar() -> u32 {
-    250
+    290
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             search_template: crate::search::DDG.into(),
-            idle_minutes: 5,
+            idle_minutes: 10,
             memory_limit_mb: default_memory_limit(),
             sidebar_collapsed: false,
             topbar_visible: true,

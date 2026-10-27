@@ -6,11 +6,17 @@ pub const PAGE: &str = r#"(()=>{
 if(window.__aditus)return;window.__aditus=1;
 const q=window.cefQuery;if(!q)return;
 const send=(cmd,args)=>new Promise((ok,no)=>{try{q({request:JSON.stringify({cmd,args}),onSuccess:ok,onFailure:(c,m)=>no(m)})}catch(e){no(e)}});
-const ping=k=>{send('page_ping',{kind:k}).catch(()=>{})};
-addEventListener('click',()=>ping('g'),true);
+const ping=(k,href)=>{send('page_ping',{kind:k,href:href||''}).catch(()=>{})};
+// Real clicks only (an ad's synthetic a.click() is untrusted), with the link they landed on: popups and
+// navigations that follow may go there and nowhere else (see adblock::hijack).
+const lk=e=>{const a=e.composedPath().find(n=>n instanceof HTMLAnchorElement&&/^https?:/.test(n.href)&&!(n.hash&&n.href.split('#')[0]===location.href.split('#')[0]));return a?a.href:''};
+for(const t of ['click','auxclick'])addEventListener(t,e=>{if(e.isTrusted)ping('g',lk(e))},true);
 if(window===top){let lm=0;addEventListener('pointermove',e=>{const n=Date.now();if(n-lm<120)return;lm=n;send('page_ping',{kind:'m',x:e.clientX/innerWidth,y:e.clientY/innerHeight}).catch(()=>{})},true)}
-addEventListener('keydown',e=>{if(e.key==='Enter')ping('g')},true);
-addEventListener('submit',e=>{ping('g');try{const f=e.target,p=f.querySelector&&f.querySelector('input[type=password]');if(p&&p.value){const all=[...f.querySelectorAll('input')],u=all.slice(0,all.indexOf(p)).reverse().find(x=>/^(text|email|tel|)$/.test(x.type)&&x.value);send('page_login',{u:u?u.value:'',p:p.value}).catch(()=>{})}}catch(_){}},true);
+addEventListener('keydown',e=>{if(e.key==='Enter'&&e.isTrusted)ping('g',lk(e))},true);
+// Two-finger horizontal swipe = back/forward, unless something under the pointer can scroll sideways.
+if(window===top){let acc=0,until=0,rs;const sx=(e,d)=>{for(let n=e.target;n&&n.nodeType===1;n=n.parentElement){const o=getComputedStyle(n).overflowX;if((o==='auto'||o==='scroll')&&(d<0?n.scrollLeft>0:n.scrollLeft+n.clientWidth<n.scrollWidth-1))return 1}};
+addEventListener('wheel',e=>{const n=Date.now();if(n<until||Math.abs(e.deltaX)<Math.abs(e.deltaY)*2||sx(e,e.deltaX))return;acc+=e.deltaX;clearTimeout(rs);rs=setTimeout(()=>acc=0,150);if(Math.abs(acc)>=150){ping(acc<0?'b':'f');acc=0;until=n+800}},{passive:true})}
+addEventListener('submit',e=>{if(e.isTrusted)ping('g',e.target.action);try{const f=e.target,p=f.querySelector&&f.querySelector('input[type=password]');if(p&&p.value){const all=[...f.querySelectorAll('input')],u=all.slice(0,all.indexOf(p)).reverse().find(x=>/^(text|email|tel|)$/.test(x.type)&&x.value);send('page_login',{u:u?u.value:'',p:p.value}).catch(()=>{})}}catch(_){}},true);
 for(const m of ['pushState','replaceState']){const o=history[m];history[m]=function(){const r=o.apply(this,arguments);ping('u');return r}}
 addEventListener('popstate',()=>ping('u'));addEventListener('hashchange',()=>ping('u'));
 addEventListener('playing',()=>ping('p1'),true);
@@ -50,6 +56,9 @@ if(stall>=2&&V<3){const r=p.getPlayerResponse&&p.getPlayerResponse();if(r&&r.vid
 const st=document.createElement('style');st.textContent='#movie_player.ad-showing video{opacity:0!important}.video-ads,.ytp-ad-module,.ytp-ad-overlay-container,#player-ads,ytd-ad-slot-renderer,ytd-in-feed-ad-layout-renderer,ytd-display-ad-renderer,ytd-promoted-sparkles-web-renderer{display:none!important}';
 const add=()=>(document.head||document.documentElement).appendChild(st);document.documentElement?add():addEventListener('DOMContentLoaded',add);
 let was=0;const skip=()=>{const m=document.querySelector('#movie_player.ad-showing');if(m&&!was)console.debug('[aditus] ad playing, skipping');if(!m){if(was){was=0;const v0=document.querySelector('#movie_player video');if(v0){v0.muted=false;v0.playbackRate=1}const pl=document.querySelector('#movie_player');if(pl&&pl.playVideo)pl.playVideo()}return}was=1;const vd=m.querySelector('video');if(vd&&isFinite(vd.duration)){vd.muted=true;vd.playbackRate=16;vd.currentTime=vd.duration}const b=document.querySelector('.ytp-skip-ad-button,.ytp-ad-skip-button-modern,.ytp-ad-skip-button');if(b)b.click()};
+// "Ad blockers violate YouTube's Terms" wall: drop the dialog and its backdrop, let the video play.
+const wall=()=>{const w=document.querySelector('ytd-enforcement-message-view-model');if(!w)return;console.debug('[aditus] removing enforcement dialog');(w.closest('tp-yt-paper-dialog')||w).remove();document.querySelectorAll('tp-yt-iron-overlay-backdrop').forEach(e=>e.remove());document.body.style.overflow='';document.documentElement.style.overflow='';const p=document.getElementById('movie_player');if(p&&p.getPlayerState&&p.getPlayerState()===2&&p.playVideo)p.playVideo()};
+new MutationObserver(wall).observe(document,{subtree:true,childList:true});setInterval(wall,1000);
 new MutationObserver(skip).observe(document,{subtree:true,attributes:true,attributeFilter:['class']});for(const ev of ['loadstart','loadedmetadata','durationchange','playing'])document.addEventListener(ev,skip,true);setInterval(skip,100);
 })();"#;
 

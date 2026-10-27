@@ -128,8 +128,8 @@ pub struct App {
     skipped: HashSet<String>,
     toast: Option<Toast>,
     undo: Option<Undo>,
-    /// Last user gesture per tab (click, Enter, submit), reported by the page script.
-    gestures: HashMap<u32, Instant>,
+    /// Last user gesture per tab (click, Enter, submit) and the link it landed on, reported by the page script.
+    gestures: HashMap<u32, (Instant, String)>,
     /// Recently closed tabs (url, profile), newest last.
     closed: Vec<(String, String)>,
 }
@@ -488,8 +488,17 @@ pub fn on_navigation(app: &AppHandle, label: &str, u: &Url, user_gesture: bool, 
     let decision = {
         let mut g = s.app.lock().unwrap();
         // A redirect is not a new gesture, but it continues the click that started it.
-        let recent = g.gestures.get(&tab_id).is_some_and(|t| t.elapsed() < GESTURE_WINDOW);
-        let user = user_gesture || recent;
+        let recent = g.gestures.get(&tab_id).filter(|t| t.0.elapsed() < GESTURE_WINDOW).map(|t| t.1.clone());
+        let user = user_gesture || recent.is_some();
+        // Tab-under: right after a click the page sends this tab to an ad (often opening the link in a new tab).
+        // After a click on no link only listed ads are stopped, so script buttons (sign-in) still go cross-site.
+        if let (Some(link), false, Some(t)) = (&recent, is_redirect, g.tabs.iter().find(|t| t.id == tab_id)) {
+            let cur = t.url();
+            let ad = if link.is_empty() { crate::adblock::check(u.as_str(), &cur, "document") } else { crate::adblock::hijack(u.as_str(), &cur, link) };
+            if ad {
+                return false;
+            }
+        }
         if user && !is_redirect {
             g.gestures.remove(&tab_id);
         }
@@ -668,6 +677,13 @@ fn record_entry(t: &mut Tab, url: &str) {
 }
 
 /// `window.open` / target=_blank: a tab beside the opener, in its profile.
+/// The link the tab's last recent click landed on ("" when none), for `adblock::hijack`.
+pub fn clicked_link(app: &AppHandle, label: &str) -> String {
+    let Some((id, _)) = parse_label(label) else { return String::new() };
+    let g = shared(app).app.lock().unwrap();
+    g.gestures.get(&id).filter(|t| t.0.elapsed() < GESTURE_WINDOW).map(|t| t.1.clone()).unwrap_or_default()
+}
+
 pub fn on_popup(app: &AppHandle, label: &str, url: &str) {
     let Ok(u) = Url::parse(url) else { return };
     if !matches!(u.scheme(), "http" | "https") {
@@ -761,15 +777,16 @@ fn tell_pointer(app: &AppHandle, id: u32, json: &str) {
     engine::emit_to(&wv_label("ui", &win), "page-pointer", json);
 }
 
-pub fn page_ping(app: &AppHandle, view_label: &str, kind: &str, x: f64, y: f64) {
+pub fn page_ping(app: &AppHandle, view_label: &str, kind: &str, href: &str, x: f64, y: f64) {
     let Some((id, gen)) = parse_label(view_label) else { return };
     let s = shared(app);
     match kind {
         "g" => {
-            s.app.lock().unwrap().gestures.insert(id, Instant::now());
+            s.app.lock().unwrap().gestures.insert(id, (Instant::now(), href.to_string()));
             tell_pointer(app, id, r#"{"c":1}"#);
         }
         "m" => tell_pointer(app, id, &format!(r#"{{"x":{:.2},"y":{:.2}}}"#, x.clamp(0.0, 1.0), y.clamp(0.0, 1.0))),
+        "b" | "f" => go_history(app, id, if kind == "b" { -1 } else { 1 }),
         "p1" | "p0" => {
             let changed = {
                 let mut g = s.app.lock().unwrap();

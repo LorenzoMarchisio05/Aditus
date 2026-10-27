@@ -979,8 +979,14 @@ wrap_life_span_handler! {
             if user_gesture == 0 || crate::adblock::check(&url, &source, "document") {
                 return 1;
             }
+            // Click-hijacking ads too (animeworld's even ask for a sized popup window, so that is no sign of a
+            // sign-in). Delayed so the click's page ping, sent just before but itself deferred, has landed.
             let label = self.label.clone();
-            defer(move || tabs::on_popup(&tabs::AppHandle, &label, &url));
+            defer_after(50, move || {
+                if !crate::adblock::hijack(&url, &source, &tabs::clicked_link(&tabs::AppHandle, &label)) {
+                    tabs::on_popup(&tabs::AppHandle, &label, &url);
+                }
+            });
             1
         }
 

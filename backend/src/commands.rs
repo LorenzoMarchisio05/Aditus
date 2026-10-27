@@ -472,7 +472,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             ok(Value::Null)
         }
         "page_ping" => {
-            tabs::page_ping(&APP, &ctx.label, &str_arg(&a, "kind"), num(&a, "x"), num(&a, "y"));
+            tabs::page_ping(&APP, &ctx.label, &str_arg(&a, "kind"), &str_arg(&a, "href"), num(&a, "x"), num(&a, "y"));
             ok(Value::Null)
         }
         _ => reply.done(Err(format!("unknown command {cmd}"))),
