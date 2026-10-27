@@ -232,7 +232,7 @@ pub fn set_enabled(id: &str, on: bool) {
         d.push(id.to_string());
     }
     let _ = fs::create_dir_all(root());
-    let _ = fs::write(root().join("state.json"), json!({ "disabled": d }).to_string());
+    let _ = crate::config::write_atomic(&root().join("state.json"), json!({ "disabled": d }).to_string());
 }
 
 pub fn remove(id: &str) {

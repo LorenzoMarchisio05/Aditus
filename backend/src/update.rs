@@ -73,6 +73,14 @@ fn bundle_id(app: &Path) -> Result<String, String> {
 /// Download, verify and stage the new bundle, then start the swap that runs after this process exits.
 /// Returns once the caller may quit.
 pub fn install() -> Result<(), String> {
+    let r = install_inner();
+    if r.is_err() {
+        let _ = std::fs::remove_dir_all(std::env::temp_dir().join(format!("aditus-update-{}", std::process::id())));
+    }
+    r
+}
+
+fn install_inner() -> Result<(), String> {
     let r = latest().filter(|r| is_newer(&r.tag, env!("CARGO_PKG_VERSION"))).ok_or("No newer release")?;
     let (url, sha) = r.asset.ok_or("Release has no verifiable download")?;
     let cur = bundle().ok_or("Aditus isn't in a writable location; download it from the release page")?;
@@ -101,7 +109,7 @@ pub fn install() -> Result<(), String> {
 
     // Wait for us to exit, swap with a backup, relaunch; roll back if the move fails.
     let script = r#"while kill -0 "$1" 2>/dev/null; do sleep 0.3; done
-rm -rf "$2.old"; mv "$2" "$2.old" && mv "$3" "$2" && { rm -rf "$2.old" "$4"; open "$2"; } || { rm -rf "$2"; mv "$2.old" "$2"; open "$2"; }"#;
+rm -rf "$2.old"; mv "$2" "$2.old" && mv "$3" "$2" && { rm -rf "$2.old" "$4"; open "$2"; } || { [ -d "$2.old" ] && { rm -rf "$2"; mv "$2.old" "$2"; }; rm -rf "$4"; open "$2"; }"#;
     // `open` drops our environment; debug runs pass their sandbox through so the relaunch can't touch real data.
     let env = std::env::var("ADITUS_DATA_DIR").ok().filter(|_| cfg!(debug_assertions)).map(|d| format!("--env ADITUS_DATA_DIR={d} --env ADITUS_DEBUG_PORT={}", std::env::var("ADITUS_DEBUG_PORT").unwrap_or_default())).unwrap_or_default();
     Command::new("sh").args(["-c", &script.replace("open ", &format!("open {env} ")), "sh", &std::process::id().to_string()]).arg(&cur).arg(&new).arg(&dir).spawn().map_err(|e| e.to_string())?;
