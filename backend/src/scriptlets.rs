@@ -60,7 +60,7 @@ const SCRIPTLETS: &[(&str, &[&str], &[&str], &str)] = &[
         "json-prune",
         &[],
         &["aditus-prune.fn"],
-        r#"function aditusJsonPrune(prune,need){const sp=s=>String(s||'').split(/ +/).filter(Boolean).map(x=>x.split('.')),P=sp(prune),N=sp(need),o=JSON.parse;JSON.parse=new Proxy(o,{apply(t,th,a){const r=Reflect.apply(t,th,a);if(N.length&&!N.every(p=>aditusPrune(r,p,false)))return r;for(const p of P)aditusPrune(r,p,true);return r}})}"#,
+        r#"function aditusJsonPrune(prune,need){const sp=s=>String(s||'').split(/ +/).filter(Boolean).map(x=>x.split('.')),P=sp(prune),N=sp(need),o=JSON.parse,f=r=>{try{if(N.length&&!N.every(p=>aditusPrune(r,p,false)))return r;for(const p of P)if(aditusPrune(r,p,true)){window.__aditusPruned=(window.__aditusPruned||0)+1;console.debug('[aditus] pruned',p.join('.'))}}catch(e){}return r};JSON.parse=new Proxy(o,{apply:(t,th,a)=>f(Reflect.apply(t,th,a))});const j=Response.prototype.json;Response.prototype.json=new Proxy(j,{apply:(t,th,a)=>Reflect.apply(t,th,a).then(f)})}"#,
     ),
     (
         "remove-attr",
