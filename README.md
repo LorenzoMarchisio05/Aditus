@@ -2,7 +2,7 @@
 
 A lightweight, open-source desktop browser with a vertical tab sidebar and per-site account isolation.
 
-> Status: early, daily-usable on macOS. Runs on Chromium (CEF). Windows and Linux build in CI but are untested.
+> Status: early, daily-usable on macOS. Runs on Chromium (CEF). Only macOS is built and tested in CI; Windows and Linux are untested.
 
 <p align="center"><img src="docs/newtab.png" alt="Aditus new tab page with the sidebar, address bar and Swing at the bottom" width="860"></p>
 

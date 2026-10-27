@@ -1,7 +1,7 @@
 name: ci
 on:
   push:
-    branches: [main, cef-port]
+    branches: [main]
   pull_request:
 
 jobs:
@@ -31,6 +31,10 @@ jobs:
       - name: Test
         working-directory: backend
         run: cargo test --lib
+      - name: Clippy
+        working-directory: backend
+        continue-on-error: true
+        run: cargo clippy --lib
       - name: Bundle (debug)
         working-directory: backend
         run: ./bundle-mac.sh
