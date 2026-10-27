@@ -31,6 +31,9 @@ jobs:
         working-directory: ui
       - name: Tag matches app version
         run: '[ "${GITHUB_REF_NAME#v}" = "$(grep -m1 "^version" backend/Cargo.toml | cut -d\" -f2)" ]'
+      - name: Format
+        working-directory: backend
+        run: cargo fmt --check
       - name: Test
         working-directory: backend
         run: cargo test --lib

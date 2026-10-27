@@ -28,6 +28,9 @@ jobs:
       - run: npm ci
         working-directory: ui
       - run: cargo install cef --version =156.1.0 --features build-util --bin bundle-cef-app
+      - name: Format
+        working-directory: backend
+        run: cargo fmt --check
       - name: Test
         working-directory: backend
         run: cargo test --lib

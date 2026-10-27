@@ -129,7 +129,7 @@ Open decisions: #8 (who builds CEF with H.264). Skipped on purpose: #18, #22. Ne
 34. **No auth or certificate handlers (verify).** No `get_auth_credentials` or `on_certificate_error` seen. HTTP basic auth (routers, NAS) and self-signed local services probably unreachable.
    - **Status: Fixed (untested).** Basic-auth card and certificate-error card (Go back / Proceed for this host, session only, private separated); `answer_net` not exposed to untrusted pages. Sub-resource auth prompts still show a card.
 35. **No download hardening.** `can_download` always 1 (drive-by downloads), no warning, `open_download` opens anything. Same-URL downloads matched by `MAX(id)`; stale `active` rows survive a crash. Whether files are quarantined: **(verify)**.
-   - **Status: Mostly fixed.** Downloads tracked by row id, stale `active` rows marked failed at startup, downloads with no click/Enter in the last 10s are blocked with a toast. `open_download` still opens anything; no warning/quarantine check.
+   - **Status: Mostly fixed.** Downloads tracked by row id, stale `active` rows marked failed at startup, downloads with no click/Enter in the last 10s are blocked with a toast. `open_download` now confirms (native dialog) for risky types (.app .dmg .pkg .command .sh .jar .scpt .terminal, exec bit) and sets `com.apple.quarantine` via `xattr` if missing (untested at runtime).
 36. **Closing a window doesn't wait for `beforeunload`.** `can_close` fires `try_close_browser` and returns 1 at once. No "N tabs / active downloads" confirmation.
    - **Status: Fixed (untested).** `can_close` asks tab browsers via `try_close_browser`; second close within 3s forces it. Assumes CEF re-closes after the dialog.
 37. **History.** `LIKE '%q%'` full-scans an unbounded table on the UI thread and returns duplicate URLs; `_` not escaped. Default `history_days` is 0, never pruned. Re-importing Chrome history duplicates 5000 rows. No DB schema versioning. Importer described as supporting Brave, Edge etc., but path handling is Chrome-only.
@@ -144,9 +144,9 @@ Open decisions: #8 (who builds CEF with H.264). Skipped on purpose: #18, #22. Ne
 40. **`bundle-mac.sh` hardcodes `-v 0.1.2`** while the crate is 0.1.4; bundle version string is stale. (`ui/package.json` says 0.1.0.)
    - **Status: Fixed.** `bundle-mac.sh` reads the version from `Cargo.toml`; `ui/package.json` aligned.
 41. **Release workflow runs no tests.** No `cargo test` or smoke test before publishing a tag; no clippy or fmt anywhere. Signing path documented as untested.
-   - **Status: Partly fixed.** `release.yml` runs tests and a smoke test; non-blocking clippy; `cargo fmt` applied with `backend/rustfmt.toml` (200 cols). No `fmt --check` in CI yet.
+   - **Status: Partly fixed.** `release.yml` runs tests and a smoke test; non-blocking clippy; `cargo fmt` applied with `backend/rustfmt.toml` (200 cols). `cargo fmt --check` is blocking in CI and release.
 42. **Test coverage.** ~25 unit tests, all on pure modules. `tabs.rs` (1.6k lines, the state machine), `engine.rs` and `commands.rs` have zero. Smoke test only checks the UI loads and the page script is injected. One `scheme.rs` assertion is a tautology (`is_none() || starts_with`).
-   - **Status: Partly fixed.** Tests added in `tabs.rs`, `scheme.rs`, `history.rs`, `config.rs`, `db.rs` (54 pass, 2 ignored); `engine.rs`/`commands.rs` still untested; smoke test extended.
+   - **Status: Partly fixed.** Tests added in `tabs.rs`, `scheme.rs`, `history.rs`, `config.rs`, `db.rs` (54 pass, 2 ignored); pure helpers in `engine.rs`/`commands.rs` now tested (60 pass); smoke test extended.
 43. **arm64-only release asset**; updater hardcodes the asset name.
 
    - **Status: Fixed.** `asset_name(arch)` in `update.rs`; `release.yml` derives the name from `uname -m`. Still arm64-only in practice.

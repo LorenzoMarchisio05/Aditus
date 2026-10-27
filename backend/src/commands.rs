@@ -404,7 +404,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             // Only paths in the downloads table qualify.
             let path = str_arg(&a, "path");
             if shared(&APP).db.downloads().iter().any(|d| d.path == path && d.status == "done") {
-                tabs::open_external(&path);
+                open_download(path);
             }
             ok(Value::Null)
         }
@@ -570,7 +570,11 @@ fn at(a: &Value, win: &str) -> (i32, i32) {
         let w = g.win(win);
         (w.sidebar, w.top)
     };
-    (a["_x"].as_f64().unwrap_or(sidebar) as i32, a["_y"].as_f64().unwrap_or(top) as i32)
+    pos_arg(a, sidebar, top)
+}
+
+fn pos_arg(a: &Value, x: f64, y: f64) -> (i32, i32) {
+    (a["_x"].as_f64().unwrap_or(x) as i32, a["_y"].as_f64().unwrap_or(y) as i32)
 }
 
 fn overlay(label: &str, win: &str, view: &str, bounds: engine::Bounds) -> Spec {
@@ -637,6 +641,75 @@ fn search_suggest(on: bool, template: &str, private: bool, q: &str) -> Vec<Strin
         .unwrap_or_default()
 }
 
+/// Files that run code when opened: installers, scripts, app bundles, or anything with an exec bit.
+fn is_risky_download(path: &str, mode: Option<u32>) -> bool {
+    const RISKY: &[&str] = &["app", "dmg", "pkg", "command", "sh", "jar", "scpt", "terminal"];
+    let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+    RISKY.contains(&ext.as_str()) || mode.is_some_and(|m| m & 0o111 != 0)
+}
+
+/// Quarantine value in the format Gatekeeper expects: `flags;hex-seconds;agent;`.
+fn quarantine_value(unix_secs: u64) -> String {
+    format!("0083;{unix_secs:x};Aditus;")
+}
+
+/// Make sure a downloaded file carries `com.apple.quarantine` (CEF may not set it); never overwrites an existing one.
+#[cfg(target_os = "macos")]
+pub fn ensure_quarantine(path: &str) {
+    let has = std::process::Command::new("xattr").args(["-p", "com.apple.quarantine", path]).output().is_ok_and(|o| o.status.success());
+    if !has {
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let _ = crate::applog::check("quarantine xattr", std::process::Command::new("xattr").args(["-w", "com.apple.quarantine", &quarantine_value(secs), path]).status());
+    }
+}
+#[cfg(not(target_os = "macos"))]
+pub fn ensure_quarantine(_path: &str) {}
+
+/// Opens a finished download; risky types wait for a native confirmation (on a worker, it blocks).
+fn open_download(path: String) {
+    ensure_quarantine(&path);
+    let meta = std::fs::metadata(&path).ok();
+    #[cfg(unix)]
+    let mode = {
+        use std::os::unix::fs::MetadataExt;
+        meta.as_ref().filter(|m| m.is_file()).map(|m| m.mode())
+    };
+    #[cfg(not(unix))]
+    let mode = {
+        let _ = meta;
+        None
+    };
+    if !is_risky_download(&path, mode) {
+        tabs::open_external(&path);
+        return;
+    }
+    std::thread::spawn(move || {
+        let name = std::path::Path::new(&path).file_name().and_then(|n| n.to_str()).unwrap_or("this file").to_string();
+        if confirm_open(&name) {
+            tabs::open_external(&path);
+        }
+    });
+}
+
+/// Native warning dialog; true only if the user picks "Open". The name goes in as an argument, never into the script text.
+#[cfg(target_os = "macos")]
+fn confirm_open(name: &str) -> bool {
+    let script = [
+        "on run argv",
+        "display dialog (quote & item 1 of argv & quote & \" can run code on your Mac. Only open it if you trust where it came from.\") with title \"Open downloaded file?\" with icon caution buttons {\"Cancel\", \"Open\"} default button \"Cancel\" cancel button \"Cancel\"",
+        "end run",
+    ];
+    let mut c = std::process::Command::new("osascript");
+    for l in script {
+        c.args(["-e", l]);
+    }
+    c.arg(name).output().is_ok_and(|o| o.status.success())
+}
+#[cfg(not(target_os = "macos"))]
+fn confirm_open(_name: &str) -> bool {
+    false
+}
+
 fn reveal_path(path: &str) {
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open").args(["-R", path]).spawn();
@@ -655,7 +728,10 @@ fn palette_rect(win: &str) -> engine::Bounds {
         let w = g.win(win);
         (w.sidebar, w.top)
     };
-    let w = engine::win_size(win).0;
+    palette_bounds(sidebar, top, engine::win_size(win).0)
+}
+
+fn palette_bounds(sidebar: f64, top: f64, w: f64) -> engine::Bounds {
     let pw = 640.0_f64.min(w - 40.0);
     (sidebar + ((w - sidebar - pw) / 2.0).max(0.0), top + 24.0, pw, 72.0)
 }
@@ -858,5 +934,44 @@ pub fn page_context_action(_label: &str, id: i32) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn risky_downloads() {
+        for p in ["a.app", "/x/A.DMG", "b.pkg", "c.command", "d.sh", "e.jar", "f.scpt", "g.terminal"] {
+            assert!(is_risky_download(p, None), "{p}");
+        }
+        assert!(!is_risky_download("photo.png", Some(0o644)));
+        assert!(!is_risky_download("noext", None));
+        assert!(is_risky_download("tool", Some(0o755)));
+        assert!(is_risky_download("tool", Some(0o100)));
+    }
+
+    #[test]
+    fn quarantine_format() {
+        assert_eq!(quarantine_value(255), "0083;ff;Aditus;");
+    }
+
+    #[test]
+    fn args() {
+        assert_eq!(str_arg(&json!({"k": "v"}), "k"), "v");
+        assert_eq!(str_arg(&json!({"k": 1}), "k"), "");
+        assert_eq!(num(&json!({"k": 2.5}), "k"), 2.5);
+        assert_eq!(num(&json!({}), "k"), 0.0);
+        assert_eq!(pos_arg(&json!({"_x": 10.9, "_y": 4}), 1.0, 2.0), (10, 4));
+        assert_eq!(pos_arg(&json!({}), 200.0, 30.0), (200, 30));
+        assert_eq!(view_url("settings", "main"), "aditus://app/index.html?view=settings&win=main");
+    }
+
+    #[test]
+    fn palette_centred_and_clamped() {
+        assert_eq!(palette_bounds(200.0, 40.0, 1440.0), (200.0 + (1440.0 - 200.0 - 640.0) / 2.0, 64.0, 640.0, 72.0));
+        let (x, _, w, _) = palette_bounds(0.0, 0.0, 500.0);
+        assert_eq!((x, w), (20.0, 460.0));
     }
 }

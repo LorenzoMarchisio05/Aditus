@@ -1416,6 +1416,9 @@ wrap_download_handler! {
                 return;
             }
             if let Some((id, path)) = reg(|r| r.downloads.remove(&item.id())) {
+                if done {
+                    crate::commands::ensure_quarantine(&path);
+                }
                 tabs::on_download_end(&tabs::AppHandle, id, &path, done);
             }
         }
@@ -1708,12 +1711,17 @@ wrap_menu_model_delegate! {
 
     impl MenuModelDelegate {
         fn execute_command(&self, _menu: Option<&mut MenuModel>, command: i32, _flags: EventFlags) {
-            let id = self.ids.borrow().get((command - 1) as usize).cloned();
+            let id = menu_id(&self.ids.borrow(), command);
             if let Some(id) = id {
                 defer(move || crate::menu::picked(&id));
             }
         }
     }
+}
+
+/// Entry commands are 1-based indexes into `ids`; anything else (sub-menu ids, 0) picks nothing.
+fn menu_id(ids: &[String], command: i32) -> Option<String> {
+    usize::try_from(command - 1).ok().and_then(|i| ids.get(i)).cloned()
 }
 
 fn fill(model: &MenuModel, items: Vec<Item>, ids: &std::rc::Rc<RefCell<Vec<String>>>) {
@@ -1768,5 +1776,39 @@ mod tests {
         assert!(!force_close(None, t));
         assert!(force_close(Some(t), t + Duration::from_secs(1)));
         assert!(!force_close(Some(t), t + CLOSE_FORCE + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn menu_ids() {
+        let ids = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(menu_id(&ids, 1).as_deref(), Some("a"));
+        assert_eq!(menu_id(&ids, 2).as_deref(), Some("b"));
+        assert_eq!(menu_id(&ids, 3), None);
+        assert_eq!(menu_id(&ids, 0), None);
+        assert_eq!(menu_id(&ids, i32::MIN + 1), None);
+        assert_eq!(menu_id(&ids, 10_001), None);
+    }
+
+    #[test]
+    fn unique_names() {
+        let d = std::env::temp_dir().join(format!("aditus-unique-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(unique(&d, "a.txt"), d.join("a.txt"));
+        std::fs::write(d.join("a.txt"), "").unwrap();
+        assert_eq!(unique(&d, "a.txt"), d.join("a (1).txt"));
+        std::fs::write(d.join("a (1).txt"), "").unwrap();
+        assert_eq!(unique(&d, "a.txt"), d.join("a (2).txt"));
+        std::fs::write(d.join("noext"), "").unwrap();
+        assert_eq!(unique(&d, "noext"), d.join("noext (1)"));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn small_helpers() {
+        assert!(is_app_url(&format!("{SCHEME}://app/index.html")));
+        assert!(!is_app_url("https://example.com"));
+        assert_eq!(emit_js("x\"y", "{\"a\":1}"), "window.__aditus_emit&&window.__aditus_emit(\"x\\\"y\",{\"a\":1})");
+        let u = error_page("https://a.b/?q=1&r=2", "-105");
+        assert!(u.starts_with(&format!("{SCHEME}://")) && u.contains("error.html?u=https%3A%2F%2Fa.b%2F%3Fq%3D1%26r%3D2&e=-105"), "{u}");
     }
 }
