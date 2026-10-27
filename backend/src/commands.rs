@@ -156,6 +156,11 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             tabs::answer_permission(&APP, a["allow"].as_bool().unwrap_or(false));
             ok(Value::Null)
         }
+        "answer_net" => {
+            let id = a["id"].as_u64().unwrap_or(0);
+            tabs::answer_net(&APP, id, a["allow"].as_bool().unwrap_or(false), &str_arg(&a, "user"), &str_arg(&a, "pass"));
+            ok(Value::Null)
+        }
         "delete_permission" => {
             let (host, kind) = (str_arg(&a, "host"), str_arg(&a, "kind"));
             mutate_cfg(|c| c.permissions.retain(|r| !(r.host == host && r.kind == kind)));

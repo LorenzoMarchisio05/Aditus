@@ -11,6 +11,8 @@
   const FIND = 40;
 
   let st = $state({ tabs: [], active: 0, cfg: null, prompt: null, toast: null, adblock_site: true });
+  let netUser = $state('');
+  let netPass = $state('');
   let width = $state(250);
   let newer = $state(null); // { latest, url } when a release is available
   let checked = false;
@@ -434,6 +436,22 @@
       <span><b>{st.perm[0]}</b> wants to use your {st.perm[1]}</span>
       <div class="row2"><button onclick={() => call('answer_permission', { allow: false })}>Block</button><button class="ok" onclick={() => call('answer_permission', { allow: true })}>Allow</button></div>
     </div>
+  {/if}
+
+  {#if st.net && !collapsed}
+    {#key st.net.id}
+      <form class="card perm" onsubmit={(e) => { e.preventDefault(); call('answer_net', { id: st.net.id, allow: true, user: netUser, pass: netPass }); netUser = netPass = ''; }}>
+        {#if st.net.cert}
+          <span><b>{st.net.host}</b> is not secure: {st.net.detail}. Proceeding may expose your data. Allowed until you quit.</span>
+          <div class="row2"><button type="button" class="ok" onclick={() => call('answer_net', { id: st.net.id, allow: false })}>Go back</button><button type="button" onclick={() => call('answer_net', { id: st.net.id, allow: true })}>Proceed anyway</button></div>
+        {:else}
+          <span><b>{st.net.host}</b> asks you to sign in{st.net.detail ? ` (${st.net.detail})` : ''}</span>
+          <input placeholder="Username" autocomplete="off" bind:value={netUser} />
+          <input type="password" placeholder="Password" autocomplete="off" bind:value={netPass} />
+          <div class="row2"><button type="button" onclick={() => { call('answer_net', { id: st.net.id, allow: false }); netUser = netPass = ''; }}>Cancel</button><button class="ok" type="submit">Sign in</button></div>
+        {/if}
+      </form>
+    {/key}
   {/if}
 
   {#if offer && !collapsed}
