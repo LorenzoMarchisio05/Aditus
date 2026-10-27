@@ -38,7 +38,7 @@ impl Reply {
 }
 
 /// Commands a web page may call.
-const PAGE_COMMANDS: &[&str] = &["page_ping", "page_state", "page_login", "page_link", "cosmetic_css"];
+const PAGE_COMMANDS: &[&str] = &["page_ping", "page_state", "page_login", "page_link", "cosmetic_css", "cosmetic_generic"];
 
 struct Handler;
 
