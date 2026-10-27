@@ -11,7 +11,10 @@ use adblock::{
 };
 use std::{
     path::PathBuf,
-    sync::{atomic::{AtomicUsize, Ordering}, Arc, OnceLock, RwLock},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, OnceLock, RwLock,
+    },
     time::{Duration, SystemTime},
 };
 
@@ -26,7 +29,6 @@ const FALLBACK: &str = "||doubleclick.net^\n||googlesyndication.com^\n||googlead
 ||adservice.google.com^\n||google-analytics.com^\n||googletagmanager.com^\n||adnxs.com^\n\
 ||taboola.com^\n||outbrain.com^\n||criteo.com^\n||scorecardresearch.com^\n||hotjar.com^\n\
 ||amazon-adsystem.com^\n||pubmatic.com^\n||rubiconproject.com^\n";
-
 
 struct Blocker {
     engine: RwLock<Option<Arc<Engine>>>,
@@ -82,9 +84,7 @@ fn popup_as_document(list: &str) -> String {
 }
 
 pub fn is_blocked(engine: &Engine, url: &str, source: &str, kind: &str) -> bool {
-    Request::new(url, source, kind, "GET")
-        .map(|r| engine.check_network_request(&r).should_block())
-        .unwrap_or(false)
+    Request::new(url, source, kind, "GET").map(|r| engine.check_network_request(&r).should_block()).unwrap_or(false)
 }
 
 fn css_for(engine: &Engine, url: &str) -> String {
@@ -165,7 +165,8 @@ pub fn hijack(url: &str, source: &str, link: &str) -> bool {
 }
 
 /// Sign-in and payment popups open from script buttons (no link), so they look like hijacks; popunders never use these.
-const AUTH_HOSTS: &[&str] = &["accounts.google.com", "appleid.apple.com", "login.microsoftonline.com", "login.live.com", "www.facebook.com", "github.com", "paypal.com", "stripe.com", "checkout.stripe.com"];
+const AUTH_HOSTS: &[&str] =
+    &["accounts.google.com", "appleid.apple.com", "login.microsoftonline.com", "login.live.com", "www.facebook.com", "github.com", "paypal.com", "stripe.com", "checkout.stripe.com"];
 
 fn is_hijack(url: &str, source: &str, link: &str) -> bool {
     let host = url::Url::parse(url).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
@@ -217,12 +218,7 @@ pub fn refresh_host(app: &AppHandle, toggled: &str) {
 }
 
 fn stale(path: &PathBuf) -> bool {
-    std::fs::metadata(path)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| SystemTime::now().duration_since(t).ok())
-        .map(|age| age > Duration::from_secs(24 * 3600))
-        .unwrap_or(true)
+    std::fs::metadata(path).and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).map(|age| age > Duration::from_secs(24 * 3600)).unwrap_or(true)
 }
 
 fn download(dir: &PathBuf) {
@@ -242,11 +238,7 @@ fn download(dir: &PathBuf) {
 }
 
 fn load_texts(dir: &PathBuf, disabled: &[String]) -> Vec<String> {
-    let mut texts: Vec<String> = LISTS
-        .iter()
-        .filter(|(name, _)| !disabled.contains(&name.to_string()))
-        .filter_map(|(name, _)| std::fs::read_to_string(dir.join(format!("{name}.txt"))).ok())
-        .collect();
+    let mut texts: Vec<String> = LISTS.iter().filter(|(name, _)| !disabled.contains(&name.to_string())).filter_map(|(name, _)| std::fs::read_to_string(dir.join(format!("{name}.txt"))).ok()).collect();
     if texts.is_empty() {
         texts.push(FALLBACK.into());
     }
@@ -285,11 +277,7 @@ pub fn info(app: &AppHandle) -> Info {
         .map(|(name, _)| ListInfo {
             name,
             enabled: !disabled.contains(&name.to_string()),
-            age_hours: std::fs::metadata(b.dir.join(format!("{name}.txt")))
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| SystemTime::now().duration_since(t).ok())
-                .map(|d| d.as_secs() / 3600),
+            age_hours: std::fs::metadata(b.dir.join(format!("{name}.txt"))).and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).map(|d| d.as_secs() / 3600),
         })
         .collect();
     Info { lists, rules: b.rules.load(Ordering::Relaxed) }
@@ -378,10 +366,7 @@ mod tests {
     #[test]
     #[ignore]
     fn real_lists() {
-        let texts: Vec<String> = LISTS
-            .iter()
-            .map(|(_, u)| ureq::get(u).call().unwrap().into_string().unwrap())
-            .collect();
+        let texts: Vec<String> = LISTS.iter().map(|(_, u)| ureq::get(u).call().unwrap().into_string().unwrap()).collect();
         let t = std::time::Instant::now();
         let (engine, rules) = build(&texts);
         println!("built in {:?}, {} rules", t.elapsed(), rules);

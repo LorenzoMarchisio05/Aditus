@@ -93,7 +93,11 @@ static PAGES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<Str
 
 fn set_page(label: &str, on: bool) {
     let mut p = PAGES.lock().unwrap();
-    if on { p.insert(label.to_string()); } else { p.remove(label); }
+    if on {
+        p.insert(label.to_string());
+    } else {
+        p.remove(label);
+    }
 }
 
 fn reg<R>(f: impl FnOnce(&mut Reg) -> R) -> R {
@@ -279,11 +283,7 @@ fn with_context(key: &str, cache: &Path, f: Box<dyn FnOnce(RequestContext)>) {
         Step::Queued => {}
         Step::Create => {
             reg(|r| r.ctxs.insert(key.to_string(), CtxState::Pending(None, vec![f.take().unwrap()])));
-            let settings = RequestContextSettings {
-                cache_path: s(&cache.to_string_lossy()),
-                persist_session_cookies: !cache.as_os_str().is_empty() as i32,
-                ..Default::default()
-            };
+            let settings = RequestContextSettings { cache_path: s(&cache.to_string_lossy()), persist_session_cookies: !cache.as_os_str().is_empty() as i32, ..Default::default() };
             let mut handler = CtxHandler::new(key.to_string());
             let early = request_context_create_context(Some(&settings), Some(&mut handler));
             // Keep the context alive until its init callback.
@@ -376,14 +376,7 @@ fn build(spec: Spec, ctx: Option<RequestContext>) {
     let settings = BrowserSettings { background_color: background(spec.kind), ..Default::default() };
     let mut ctx = ctx;
     let mut delegate = PageViewDelegate::new(spec.label.clone(), false);
-    let Some(bv) = browser_view_create(
-        Some(&mut client(&spec.label)),
-        Some(&s(&spec.url)),
-        Some(&settings),
-        extra.as_mut(),
-        ctx.as_mut(),
-        Some(&mut delegate),
-    ) else {
+    let Some(bv) = browser_view_create(Some(&mut client(&spec.label)), Some(&s(&spec.url)), Some(&settings), extra.as_mut(), ctx.as_mut(), Some(&mut delegate)) else {
         eprintln!("browser_view_create failed for {}", spec.label);
         return;
     };
@@ -1364,10 +1357,12 @@ fn unique(dir: &Path, name: &str) -> PathBuf {
     let p = Path::new(name);
     let (stem, ext) = (p.file_stem().and_then(|s| s.to_str()).unwrap_or(name), p.extension().and_then(|s| s.to_str()));
     (1..)
-        .map(|n| dir.join(match ext {
-            Some(e) => format!("{stem} ({n}).{e}"),
-            None => format!("{stem} ({n})"),
-        }))
+        .map(|n| {
+            dir.join(match ext {
+                Some(e) => format!("{stem} ({n}).{e}"),
+                None => format!("{stem} ({n})"),
+            })
+        })
         .find(|p| !p.exists())
         .unwrap()
 }

@@ -211,7 +211,11 @@ impl App {
 
 /// Per-window view label: the first window keeps the bare names.
 pub fn wv_label(kind: &str, win: &str) -> String {
-    if win == "main" { kind.to_string() } else { format!("{kind}-{win}") }
+    if win == "main" {
+        kind.to_string()
+    } else {
+        format!("{kind}-{win}")
+    }
 }
 
 impl Tab {
@@ -362,13 +366,7 @@ fn emit(app: &AppHandle, save: bool) {
         g.wins
             .iter()
             .filter_map(|(win, w)| {
-                let active_host = g
-                    .tabs
-                    .iter()
-                    .find(|t| t.id == w.active)
-                    .and_then(|t| Url::parse(&t.url()).ok())
-                    .and_then(|u| u.host_str().map(String::from))
-                    .unwrap_or_default();
+                let active_host = g.tabs.iter().find(|t| t.id == w.active).and_then(|t| Url::parse(&t.url()).ok()).and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
                 let active_url = g.tabs.iter().find(|t| t.id == w.active).map(|t| t.url()).unwrap_or_default();
                 let snap = Snapshot {
                     win,
@@ -381,7 +379,15 @@ fn emit(app: &AppHandle, save: bool) {
                             let parsed = Url::parse(&url).ok();
                             TabView {
                                 id: t.id,
-                                title: if t.title.is_empty() { if is_blank(&url) { "New Tab".into() } else { url.clone() } } else { t.title.clone() },
+                                title: if t.title.is_empty() {
+                                    if is_blank(&url) {
+                                        "New Tab".into()
+                                    } else {
+                                        url.clone()
+                                    }
+                                } else {
+                                    t.title.clone()
+                                },
                                 host: if is_blank(&url) || internal_view(&url).is_some() { String::new() } else { parsed.as_ref().and_then(|u| u.host_str().map(String::from)).unwrap_or_default() },
                                 url: if is_blank(&url) { String::new() } else { url },
                                 profile: t.profile.clone(),
@@ -449,10 +455,7 @@ pub fn content_rect(app: &AppHandle, win: &str) -> Bounds {
 pub fn apply_layout(app: &AppHandle) {
     let wins: Vec<(String, Option<String>)> = {
         let g = shared(app).app.lock().unwrap();
-        g.wins
-            .iter()
-            .map(|(name, w)| (name.clone(), g.tabs.iter().find(|t| t.id == w.active).map(|t| label(t.id, t.gen))))
-            .collect()
+        g.wins.iter().map(|(name, w)| (name.clone(), g.tabs.iter().find(|t| t.id == w.active).map(|t| label(t.id, t.gen)))).collect()
     };
     for (win, tab) in wins {
         let area = content_rect(app, &win);
@@ -1059,7 +1062,8 @@ pub fn page_ping(app: &AppHandle, view_label: &str, frame: &str, kind: &str, hre
 /// The page says which link its selection holds ("" = none). Only web addresses are kept.
 pub fn page_link(app: &AppHandle, view_label: &str, url: &str) {
     let Some((id, gen)) = parse_label(view_label) else { return };
-    let link = Url::parse(url).ok().filter(|u| matches!(u.scheme(), "http" | "https"));    if let Some(t) = shared(app).app.lock().unwrap().tab(id).filter(|t| t.gen == gen) {
+    let link = Url::parse(url).ok().filter(|u| matches!(u.scheme(), "http" | "https"));
+    if let Some(t) = shared(app).app.lock().unwrap().tab(id).filter(|t| t.gen == gen) {
         t.link = link;
     }
 }
@@ -1099,15 +1103,8 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
         let mut g = shared(app).app.lock().unwrap();
         g.win(win);
         // No explicit profile: a mapped site opens in its profile, anything else in the default one.
-        let mapped = url
-            .as_ref()
-            .and_then(|u| u.host_str())
-            .and_then(|h| nav::lookup(&g.cfg.mappings, h))
-            .map(|m| m.profile.clone());
-        let profile = profile
-            .or(mapped)
-            .filter(|p| g.cfg.profile(p).is_some())
-            .unwrap_or_else(|| g.cfg.profiles.first().map(|p| p.name.clone()).unwrap_or_default());
+        let mapped = url.as_ref().and_then(|u| u.host_str()).and_then(|h| nav::lookup(&g.cfg.mappings, h)).map(|m| m.profile.clone());
+        let profile = profile.or(mapped).filter(|p| g.cfg.profile(p).is_some()).unwrap_or_else(|| g.cfg.profiles.first().map(|p| p.name.clone()).unwrap_or_default());
         let id = g.next_id;
         g.next_id += 1;
         let private = g.wins.get(win).is_some_and(|w| w.incognito);
@@ -1511,7 +1508,8 @@ pub fn fill_login(app: &AppHandle, tab_id: u32, pos: (i32, i32)) {
     let mut users: Vec<String> = shared(app).db.logins(Some(&pid), Some(&origin)).into_iter().map(|l| l.1).collect();
     if users.len() > 1 {
         let win = shared(app).app.lock().unwrap().tabs.iter().find(|t| t.id == tab_id).map(|t| t.win.clone()).unwrap_or_default();
-        let items = users.into_iter().map(|u| engine::Item::Entry { label: if u.is_empty() { "(no username)".into() } else { u.clone() }, id: format!("login:{u}"), enabled: true, checked: false }).collect();
+        let items =
+            users.into_iter().map(|u| engine::Item::Entry { label: if u.is_empty() { "(no username)".into() } else { u.clone() }, id: format!("login:{u}"), enabled: true, checked: false }).collect();
         engine::popup(&win, items, pos);
     } else if let Some(user) = users.pop() {
         fill_login_as(app, tab_id, &user);
@@ -1580,9 +1578,7 @@ pub fn assign_mapping(app: &AppHandle, host: &str, profile: &str) {
         g.cfg.mappings.retain(|m| m.pattern != host);
         g.cfg.mappings.push(nav::Mapping { pattern: host.into(), profile: profile.into() });
         let active = g.focused_active();
-        g.tab(active)
-            .filter(|t| t.profile != profile && Url::parse(&t.url()).ok().and_then(|u| u.host_str().map(|h| nav::matches(host, h))).unwrap_or(false))
-            .map(|t| (t.id, t.url()))
+        g.tab(active).filter(|t| t.profile != profile && Url::parse(&t.url()).ok().and_then(|u| u.host_str().map(|h| nav::matches(host, h))).unwrap_or(false)).map(|t| (t.id, t.url()))
     };
     save_cfg(app);
     if let Some((id, url)) = to_swap {
@@ -1707,15 +1703,11 @@ fn sleep_for_memory_with(app: &AppHandle, rows: &[(u32, u32, u64)]) {
     let victim = {
         let mut g = shared(app).app.lock().unwrap();
         let actives: Vec<u32> = g.wins.values().map(|w| w.active).collect();
-        g.tabs
-            .iter_mut()
-            .filter(|t| !actives.contains(&t.id) && !t.pinned && !t.audible && !t.discarded)
-            .min_by_key(|t| t.last_active)
-            .map(|t| {
-                t.discarded = true;
-                t.loading = false;
-                [Some(label(t.id, t.gen)), t.retiring.take()]
-            })
+        g.tabs.iter_mut().filter(|t| !actives.contains(&t.id) && !t.pinned && !t.audible && !t.discarded).min_by_key(|t| t.last_active).map(|t| {
+            t.discarded = true;
+            t.loading = false;
+            [Some(label(t.id, t.gen)), t.retiring.take()]
+        })
     };
     if let Some(ls) = victim {
         for l in ls.into_iter().flatten() {
@@ -1764,7 +1756,11 @@ pub fn select(app: &AppHandle, n: usize) {
     let id = {
         let g = shared(app).app.lock().unwrap();
         let ids: Vec<u32> = g.tabs.iter().filter(|t| t.win == g.focused).map(|t| t.id).collect();
-        if n >= 9 { ids.last().copied() } else { ids.get(n - 1).copied() }
+        if n >= 9 {
+            ids.last().copied()
+        } else {
+            ids.get(n - 1).copied()
+        }
     };
     if let Some(id) = id {
         activate(app, id);
@@ -1892,16 +1888,17 @@ pub fn save_session(app: &AppHandle) {
                 .map(|t| {
                     let (history, idx) = t.hist.for_save();
                     Saved {
-                    url: t.url(),
-                    profile: t.profile.clone(),
-                    pinned: t.pinned,
-                    group: t.group.clone(),
-                    title: t.title.clone(),
-                    win: t.win.clone(),
-                    active: g.active(&t.win) == t.id,
-                    history,
-                    idx,
-                }})
+                        url: t.url(),
+                        profile: t.profile.clone(),
+                        pinned: t.pinned,
+                        group: t.group.clone(),
+                        title: t.title.clone(),
+                        win: t.win.clone(),
+                        active: g.active(&t.win) == t.id,
+                        history,
+                        idx,
+                    }
+                })
                 .collect(),
         }
     };
@@ -1911,10 +1908,7 @@ pub fn save_session(app: &AppHandle) {
 }
 
 pub fn restore_session(app: &AppHandle) {
-    let session: Session = std::fs::read_to_string(session_path(app))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+    let session: Session = std::fs::read_to_string(session_path(app)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     let (startup, home) = {
         let g = shared(app).app.lock().unwrap();
         (g.cfg.settings.startup.clone(), g.cfg.settings.home_url.clone())
@@ -1941,7 +1935,11 @@ pub fn restore_session(app: &AppHandle) {
         }
         let profile = {
             let g = shared(app).app.lock().unwrap();
-            if g.cfg.profile(&s.profile).is_some() { s.profile } else { g.cfg.profiles.first().map(|p| p.name.clone()).unwrap_or_default() }
+            if g.cfg.profile(&s.profile).is_some() {
+                s.profile
+            } else {
+                g.cfg.profiles.first().map(|p| p.name.clone()).unwrap_or_default()
+            }
         };
         let id = open_tab_in(app, &s.win, Url::parse(&s.url).ok(), Some(profile), false);
         with_tab(app, id, |t| {

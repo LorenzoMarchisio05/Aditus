@@ -5,9 +5,7 @@
 //! view that may host them) get the full command set; web pages may only ping.
 
 use cef::{
-    wrapper::message_router::{
-        BrowserSideCallback, BrowserSideHandler, BrowserSideRouter, MessageRouterBrowserSide, MessageRouterConfig,
-    },
+    wrapper::message_router::{BrowserSideCallback, BrowserSideHandler, BrowserSideRouter, MessageRouterBrowserSide, MessageRouterConfig},
     *,
 };
 use serde_json::Value;
@@ -45,15 +43,7 @@ const PAGE_COMMANDS: &[&str] = &["page_ping", "page_state", "page_login", "page_
 struct Handler;
 
 impl BrowserSideHandler for Handler {
-    fn on_query_str(
-        &self,
-        browser: Option<Browser>,
-        frame: Option<Frame>,
-        _query_id: i64,
-        request: &str,
-        _persistent: bool,
-        callback: Arc<Mutex<dyn BrowserSideCallback>>,
-    ) -> bool {
+    fn on_query_str(&self, browser: Option<Browser>, frame: Option<Frame>, _query_id: i64, request: &str, _persistent: bool, callback: Arc<Mutex<dyn BrowserSideCallback>>) -> bool {
         let reply = Reply(callback);
         let (Some(browser), Some(frame)) = (browser, frame) else { return false };
         let Some(ctx) = crate::engine::ctx(&browser, &frame) else { return false };

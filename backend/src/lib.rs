@@ -9,17 +9,17 @@ pub mod extensions;
 pub mod history;
 pub mod import;
 pub mod ipc;
+#[cfg(target_os = "macos")]
+mod mac;
 pub mod menu;
-pub mod passwords;
 pub mod nav;
+pub mod passwords;
 pub mod scheme;
 pub mod scriptlets;
 pub mod scripts;
 pub mod search;
 pub mod tabs;
 pub mod update;
-#[cfg(target_os = "macos")]
-mod mac;
 
 use cef::*;
 use std::{

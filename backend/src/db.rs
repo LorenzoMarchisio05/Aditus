@@ -92,24 +92,23 @@ impl Db {
     }
 
     pub fn add_visit(&self, url: &str, title: &str, profile: &str) {
-        let _ = crate::applog::check("db add_visit", self.0.lock().unwrap().execute(
-            "INSERT INTO history(url,title,profile,visited_at) VALUES(?1,?2,?3,strftime('%s','now'))",
-            params![url, title, profile],
-        ));
+        let _ = crate::applog::check(
+            "db add_visit",
+            self.0.lock().unwrap().execute("INSERT INTO history(url,title,profile,visited_at) VALUES(?1,?2,?3,strftime('%s','now'))", params![url, title, profile]),
+        );
     }
 
     pub fn set_title(&self, url: &str, title: &str) {
-        let _ = crate::applog::check("db set_title", self.0.lock().unwrap().execute(
-            "UPDATE history SET title=?2 WHERE id=(SELECT MAX(id) FROM history WHERE url=?1)",
-            params![url, title],
-        ));
+        let _ = crate::applog::check("db set_title", self.0.lock().unwrap().execute("UPDATE history SET title=?2 WHERE id=(SELECT MAX(id) FROM history WHERE url=?1)", params![url, title]));
     }
 
     pub fn search_history(&self, q: &str, limit: i64) -> Vec<HistoryRow> {
         let like = like(q);
-        self.rows("SELECT url,title,profile,MAX(visited_at) v FROM history WHERE url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\' GROUP BY url ORDER BY MAX(id) DESC LIMIT ?2", params![like, limit], |r| {
-            Ok(HistoryRow { url: r.get(0)?, title: r.get(1)?, profile: r.get(2)?, visited_at: r.get(3)? })
-        })
+        self.rows(
+            "SELECT url,title,profile,MAX(visited_at) v FROM history WHERE url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\' GROUP BY url ORDER BY MAX(id) DESC LIMIT ?2",
+            params![like, limit],
+            |r| Ok(HistoryRow { url: r.get(0)?, title: r.get(1)?, profile: r.get(2)?, visited_at: r.get(3)? }),
+        )
     }
 
     /// Bulk insert for imports: `(url, title, unix seconds)`.
@@ -117,19 +116,17 @@ impl Db {
         let mut c = self.0.lock().unwrap();
         let Ok(tx) = c.transaction() else { return };
         for (u, t, at) in rows {
-            let _ = tx.execute(
-                "INSERT INTO history(url,title,profile,visited_at) SELECT ?1,?2,?3,?4 WHERE NOT EXISTS(SELECT 1 FROM history WHERE url=?1 AND visited_at=?4)",
-                params![u, t, profile, at],
-            );
+            let _ =
+                tx.execute("INSERT INTO history(url,title,profile,visited_at) SELECT ?1,?2,?3,?4 WHERE NOT EXISTS(SELECT 1 FROM history WHERE url=?1 AND visited_at=?4)", params![u, t, profile, at]);
         }
         let _ = crate::applog::check("db import_visits", tx.commit());
     }
 
     pub fn add_bookmark(&self, url: &str, title: &str, profile: &str) {
-        let _ = crate::applog::check("db add_bookmark", self.0.lock().unwrap().execute(
-            "INSERT OR REPLACE INTO bookmarks(url,title,profile,added_at) VALUES(?1,?2,?3,strftime('%s','now'))",
-            params![url, title, profile],
-        ));
+        let _ = crate::applog::check(
+            "db add_bookmark",
+            self.0.lock().unwrap().execute("INSERT OR REPLACE INTO bookmarks(url,title,profile,added_at) VALUES(?1,?2,?3,strftime('%s','now'))", params![url, title, profile]),
+        );
     }
 
     pub fn remove_bookmark(&self, url: &str) {
@@ -163,14 +160,13 @@ impl Db {
 
     /// `(origin, username, profile)`, optionally for one profile and/or origin.
     pub fn logins(&self, profile: Option<&str>, origin: Option<&str>) -> Vec<(String, String, String)> {
-        self.rows("SELECT origin,username,profile FROM logins WHERE (?1 IS NULL OR profile=?1) AND (?2 IS NULL OR origin=?2) ORDER BY origin,username", params![profile, origin], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        self.rows("SELECT origin,username,profile FROM logins WHERE (?1 IS NULL OR profile=?1) AND (?2 IS NULL OR origin=?2) ORDER BY origin,username", params![profile, origin], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
     }
 
     pub fn prune_history(&self, days: u32) {
-        let _ = crate::applog::check("db prune_history", self.0.lock().unwrap().execute(
-            "DELETE FROM history WHERE visited_at < strftime('%s','now') - ?1 * 86400",
-            params![days],
-        ));
+        let _ = crate::applog::check("db prune_history", self.0.lock().unwrap().execute("DELETE FROM history WHERE visited_at < strftime('%s','now') - ?1 * 86400", params![days]));
     }
 
     /// History from the last `hours` hours; 0 clears everything.
@@ -188,18 +184,15 @@ impl Db {
 
     pub fn add_download(&self, url: &str, path: &str) -> i64 {
         let c = self.0.lock().unwrap();
-        let _ = crate::applog::check("db add_download", c.execute(
-            "INSERT INTO downloads(url,path,status,started_at) VALUES(?1,?2,'active',strftime('%s','now'))",
-            params![url, path],
-        ));
+        let _ = crate::applog::check("db add_download", c.execute("INSERT INTO downloads(url,path,status,started_at) VALUES(?1,?2,'active',strftime('%s','now'))", params![url, path]));
         c.last_insert_rowid()
     }
 
     pub fn finish_download(&self, id: i64, path: &str, ok: bool) {
-        let _ = crate::applog::check("db finish_download", self.0.lock().unwrap().execute(
-            "UPDATE downloads SET status=?3, path=CASE WHEN ?2='' THEN path ELSE ?2 END WHERE id=?1",
-            params![id, path, if ok { "done" } else { "failed" }],
-        ));
+        let _ = crate::applog::check(
+            "db finish_download",
+            self.0.lock().unwrap().execute("UPDATE downloads SET status=?3, path=CASE WHEN ?2='' THEN path ELSE ?2 END WHERE id=?1", params![id, path, if ok { "done" } else { "failed" }]),
+        );
     }
 
     pub fn downloads(&self) -> Vec<DownloadRow> {

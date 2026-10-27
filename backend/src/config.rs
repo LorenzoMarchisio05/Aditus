@@ -254,7 +254,9 @@ mod tests {
 
     #[test]
     fn sanitize_dedupes_and_drops_orphans() {
-        let mut c: Config = toml::from_str("profiles = [{name='A',id='1'},{name='A',id='2'},{name=' ',id='3'}]\nmappings = [{pattern='x',profile='A'},{pattern='y',profile='Z'}]\n[settings]\nadblock = false").unwrap();
+        let mut c: Config =
+            toml::from_str("profiles = [{name='A',id='1'},{name='A',id='2'},{name=' ',id='3'}]\nmappings = [{pattern='x',profile='A'},{pattern='y',profile='Z'}]\n[settings]\nadblock = false")
+                .unwrap();
         c.sanitize();
         assert_eq!(c.profiles.len(), 1);
         assert_eq!(c.profiles[0].id, "1");

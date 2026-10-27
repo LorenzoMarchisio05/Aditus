@@ -23,10 +23,7 @@ pub fn resolve(input: &str, template: &str) -> Url {
             return u;
         }
     }
-    let looks_like_host = !input.contains(' ')
-        && (input.contains('.') || input.starts_with("localhost") || input.starts_with("[::1]"))
-        && !input.starts_with('.')
-        && !input.ends_with('.');
+    let looks_like_host = !input.contains(' ') && (input.contains('.') || input.starts_with("localhost") || input.starts_with("[::1]")) && !input.starts_with('.') && !input.ends_with('.');
     if looks_like_host {
         let scheme = if is_local(input) { "http" } else { "https" };
         if let Ok(u) = Url::parse(&format!("{scheme}://{input}")) {

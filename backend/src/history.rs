@@ -96,8 +96,7 @@ impl Hist {
         }
         let new = new as usize;
         let target = self.entries[new].clone();
-        let native = target.profile == profile
-            && if new < self.idx { new >= self.base && self.idx <= self.top } else { new <= self.top && self.idx >= self.base };
+        let native = target.profile == profile && if new < self.idx { new >= self.base && self.idx <= self.top } else { new <= self.top && self.idx >= self.base };
         self.idx = new;
         if native {
             Step::Native

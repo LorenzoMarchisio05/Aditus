@@ -4,9 +4,7 @@
 //! Renderer side: `cefQuery` router and the page scripts, injected before any page script runs.
 
 use cef::{
-    wrapper::message_router::{
-        MessageRouterConfig, MessageRouterRendererSide, MessageRouterRendererSideHandlerCallbacks, RendererSideRouter,
-    },
+    wrapper::message_router::{MessageRouterConfig, MessageRouterRendererSide, MessageRouterRendererSideHandlerCallbacks, RendererSideRouter},
     *,
 };
 use std::{cell::RefCell, collections::HashMap, sync::Arc};

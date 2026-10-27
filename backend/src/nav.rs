@@ -17,17 +17,8 @@ pub enum Decision {
 }
 
 /// Hosts that take part in login flows. Never prompt or swap on these.
-const AUTH_HOSTS: &[&str] = &[
-    "accounts.google.com",
-    "login.microsoftonline.com",
-    "login.live.com",
-    "appleid.apple.com",
-    "idmsa.apple.com",
-    "github.com/login",
-    "login.yahoo.com",
-    "auth0.com",
-    "okta.com",
-];
+const AUTH_HOSTS: &[&str] =
+    &["accounts.google.com", "login.microsoftonline.com", "login.live.com", "appleid.apple.com", "idmsa.apple.com", "github.com/login", "login.yahoo.com", "auth0.com", "okta.com"];
 
 pub fn is_auth_host(host: &str) -> bool {
     AUTH_HOSTS.iter().any(|a| {
@@ -61,18 +52,10 @@ pub fn matches(pattern: &str, host: &str) -> bool {
 
 /// Exact patterns beat wildcards; among wildcards the longest wins.
 pub fn lookup<'a>(mappings: &'a [Mapping], host: &str) -> Option<&'a Mapping> {
-    mappings
-        .iter()
-        .filter(|m| matches(&m.pattern, host))
-        .max_by_key(|m| (!m.pattern.starts_with("*."), m.pattern.len()))
+    mappings.iter().filter(|m| matches(&m.pattern, host)).max_by_key(|m| (!m.pattern.starts_with("*."), m.pattern.len()))
 }
 
-pub fn decide(
-    mappings: &[Mapping],
-    current_profile: &str,
-    host: &str,
-    user_initiated: bool,
-) -> Decision {
+pub fn decide(mappings: &[Mapping], current_profile: &str, host: &str, user_initiated: bool) -> Decision {
     if !user_initiated || host.is_empty() || is_auth_host(host) {
         return Decision::Allow;
     }

@@ -73,7 +73,7 @@ pub fn shortcut(modifiers: u32, vk: i32) -> Option<String> {
     let (shift, ctrl, alt) = (modifiers & 2 != 0, modifiers & 4 != 0, modifiers & 8 != 0);
     let ch = if (0x41..=0x5A).contains(&vk) { (vk as u8 as char).to_ascii_lowercase() } else { '\0' };
     let id = match (ctrl, shift, alt, vk, ch) {
-        (_, _, _, 0x7B, _) => "devtools", // F12
+        (_, _, _, 0x7B, _) => "devtools",   // F12
         (_, _, _, 0x7A, _) => "fullscreen", // F11
         (false, false, true, 0x25, _) => "back",
         (false, false, true, 0x27, _) => "forward",
@@ -157,11 +157,7 @@ pub fn install() {
                 &item("fill-login", "Fill Saved Password", "CmdOrCtrl+Alt+F"),
             ],
         )?;
-        let edit = Submenu::with_items(
-            "Edit",
-            true,
-            &[&P::undo(None), &P::redo(None), &sep(), &P::cut(None), &P::copy(None), &P::paste(None), &P::select_all(None)],
-        )?;
+        let edit = Submenu::with_items("Edit", true, &[&P::undo(None), &P::redo(None), &sep(), &P::cut(None), &P::copy(None), &P::paste(None), &P::select_all(None)])?;
         let view = Submenu::with_items(
             "View",
             true,
@@ -197,11 +193,7 @@ pub fn install() {
             ],
         )?;
         let tabs_menu = Submenu::new("Tabs", true);
-        for it in [
-            item("next-tab", "Next Tab", "Ctrl+Tab"),
-            item("prev-tab", "Previous Tab", "Ctrl+Shift+Tab"),
-            item("search-tabs", "Search Tabs", "CmdOrCtrl+Shift+A"),
-        ] {
+        for it in [item("next-tab", "Next Tab", "Ctrl+Tab"), item("prev-tab", "Previous Tab", "Ctrl+Shift+Tab"), item("search-tabs", "Search Tabs", "CmdOrCtrl+Shift+A")] {
             tabs_menu.append(&it)?;
         }
         tabs_menu.append(&sep())?;
@@ -212,7 +204,8 @@ pub fn install() {
             let text = if n == 9 { "Last Tab".to_string() } else { format!("Tab {n}") };
             tabs_menu.append(&item(&format!("select-tab:{n}"), &text, &format!("CmdOrCtrl+{n}")))?;
         }
-        let window = Submenu::with_items("Window", true, &[&item("minimize", "Minimize", "CmdOrCtrl+M"), &item("maximize", "Zoom", ""), &sep(), &item("close-window", "Close Window", "CmdOrCtrl+Shift+W")])?;
+        let window =
+            Submenu::with_items("Window", true, &[&item("minimize", "Minimize", "CmdOrCtrl+M"), &item("maximize", "Zoom", ""), &sep(), &item("close-window", "Close Window", "CmdOrCtrl+Shift+W")])?;
         window.set_as_windows_menu_for_nsapp();
         let help = Submenu::with_items("Help", true, &[&item("help-site", "Aditus on GitHub", ""), &item("help-issue", "Report an Issue", "")])?;
         help.set_as_help_menu_for_nsapp();

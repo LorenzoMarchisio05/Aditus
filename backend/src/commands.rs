@@ -1,12 +1,11 @@
 //! Every `cefQuery` command. Runs on the UI thread; slow ones (network) answer from a worker.
 
 use crate::{
-    passwords,
     adblock,
     config::{self, Config, Settings},
     engine::{self, Item, Kind, Spec},
     ipc::{Ctx, Reply},
-    search, tabs,
+    passwords, search, tabs,
     tabs::{shared, AppHandle},
 };
 use serde_json::{json, Value};
@@ -549,7 +548,8 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             ok(Value::Null)
         }
         "address_selection" => {
-            shared(&APP).app.lock().unwrap().win(win).address_sel = str_arg(&a, "text");            ok(Value::Null)
+            shared(&APP).app.lock().unwrap().win(win).address_sel = str_arg(&a, "text");
+            ok(Value::Null)
         }
         "page_link" => {
             tabs::page_link(&APP, &ctx.label, &str_arg(&a, "u"));
@@ -574,25 +574,19 @@ fn at(a: &Value, win: &str) -> (i32, i32) {
 }
 
 fn overlay(label: &str, win: &str, view: &str, bounds: engine::Bounds) -> Spec {
-    Spec {
-        label: label.to_string(),
-        win: win.to_string(),
-        url: view_url(view, win),
-        kind: Kind::Overlay,
-        app_page: true,
-        store: None,
-        bounds,
-        visible: true,
-        zoom: 100,
-        yt: false,
-    }
+    Spec { label: label.to_string(), win: win.to_string(), url: view_url(view, win), kind: Kind::Overlay, app_page: true, store: None, bounds, visible: true, zoom: 100, yt: false }
 }
 
 fn save_settings(settings: Settings) {
     let (lists_changed, blocking_changed, zoom_changed, dock_changed) = {
         let g = shared(&APP).app.lock().unwrap();
         let old = &g.cfg.settings;
-        (old.disabled_lists != settings.disabled_lists, old.adblock != settings.adblock || old.disabled_lists != settings.disabled_lists, old.page_zoom != settings.page_zoom, old.devtools_dock != settings.devtools_dock)
+        (
+            old.disabled_lists != settings.disabled_lists,
+            old.adblock != settings.adblock || old.disabled_lists != settings.disabled_lists,
+            old.page_zoom != settings.page_zoom,
+            old.devtools_dock != settings.devtools_dock,
+        )
     };
     let zoom = settings.page_zoom;
     mutate_cfg(|c| c.settings = settings);
@@ -782,18 +776,12 @@ fn tab_menu(win: &str, id: u32, pos: (i32, i32)) {
         (t.pinned, t.group.clone(), t.profile.clone(), site && !t.private, site, groups, g.cfg.profiles.iter().map(|p| p.name.clone()).collect::<Vec<_>>())
     };
     let plain = |act: &str, label: &str| Item::Entry { id: format!("tabm:{act}:{id}"), label: label.into(), enabled: true, checked: false };
-    let mut group_items: Vec<Item> = groups
-        .iter()
-        .map(|n| Item::Entry { id: format!("tabm:group:{id}:{n}"), label: n.clone(), enabled: true, checked: group.as_deref() == Some(n) })
-        .collect();
+    let mut group_items: Vec<Item> = groups.iter().map(|n| Item::Entry { id: format!("tabm:group:{id}:{n}"), label: n.clone(), enabled: true, checked: group.as_deref() == Some(n) }).collect();
     group_items.push(plain("newgroup", "New Group…"));
     if group.is_some() {
         group_items.push(plain("ungroup", "Remove from Group"));
     }
-    let profile_items = profiles
-        .iter()
-        .map(|n| Item::Entry { id: format!("tabm:profile:{id}:{n}"), label: n.clone(), enabled: true, checked: *n == profile })
-        .collect();
+    let profile_items = profiles.iter().map(|n| Item::Entry { id: format!("tabm:profile:{id}:{n}"), label: n.clone(), enabled: true, checked: *n == profile }).collect();
     let items = vec![
         plain("reload", "Reload"),
         Item::Entry { id: format!("tabm:pin:{id}"), label: if pinned { "Unpin Tab" } else { "Pin Tab" }.into(), enabled: pinned || is_site, checked: false },
@@ -821,12 +809,7 @@ static PAGE_CTX: Mutex<Option<PageCtx>> = Mutex::new(None);
 /// Called by the engine when a page's context menu opens: URLs are already filtered to http(s).
 pub fn remember_page_context(label: &str, link: Option<String>, image: Option<String>, selection: String) {
     let Some((tab, _)) = tabs::parse_label(label) else { return };
-    *PAGE_CTX.lock().unwrap() = Some(PageCtx {
-        tab,
-        link: link.and_then(|u| Url::parse(&u).ok()),
-        image: image.and_then(|u| Url::parse(&u).ok()),
-        selection: selection.chars().take(2000).collect(),
-    });
+    *PAGE_CTX.lock().unwrap() = Some(PageCtx { tab, link: link.and_then(|u| Url::parse(&u).ok()), image: image.and_then(|u| Url::parse(&u).ok()), selection: selection.chars().take(2000).collect() });
 }
 
 pub fn page_context_action(_label: &str, id: i32) {

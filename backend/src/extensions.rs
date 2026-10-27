@@ -247,7 +247,10 @@ fn update_all() {
         let Some(old) = describe(&root().join(&id), &id) else { continue };
         let have = text(&old, "version");
         // An up-to-date extension makes the store answer with nothing, which fails to parse: no update.
-        let Ok(new) = stage_id(&id, Some(&have)) else { discard(&id); continue };
+        let Ok(new) = stage_id(&id, Some(&have)) else {
+            discard(&id);
+            continue;
+        };
         if text(&new, "version") != have && perms(&new).iter().all(|p| perms(&old).contains(p)) {
             let _ = crate::applog::check("extension update commit", commit(&id));
         } else {
@@ -266,7 +269,11 @@ pub fn init_updates() {
 }
 
 fn disabled() -> Vec<String> {
-    fs::read_to_string(root().join("state.json")).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()).and_then(|v| v["disabled"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())).unwrap_or_default()
+    fs::read_to_string(root().join("state.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v["disabled"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()))
+        .unwrap_or_default()
 }
 
 pub fn set_enabled(id: &str, on: bool) {
@@ -294,7 +301,15 @@ fn ids() -> Vec<String> {
 
 pub fn list() -> Vec<Value> {
     let off = disabled();
-    ids().iter().filter_map(|id| describe(&root().join(id), id).map(|mut d| { d["enabled"] = json!(!off.contains(id)); d })).collect()
+    ids()
+        .iter()
+        .filter_map(|id| {
+            describe(&root().join(id), id).map(|mut d| {
+                d["enabled"] = json!(!off.contains(id));
+                d
+            })
+        })
+        .collect()
 }
 
 /// For `--load-extension`: the enabled extensions' folders, comma separated.

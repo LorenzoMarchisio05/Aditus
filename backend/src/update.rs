@@ -5,7 +5,11 @@
 //! requires a valid code signature and the same bundle id before swapping the app bundle.
 
 use serde_json::{json, Value};
-use std::{path::{Path, PathBuf}, process::Command, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+};
 
 const REPO: &str = "LorenzoMarchisio05/Aditus";
 
@@ -35,18 +39,13 @@ fn api_url() -> String {
 }
 
 fn latest() -> Option<Release> {
-    let body = ureq::get(&api_url())
-        .set("User-Agent", "aditus")
-        .timeout(Duration::from_secs(10))
-        .call()
-        .ok()?
-        .into_string()
-        .ok()?;
+    let body = ureq::get(&api_url()).set("User-Agent", "aditus").timeout(Duration::from_secs(10)).call().ok()?.into_string().ok()?;
     let v: Value = serde_json::from_str(&body).ok()?;
     let asset = v["assets"].as_array()?.iter().find(|a| a["name"] == asset().as_str()).and_then(|a| {
         let url = a["browser_download_url"].as_str()?;
         let sha = a["digest"].as_str()?.strip_prefix("sha256:")?;
-        (url.starts_with(&format!("https://github.com/{REPO}/releases/download/")) || (cfg!(debug_assertions) && std::env::var_os("ADITUS_UPDATE_API").is_some())).then(|| (url.to_string(), sha.to_lowercase()))
+        (url.starts_with(&format!("https://github.com/{REPO}/releases/download/")) || (cfg!(debug_assertions) && std::env::var_os("ADITUS_UPDATE_API").is_some()))
+            .then(|| (url.to_string(), sha.to_lowercase()))
     });
     Some(Release { tag: v["tag_name"].as_str()?.trim_start_matches('v').into(), page: v["html_url"].as_str()?.into(), asset })
 }
@@ -70,7 +69,11 @@ pub fn check() -> Value {
 
 fn run(cmd: &mut Command) -> Result<String, String> {
     let o = cmd.output().map_err(|e| e.to_string())?;
-    if o.status.success() { Ok(String::from_utf8_lossy(&o.stdout).trim().to_string()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) }
+    if o.status.success() {
+        Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&o.stderr).trim().to_string())
+    }
 }
 
 fn bundle_id(app: &Path) -> Result<String, String> {
@@ -135,7 +138,11 @@ fn install_inner() -> Result<(), String> {
     let script = r#"while kill -0 "$1" 2>/dev/null; do sleep 0.3; done
 rm -rf "$2.old"; mv "$2" "$2.old" && mv "$3" "$2" && { rm -rf "$2.old" "$4"; open "$2"; } || { [ -d "$2.old" ] && { rm -rf "$2"; mv "$2.old" "$2"; }; rm -rf "$4"; open "$2"; }"#;
     // `open` drops our environment; debug runs pass their sandbox through so the relaunch can't touch real data.
-    let env = std::env::var("ADITUS_DATA_DIR").ok().filter(|_| cfg!(debug_assertions)).map(|d| format!("--env ADITUS_DATA_DIR={d} --env ADITUS_DEBUG_PORT={}", std::env::var("ADITUS_DEBUG_PORT").unwrap_or_default())).unwrap_or_default();
+    let env = std::env::var("ADITUS_DATA_DIR")
+        .ok()
+        .filter(|_| cfg!(debug_assertions))
+        .map(|d| format!("--env ADITUS_DATA_DIR={d} --env ADITUS_DEBUG_PORT={}", std::env::var("ADITUS_DEBUG_PORT").unwrap_or_default()))
+        .unwrap_or_default();
     Command::new("sh").args(["-c", &script.replace("open ", &format!("open {env} ")), "sh", &std::process::id().to_string()]).arg(&cur).arg(&new).arg(&dir).spawn().map_err(|e| e.to_string())?;
     Ok(())
 }
