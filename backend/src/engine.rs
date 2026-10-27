@@ -65,7 +65,7 @@ struct Reg {
     /// Window -> label of the page showing HTML fullscreen.
     fullscreen: HashMap<String, String>,
     find_text: HashMap<String, String>,
-    downloads: HashMap<u32, (String, String)>,
+    downloads: HashMap<u32, (i64, String)>,
     popup: Option<(MenuModel, MenuModelDelegate)>,
 }
 
@@ -1226,8 +1226,8 @@ wrap_download_handler! {
             let name = suggested_name.map(|n| n.to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| "download".into());
             let path = unique(&dir, &name.replace(['/', '\\'], "_")).to_string_lossy().into_owned();
             let url = CefString::from(&item.url()).to_string();
-            tabs::on_download(&tabs::AppHandle, &url, &path, None);
-            reg(|r| r.downloads.insert(item.id(), (url, path.clone())));
+            let id = tabs::on_download_start(&tabs::AppHandle, &url, &path);
+            reg(|r| r.downloads.insert(item.id(), (id, path.clone())));
             cb.cont(Some(&s(&path)), 0);
             1
         }
@@ -1238,8 +1238,8 @@ wrap_download_handler! {
             if !done && item.is_canceled() == 0 && item.is_interrupted() == 0 {
                 return;
             }
-            if let Some((url, path)) = reg(|r| r.downloads.remove(&item.id())) {
-                tabs::on_download(&tabs::AppHandle, &url, &path, Some(done));
+            if let Some((id, path)) = reg(|r| r.downloads.remove(&item.id())) {
+                tabs::on_download_end(&tabs::AppHandle, id, &path, done);
             }
         }
     }

@@ -93,7 +93,7 @@ pub fn install() -> Result<(), String> {
     let new = stage.join("Aditus.app");
     // Our Info.plist has LSFileQuarantineEnabled, so everything we write is quarantined; Gatekeeper would
     // then refuse the relaunch of an unnotarized build. The download was checked against GitHub's digest.
-    let _ = run(Command::new("xattr").args(["-dr", "com.apple.quarantine"]).arg(&new));
+    let _ = crate::applog::check("update xattr", run(Command::new("xattr").args(["-dr", "com.apple.quarantine"]).arg(&new)));
     run(Command::new("codesign").args(["--verify", "--deep", "--strict"]).arg(&new)).map_err(|e| format!("Bad signature: {e}"))?;
     if bundle_id(&new)? != bundle_id(&cur)? {
         return Err("Downloaded app has a different identity".into());

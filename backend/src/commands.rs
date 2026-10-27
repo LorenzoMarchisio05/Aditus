@@ -173,7 +173,10 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
                     reply.done(Ok(Value::Null));
                     engine::defer_from_thread(engine::quit);
                 }
-                Err(e) => reply.done(Err(e)),
+                Err(e) => {
+                    crate::applog::log(&format!("update install: {e}"));
+                    reply.done(Err(e))
+                }
             });
         }
         "check_update" => {
@@ -299,6 +302,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             // Optional `path` (tests); default is Chrome's own file.
             let path = a["path"].as_str().map(Into::into).or_else(crate::import::chrome_path);
             let Some(text) = path.and_then(|p| std::fs::read_to_string(p).ok()) else {
+                crate::applog::log("import bookmarks: no Chrome bookmarks file");
                 return reply.done(Err("No Chrome bookmarks file found".into()));
             };
             let list = crate::import::chrome_bookmarks(&text);
@@ -312,6 +316,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             // Optional `path` (tests); default is the History file next to Chrome's Bookmarks.
             let path = a["path"].as_str().map(Into::into).or_else(|| crate::import::chrome_path().map(|p| p.with_file_name("History")));
             let Some(rows) = path.and_then(|p| crate::import::chrome_history(&p)) else {
+                crate::applog::log("import history: no Chrome history readable");
                 return reply.done(Err("No Chrome history found".into()));
             };
             shared(&APP).db.import_visits(&rows, "");

@@ -122,7 +122,7 @@ pub struct App {
     next_win: u32,
     prompt: Option<String>,
     /// A site asked for a device permission with no saved answer: (host, kind, tab).
-    perm_prompt: Option<(String, String, u32)>,
+    perm_prompt: Vec<(String, String, u32)>,
     /// Answers given in private windows; never written to disk.
     perm_tmp: Vec<config::PermRule>,
     skipped: HashSet<String>,
@@ -144,7 +144,7 @@ impl App {
             next_id: 1,
             next_win: 2,
             prompt: None,
-            perm_prompt: None,
+            perm_prompt: vec![],
             perm_tmp: vec![],
             skipped: HashSet::new(),
             toast: None,
@@ -324,7 +324,7 @@ fn emit(app: &AppHandle, save: bool) {
                     active: w.active,
                     cfg: &g.cfg,
                     prompt: g.prompt.clone(),
-                    perm: g.perm_prompt.as_ref().filter(|p| g.win_of(p.2) == *win).map(|p| (p.0.as_str(), p.1.as_str())),
+                    perm: g.perm_prompt.iter().find(|p| g.win_of(p.2) == *win).map(|p| (p.0.as_str(), p.1.as_str())),
                     toast: g.toast.clone(),
                     adblock_site: !g.cfg.allowlist.contains(&active_host),
                     bookmarked: s.db.is_bookmarked(&active_url),
@@ -537,7 +537,11 @@ pub fn on_permission(app: &AppHandle, label: &str, origin: &str, name: &str) -> 
     match saved {
         Some(allow) => allow,
         None => {
-            g.perm_prompt = Some((host, name.into(), tab_id));
+            // Queue: a pending card is never overwritten.
+            let p = (host, name.into(), tab_id);
+            if !g.perm_prompt.contains(&p) {
+                g.perm_prompt.push(p);
+            }
             drop(g);
             emit_state(app);
             false
@@ -549,7 +553,10 @@ pub fn on_permission(app: &AppHandle, label: &str, origin: &str, name: &str) -> 
 pub fn answer_permission(app: &AppHandle, allow: bool) {
     let (rule, tab, private) = {
         let mut g = shared(app).app.lock().unwrap();
-        let Some((host, kind, tab)) = g.perm_prompt.take() else { return };
+        if g.perm_prompt.is_empty() {
+            return;
+        }
+        let (host, kind, tab) = g.perm_prompt.remove(0);
         let private = g.tabs.iter().find(|t| t.id == tab).is_some_and(|t| t.private);
         (config::PermRule { host, kind, allow }, tab, private)
     };
@@ -712,15 +719,15 @@ pub fn download_dir() -> Option<PathBuf> {
     (!g.cfg.settings.download_dir.is_empty()).then(|| PathBuf::from(&g.cfg.settings.download_dir))
 }
 
-/// `finished`: `None` when it starts, `Some(ok)` when it ends.
-pub fn on_download(app: &AppHandle, url: &str, path: &str, finished: Option<bool>) {
-    let s = shared(app);
-    match finished {
-        None => {
-            s.db.add_download(url, path);
-        }
-        Some(ok) => s.db.finish_download(url, path, ok),
-    }
+pub fn on_download_start(app: &AppHandle, url: &str, path: &str) -> i64 {
+    let id = shared(app).db.add_download(url, path);
+    engine::emit("downloads-changed", "null");
+    id
+}
+
+/// `id` is the row from `on_download_start`, so concurrent downloads of one URL can't be mixed up.
+pub fn on_download_end(app: &AppHandle, id: i64, path: &str, ok: bool) {
+    shared(app).db.finish_download(id, path, ok);
     engine::emit("downloads-changed", "null");
 }
 
@@ -1559,7 +1566,7 @@ pub fn save_session(app: &AppHandle) {
         }
     };
     if let Ok(s) = serde_json::to_string(&session) {
-        let _ = std::fs::write(session_path(app), s);
+        let _ = crate::applog::check("session save", std::fs::write(session_path(app), s));
     }
 }
 
