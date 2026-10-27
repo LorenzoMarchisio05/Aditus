@@ -147,6 +147,7 @@ pub fn run_browser() -> Result<(), String> {
     let s = tabs::shared(&tabs::AppHandle);
     if s.app.lock().unwrap().cfg.settings.clear_history_on_quit {
         s.db.clear_history();
+        tabs::clear_session(&tabs::AppHandle);
     }
     Ok(())
 }

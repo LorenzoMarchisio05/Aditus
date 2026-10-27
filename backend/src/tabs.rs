@@ -533,7 +533,10 @@ pub fn on_permission(app: &AppHandle, label: &str, origin: &str, name: &str) -> 
     let Some((tab_id, _)) = parse_label(label) else { return false };
     let Some(host) = Url::parse(origin).ok().and_then(|u| u.host_str().map(String::from)) else { return false };
     let mut g = shared(app).app.lock().unwrap();
-    let saved = g.cfg.permissions.iter().chain(&g.perm_tmp).find(|r| r.host == host && r.kind == name).map(|r| r.allow);
+    // Private tabs only see private answers, regular tabs only saved ones.
+    let private = g.tab(tab_id).is_some_and(|t| t.private);
+    let rules = if private { &g.perm_tmp } else { &g.cfg.permissions };
+    let saved = rules.iter().find(|r| r.host == host && r.kind == name).map(|r| r.allow);
     match saved {
         Some(allow) => allow,
         None => {
@@ -1206,11 +1209,13 @@ pub fn label_private(app: &AppHandle, view_label: &str) -> bool {
 }
 
 /// Fill the active tab with its saved login. The origin is read from the engine right here, and
-/// only that exact origin's entry is used.
-pub fn fill_login(app: &AppHandle, tab_id: u32) {
+/// only that exact origin's entry is used. `user` picks among several accounts; else the first by name.
+/// ponytail: keychain entries are not keyed per profile, so every profile sees the same logins.
+pub fn fill_login(app: &AppHandle, tab_id: u32, user: Option<String>) {
     let Some(l) = active_view(app, tab_id) else { return };
     let Some(origin) = engine::url_of(&l).and_then(|u| crate::passwords::origin_of(&u)) else { return };
-    let Some((_, user)) = shared(app).db.logins(Some(&origin)).into_iter().next() else { return };
+    let logins = shared(app).db.logins(Some(&origin));
+    let Some((_, user)) = logins.iter().find(|l| Some(&l.1) == user.as_ref()).or(logins.first()).cloned() else { return };
     if let Some(pw) = crate::passwords::get(crate::passwords::SERVICE, &origin, &user) {
         engine::eval(&l, &crate::passwords::fill_js(&user, &pw));
     }
@@ -1536,6 +1541,11 @@ struct Session {
 
 fn session_path(app: &AppHandle) -> PathBuf {
     shared(app).data_dir.join("session.json")
+}
+
+/// Forget the open tabs' URLs and titles (clear-history-on-quit).
+pub fn clear_session(app: &AppHandle) {
+    let _ = std::fs::remove_file(session_path(app));
 }
 
 pub fn save_session(app: &AppHandle) {

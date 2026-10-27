@@ -1215,7 +1215,7 @@ wrap_download_handler! {
 
         fn on_before_download(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             item: Option<&mut DownloadItem>,
             suggested_name: Option<&CefString>,
             callback: Option<&mut BeforeDownloadCallback>,
@@ -1226,8 +1226,12 @@ wrap_download_handler! {
             let name = suggested_name.map(|n| n.to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| "download".into());
             let path = unique(&dir, &name.replace(['/', '\\'], "_")).to_string_lossy().into_owned();
             let url = CefString::from(&item.url()).to_string();
-            tabs::on_download(&tabs::AppHandle, &url, &path, None);
-            reg(|r| r.downloads.insert(item.id(), (url, path.clone())));
+            // Private windows leave no record: untracked here means on_download_updated skips it too.
+            let private = browser.and_then(|b| reg(|r| r.by_browser.get(&b.identifier()).cloned())).is_some_and(|l| tabs::label_private(&tabs::AppHandle, &l));
+            if !private {
+                tabs::on_download(&tabs::AppHandle, &url, &path, None);
+                reg(|r| r.downloads.insert(item.id(), (url, path.clone())));
+            }
             cb.cont(Some(&s(&path)), 0);
             1
         }

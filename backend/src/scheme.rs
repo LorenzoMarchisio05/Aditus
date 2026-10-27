@@ -8,13 +8,17 @@ use std::{
 
 pub const HOST: &str = "app";
 
+/// Defense in depth for the privileged UI origin: bundled scripts only, no plugins, no framing, no form posts.
+/// Inline styles (Svelte `style=`), data: images/fonts (Vite inlines small assets) and https favicons are needed.
+const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; font-src 'self' data:; connect-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
+
 static DIST: OnceLock<PathBuf> = OnceLock::new();
 
 /// Where `dist` lives: next to the executable (`Resources/dist` in a macOS bundle), or the
 /// source tree's build output for a plain `cargo run`.
 pub fn dist_dir() -> &'static Path {
     DIST.get_or_init(|| {
-        if let Some(d) = std::env::var_os("ADITUS_DIST") {
+        if let Some(d) = std::env::var_os("ADITUS_DIST").filter(|_| cfg!(debug_assertions)) {
             return d.into();
         }
         let exe = std::env::current_exe().unwrap_or_default();
@@ -81,6 +85,7 @@ wrap_resource_handler! {
             if let Some(r) = response {
                 r.set_status(b.status);
                 r.set_mime_type(Some(&CefString::from(b.mime)));
+                r.set_header_by_name(Some(&CefString::from("Content-Security-Policy")), Some(&CefString::from(CSP)), 1);
                 r.set_header_by_name(Some(&CefString::from("Cache-Control")), Some(&CefString::from("no-store")), 1);
             }
             if let Some(l) = response_length {

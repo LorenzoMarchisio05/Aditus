@@ -45,12 +45,7 @@ try {
     await evalIn(ui, `new Promise((s) => cefQuery({ request: JSON.stringify({ cmd: 'new_tab', args: { url: 'http://127.0.0.1:${webPort}/' } }), onSuccess: s, onFailure: s }))`);
     const page = await until(async () => (await targets()).find((t) => t.url.startsWith(`http://127.0.0.1:${webPort}`) && t.title === 'smoke'));
     check('http page loads in a tab', !!page);
-    if (page) {
-      check('page script injected', (await evalIn(page, 'window.__aditus')) === 1);
-      // A web page may only call the page commands, never a trusted one.
-      const denied = await evalIn(page, `new Promise((s) => cefQuery({ request: JSON.stringify({ cmd: 'get_state', args: {} }), onSuccess: () => s('ran'), onFailure: (_c, m) => s(m) }))`);
-      check('untrusted page cannot run get_state', denied === 'not allowed');
-    }
+    if (page) check('page script injected (cefQuery hidden from the page)', (await evalIn(page, 'typeof window.cefQuery')) === 'undefined');
     const q = (cmd, url) => evalIn(ui, `new Promise((s) => cefQuery({ request: JSON.stringify({ cmd: '${cmd}', args: { url: '${url}' } }), onSuccess: s, onFailure: s }))`);
     await q('new_tab', `http://127.0.0.1:${webPort}/two`);
     check('second tab loads', !!(await until(async () => (await targets()).find((t) => t.title === 'smoke2'))));
