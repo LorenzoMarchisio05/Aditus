@@ -513,6 +513,19 @@ pub fn navigate(label: &str, url: &str) {
     }
 }
 
+/// Native history step of the view's browser. `false` when there is no live view or it cannot go that way.
+pub fn go(label: &str, delta: i32) -> bool {
+    let Some(b) = view(label).and_then(|v| v.browser()) else { return false };
+    if delta < 0 && b.can_go_back() != 0 {
+        b.go_back();
+    } else if delta > 0 && b.can_go_forward() != 0 {
+        b.go_forward();
+    } else {
+        return false;
+    }
+    true
+}
+
 pub fn eval(label: &str, js: &str) {
     if let Some(f) = frame(label) {
         f.execute_java_script(Some(&s(js)), Some(&s("aditus://eval")), 0);
@@ -973,6 +986,13 @@ wrap_life_span_handler! {
             _no_javascript_access: Option<&mut i32>,
         ) -> i32 {
             // Never a native popup window: it becomes a tab beside the opener.
+            // Known limit: this is a brand-new browser, so `window.opener`, `postMessage` to the opener and
+            // `window.close()` do not work (popup sign-ins and 3-D Secure rely on them; `nav::AUTH_HOSTS` papers
+            // over the profile side of that). Returning 0 here instead would give a real related popup, and the
+            // views API can hand it over (`delegate_for_popup_browser_view` + `on_popup_browser_view_created`, the
+            // way DevTools is docked above) with a client of our own. Not done: it needs a tab that owns an
+            // existing view, `window.close()` -> tab close, and no sleep/profile swap of the opener, none of which
+            // can be checked without running CEF (popup teardown already crashes in this codebase, see `close`).
             let url = target_url.map(|u| u.to_string()).unwrap_or_default();
             // Ad popups: scripted `window.open` without a click, or a target the filter lists block.
             let source = frame.map(|f| CefString::from(&f.url()).to_string()).unwrap_or_default();
@@ -1120,17 +1140,19 @@ wrap_load_handler! {
     }
 
     impl LoadHandler {
-        fn on_load_start(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, _t: TransitionType) {
+        fn on_load_start(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, t: TransitionType) {
             let Some(f) = frame else { return };
             if f.is_main() != 0 {
-                tabs::on_load(&tabs::AppHandle, &self.label, CefString::from(&f.url()).to_string(), true);
+                // TT_FORWARD_BACK_FLAG: the page (or CEF) traversed history, rather than navigating to a new page.
+                let fwd_back = t.get_raw() & 0x0100_0000 != 0;
+                tabs::on_load(&tabs::AppHandle, &self.label, CefString::from(&f.url()).to_string(), true, fwd_back);
             }
         }
 
         fn on_load_end(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, _status: i32) {
             let Some(f) = frame else { return };
             if f.is_main() != 0 {
-                tabs::on_load(&tabs::AppHandle, &self.label, CefString::from(&f.url()).to_string(), false);
+                tabs::on_load(&tabs::AppHandle, &self.label, CefString::from(&f.url()).to_string(), false, false);
             }
         }
 
