@@ -183,7 +183,7 @@ impl Config {
     pub fn save(&self, path: &Path) {
         if let Ok(s) = toml::to_string_pretty(self) {
             let _ = std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")));
-            let _ = write_atomic(path, s);
+            let _ = crate::applog::check("config save", write_atomic(path, s));
         }
     }
 

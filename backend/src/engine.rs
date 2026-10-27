@@ -65,7 +65,7 @@ struct Reg {
     /// Window -> label of the page showing HTML fullscreen.
     fullscreen: HashMap<String, String>,
     find_text: HashMap<String, String>,
-    downloads: HashMap<u32, (String, String)>,
+    downloads: HashMap<u32, (i64, String)>,
     popup: Option<(MenuModel, MenuModelDelegate)>,
 }
 
@@ -1229,8 +1229,8 @@ wrap_download_handler! {
             // Private windows leave no record: untracked here means on_download_updated skips it too.
             let private = browser.and_then(|b| reg(|r| r.by_browser.get(&b.identifier()).cloned())).is_some_and(|l| tabs::label_private(&tabs::AppHandle, &l));
             if !private {
-                tabs::on_download(&tabs::AppHandle, &url, &path, None);
-                reg(|r| r.downloads.insert(item.id(), (url, path.clone())));
+                let id = tabs::on_download_start(&tabs::AppHandle, &url, &path);
+                reg(|r| r.downloads.insert(item.id(), (id, path.clone())));
             }
             cb.cont(Some(&s(&path)), 0);
             1
@@ -1242,8 +1242,8 @@ wrap_download_handler! {
             if !done && item.is_canceled() == 0 && item.is_interrupted() == 0 {
                 return;
             }
-            if let Some((url, path)) = reg(|r| r.downloads.remove(&item.id())) {
-                tabs::on_download(&tabs::AppHandle, &url, &path, Some(done));
+            if let Some((id, path)) = reg(|r| r.downloads.remove(&item.id())) {
+                tabs::on_download_end(&tabs::AppHandle, id, &path, done);
             }
         }
     }

@@ -1,5 +1,6 @@
 pub mod adblock;
 pub mod app;
+pub mod applog;
 pub mod commands;
 pub mod config;
 pub mod db;
