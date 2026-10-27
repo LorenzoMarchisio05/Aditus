@@ -4,6 +4,8 @@ A lightweight, open-source desktop browser with a vertical tab sidebar and per-s
 
 > Status: early, daily-usable on macOS. Runs on Chromium (CEF). Windows and Linux build in CI but are untested.
 
+<p align="center"><img src="docs/newtab.png" alt="Aditus new tab page with the sidebar, address bar and Swing at the bottom" width="860"></p>
+
 ## The name
 
 *Aditus* is Latin for "a way in": an approach, an entrance, access. It comes from *adire*, "to go toward". A browser is the door to the web, so that is what it is called.
@@ -46,9 +48,26 @@ Most browsers spend screen space and memory on things I don't use. Aditus aims f
 - **Engine:** Chromium through [CEF](https://bitbucket.org/chromiumembedded/cef) (raw `cef-rs`, no Tauri). Same engine on every OS. The prebuilt CEF has no H.264/AAC and no Widevine DRM: VP9/Opus work, Netflix-style DRM and some video sites don't.
 - **Profiles:** a profile is an isolated storage area (cookies, localStorage, logins). Every tab runs in one profile. You map hosts to profiles (`photos.google.com` → A, `youtube.com` → B). Navigating a tab to a host mapped to another profile swaps the tab to that profile's browser, with an undo toast. Redirects, login flows, and OAuth popups never swap.
 - **Ad blocker:** [`adblock-rust`](https://github.com/brave/adblock-rust) with EasyList, EasyPrivacy, and uBlock filters, refreshed in the background. Per-site allowlist from the top bar.
-- **Memory:** background tabs idle for 15 minutes (configurable) are discarded and reloaded on click. Pinned and audio-playing tabs are exempt.
+- **Memory:** background tabs idle for 10 minutes (configurable) are discarded and reloaded on click. Pinned and audio-playing tabs are exempt.
 - **Extensions:** Settings → Extensions installs Manifest V3 extensions from a Chrome Web Store link or id. Content scripts, background workers and declarativeNetRequest work (Dark Reader tested). They are shared by all profiles, don't run in private windows. They update themselves every 6 hours (new code runs after a restart) unless a new version asks for more permissions. Popups that need the current tab (password-manager autofill) don't work yet.
 - **Updates:** the app checks GitHub releases and, on macOS, installs a new version after a click. It verifies GitHub's sha256 digest, the code signature and the bundle id first. Chromium security fixes arrive by bumping the pinned `cef` crate; a weekly workflow opens that PR.
+
+## Screenshots
+
+<p align="center"><img src="docs/settings.png" alt="Settings: general options, theme, accent colour, developer tools position" width="860"></p>
+
+The sidebar lists tabs with the profile each one runs in (`def`), the address bar sits on top, and the footer holds new tab, bookmarks, history and settings.
+
+## Meet Swing
+
+Swing is the small mascot that lives in the browser. It wanders along the bottom of the new tab page, perches in the sidebar footer while a page is open, and reacts to what you do.
+
+<p align="center"><img src="docs/swing-reactions.gif" alt="Swing hopping, spinning and sitting while saying Whoa!, Where to? and Stay curious." width="360"> <img src="docs/swing-roaming.gif" alt="Swing walking across the new tab page, then falling asleep with Zzz" width="360"></p>
+
+- **Moods:** it walks, follows your pointer, waves, jumps, spins, dances, stretches, sits, sneezes, trips, naps. Its eyes track the cursor.
+- **Messages:** click it for a line (`Where to?`, `Try ⌘L, it is fast.`, `Tab hoarder detected.`, `No ads here. Ssh.`). Get close and it jumps with `Whoa!`.
+- **Reactions:** when a background tab is put to sleep it tucks it in (`Nap time, tab.`) and sometimes trips over it (`Whoops!`, `Ow.`). When open tabs add up to more than 4 GB it gets angry (`So much RAM!!`).
+- **Private windows:** it puts on shades and whispers (`Shh. Nobody saw.`, `Incognito. Very mysterious.`).
 
 ## Features
 
