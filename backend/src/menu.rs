@@ -9,7 +9,7 @@ const APP: AppHandle = AppHandle;
 
 /// Menu bar picks, tab / profile popup picks and shortcuts all land here.
 pub fn picked(id: &str) {
-    let (win, cur) = shared(&APP).app.lock().unwrap().focused_active_with_win();
+    let (win, cur) = shared(&APP).lock_app().focused_active_with_win();
     let ui = tabs::wv_label("ui", &win);
     // A link selected in the address bar or the page is what a new tab or private window opens.
     let link = matches!(id, "new-tab" | "new-private-window").then(|| tabs::selected_link(&APP, &win, cur)).flatten();

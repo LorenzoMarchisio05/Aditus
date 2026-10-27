@@ -49,7 +49,7 @@ pub fn drain_open_queue() {
 
 /// Dock icon clicked: bring the focused window forward.
 pub fn reopen() {
-    let win = tabs::shared(&tabs::AppHandle).app.lock().unwrap().focused.clone();
+    let win = tabs::shared(&tabs::AppHandle).lock_app().focused.clone();
     engine::raise_window(&win);
 }
 
@@ -170,7 +170,7 @@ pub fn run_browser() -> Result<(), String> {
     shutdown();
 
     let s = tabs::shared(&tabs::AppHandle);
-    if s.app.lock().unwrap().cfg.settings.clear_history_on_quit {
+    if s.lock_app().cfg.settings.clear_history_on_quit {
         s.db.clear_history();
         tabs::clear_session(&tabs::AppHandle);
         s.db.clear_downloads();

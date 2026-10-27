@@ -23,13 +23,13 @@ fn num(a: &Value, k: &str) -> f64 {
 }
 
 fn active_id(win: &str) -> u32 {
-    shared(&APP).app.lock().unwrap().active(win)
+    shared(&APP).lock_app().active(win)
 }
 
 fn mutate_cfg(f: impl FnOnce(&mut Config)) {
     let s = shared(&APP);
     {
-        let mut g = s.app.lock().unwrap();
+        let mut g = s.lock_app();
         f(&mut g.cfg);
         g.cfg.sanitize();
         g.cfg.save(&s.cfg_path);
@@ -91,7 +91,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             let url = a["url"].as_str().and_then(|u| Url::parse(u).ok());
             let id = active_id(win);
             // From a blank tab, a link (top site, history row) loads in place instead of piling up tabs.
-            let blank = shared(&APP).app.lock().unwrap().tabs.iter().any(|t| t.id == id && tabs::is_blank(&t.url()));
+            let blank = shared(&APP).lock_app().tabs.iter().any(|t| t.id == id && tabs::is_blank(&t.url()));
             match url {
                 Some(u) if blank => tabs::navigate(&APP, id, u, true),
                 u => {
@@ -139,7 +139,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
         }
         "set_layout" => {
             {
-                let mut g = shared(&APP).app.lock().unwrap();
+                let mut g = shared(&APP).lock_app();
                 let w = g.win(win);
                 w.sidebar = num(&a, "sidebar");
                 w.top = num(&a, "top");
@@ -227,7 +227,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
         }
         "search_suggest" => {
             let (on, template, private) = {
-                let mut g = shared(&APP).app.lock().unwrap();
+                let mut g = shared(&APP).lock_app();
                 let private = g.win(win).incognito;
                 (g.cfg.settings.search_suggestions, g.cfg.settings.search_template.clone(), private)
             };
@@ -247,8 +247,8 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
         }
         "delete_profile" => {
             let name = str_arg(&a, "name");
-            if !shared(&APP).app.lock().unwrap().tabs.iter().any(|t| t.profile == name) {
-                let dir = shared(&APP).app.lock().unwrap().cfg.profile(&name).map(|p| config::Config::data_dir(&shared(&APP).data_dir.join("cef"), p));
+            if !shared(&APP).lock_app().tabs.iter().any(|t| t.profile == name) {
+                let dir = shared(&APP).lock_app().cfg.profile(&name).map(|p| config::Config::data_dir(&shared(&APP).data_dir.join("cef"), p));
                 mutate_cfg(|c| {
                     if c.profiles.len() > 1 {
                         if let Some(d) = &dir {
@@ -386,7 +386,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             }
             if flag("cookies") || flag("cache") {
                 let only = a["profile"].as_str().filter(|p| !p.is_empty());
-                let profiles = s.app.lock().unwrap().cfg.profiles.clone();
+                let profiles = s.lock_app().cfg.profiles.clone();
                 for p in profiles.iter().filter(|p| only.is_none_or(|n| n == p.name)) {
                     let dir = config::Config::data_dir(&s.data_dir.join("cef"), p);
                     engine::clear_site_data(&format!("profile-{}", p.id), &dir, flag("cookies"), flag("cache"));
@@ -417,7 +417,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             ok(Value::Null)
         }
         "hide_palette" => {
-            shared(&APP).app.lock().unwrap().win(win).overlay_open = false;
+            shared(&APP).lock_app().win(win).overlay_open = false;
             engine::set_visible(&tabs::wv_label("palette", win), false);
             close_suggest(win);
             if let Some(l) = tabs::active_view(&APP, active_id(win)) {
@@ -512,7 +512,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
         "login_list" => ok(json!(shared(&APP).db.logins(None, None))),
         "login_remove" => {
             let (o, u, p) = (str_arg(&a, "origin"), str_arg(&a, "username"), str_arg(&a, "profile"));
-            let first = shared(&APP).app.lock().unwrap().cfg.profiles.first().is_some_and(|f| f.id == p);
+            let first = shared(&APP).lock_app().cfg.profiles.first().is_some_and(|f| f.id == p);
             passwords::delete(passwords::SERVICE, &p, &o, &u, first);
             shared(&APP).db.remove_login(&p, &o, &u);
             tabs::emit_state(&APP);
@@ -548,7 +548,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             ok(Value::Null)
         }
         "address_selection" => {
-            shared(&APP).app.lock().unwrap().win(win).address_sel = str_arg(&a, "text");
+            shared(&APP).lock_app().win(win).address_sel = str_arg(&a, "text");
             ok(Value::Null)
         }
         "page_link" => {
@@ -566,7 +566,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
 /// Menu position sent by the UI (`_x`, `_y` in window coordinates).
 fn at(a: &Value, win: &str) -> (i32, i32) {
     let (sidebar, top) = {
-        let mut g = shared(&APP).app.lock().unwrap();
+        let mut g = shared(&APP).lock_app();
         let w = g.win(win);
         (w.sidebar, w.top)
     };
@@ -579,7 +579,7 @@ fn overlay(label: &str, win: &str, view: &str, bounds: engine::Bounds) -> Spec {
 
 fn save_settings(settings: Settings) {
     let (lists_changed, blocking_changed, zoom_changed, dock_changed) = {
-        let g = shared(&APP).app.lock().unwrap();
+        let g = shared(&APP).lock_app();
         let old = &g.cfg.settings;
         (
             old.disabled_lists != settings.disabled_lists,
@@ -594,7 +594,7 @@ fn save_settings(settings: Settings) {
         tabs::apply_layout(&APP);
     }
     if zoom_changed {
-        let ids: Vec<u32> = shared(&APP).app.lock().unwrap().tabs.iter().filter(|t| t.zoom.is_none()).map(|t| t.id).collect();
+        let ids: Vec<u32> = shared(&APP).lock_app().tabs.iter().filter(|t| t.zoom.is_none()).map(|t| t.id).collect();
         for id in ids {
             if let Some(l) = tabs::active_view(&APP, id) {
                 engine::set_zoom(&l, zoom);
@@ -651,7 +651,7 @@ fn reveal_path(path: &str) {
 /// Where the palette sits: centred over the page area, a little below the top bar.
 fn palette_rect(win: &str) -> engine::Bounds {
     let (sidebar, top) = {
-        let mut g = shared(&APP).app.lock().unwrap();
+        let mut g = shared(&APP).lock_app();
         let w = g.win(win);
         (w.sidebar, w.top)
     };
@@ -662,7 +662,7 @@ fn palette_rect(win: &str) -> engine::Bounds {
 
 fn show_palette(ctx: &Ctx) {
     let win = ctx.win.as_str();
-    shared(&APP).app.lock().unwrap().win(win).overlay_open = true;
+    shared(&APP).lock_app().win(win).overlay_open = true;
     let label = tabs::wv_label("palette", win);
     let bounds = palette_rect(win);
     if engine::has_view(&label) {
@@ -755,7 +755,7 @@ fn suggest_show(ctx: &Ctx, a: &Value) {
 
 fn profile_menu(win: &str, pos: (i32, i32)) {
     let (names, cur) = {
-        let g = shared(&APP).app.lock().unwrap();
+        let g = shared(&APP).lock_app();
         let active = g.active(win);
         let cur = g.tabs.iter().find(|t| t.id == active).map(|t| t.profile.clone()).unwrap_or_default();
         (g.cfg.profiles.iter().map(|p| p.name.clone()).collect::<Vec<_>>(), cur)
@@ -766,7 +766,7 @@ fn profile_menu(win: &str, pos: (i32, i32)) {
 
 fn tab_menu(win: &str, id: u32, pos: (i32, i32)) {
     let (pinned, group, profile, can_map, is_site, groups, profiles) = {
-        let g = shared(&APP).app.lock().unwrap();
+        let g = shared(&APP).lock_app();
         let Some(t) = g.tabs.iter().find(|t| t.id == id) else { return };
         let url = t.url();
         let site = !tabs::is_blank(&url) && tabs::internal_view(&url).is_none() && Url::parse(&url).ok().is_some_and(|u| u.host_str().is_some());
@@ -820,7 +820,7 @@ pub fn page_context_action(_label: &str, id: i32) {
         }
     };
     let (win, profile, tpl) = {
-        let g = shared(&APP).app.lock().unwrap();
+        let g = shared(&APP).lock_app();
         let Some(t) = g.tabs.iter().find(|t| t.id == c.tab) else { return };
         (t.win.clone(), t.profile.clone(), g.cfg.settings.search_template.clone())
     };

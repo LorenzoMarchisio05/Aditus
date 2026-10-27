@@ -180,7 +180,7 @@ fn is_hijack(url: &str, source: &str, link: &str) -> bool {
 /// Settings or allowlist changed: reload the active tab so it is re-filtered.
 pub fn refresh(app: &AppHandle) {
     let (id, url) = {
-        let g = tabs::shared(app).app.lock().unwrap();
+        let g = tabs::shared(app).lock_app();
         let id = g.focused_active();
         (id, g.tabs.iter().find(|t| t.id == id).map(|t| t.url()).unwrap_or_default())
     };
@@ -201,7 +201,7 @@ fn covers(entry: &str, host: &str) -> bool {
 /// `host`'s allowlist entry was toggled: reload every awake tab (any window) it covers, so each is re-filtered.
 pub fn refresh_host(app: &AppHandle, toggled: &str) {
     let hit: Vec<(u32, String)> = {
-        let g = tabs::shared(app).app.lock().unwrap();
+        let g = tabs::shared(app).lock_app();
         g.tabs
             .iter()
             .filter(|t| !t.discarded && tabs::internal_view(&t.url()).is_none())
@@ -246,7 +246,7 @@ fn load_texts(dir: &PathBuf, disabled: &[String]) -> Vec<String> {
 }
 
 fn disabled_lists(app: &AppHandle) -> Vec<String> {
-    tabs::shared(app).app.lock().unwrap().cfg.settings.disabled_lists.clone()
+    tabs::shared(app).lock_app().cfg.settings.disabled_lists.clone()
 }
 
 /// Rebuild from the cached lists (or the fallback). Runs on a worker thread; the engine swap is atomic.

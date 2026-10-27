@@ -1,8 +1,15 @@
 //! Tab model and view lifecycle.
 //!
+//! Ownership: `App` (behind `Shared.app`) owns all serializable state: tabs, windows, config,
+//! history entries, prompts. `engine::REG` owns the live CEF handles (views, windows, contexts),
+//! UI thread only, addressed by the labels built here (`label`, `wv_label`). Neither side caches
+//! the other's facts: the engine only knows labels, and `engine::has_view` answers "is it alive".
+//!
 //! Everything runs on the CEF UI thread, so the state lock is only ever contended by the
 //! ad-block and IPC worker threads. Still, never hold `Shared.app` across an `engine` call: CEF
-//! calls back into our handlers synchronously, and those take the same lock.
+//! calls back into our handlers synchronously, and those take the same lock. Lock only through
+//! `Shared::lock_app`; every `engine` entry point reaches `reg`, which calls `assert_unlocked` and
+//! panics in debug builds if the calling thread still holds a guard.
 
 use crate::{
     config::{self, Config},
@@ -33,6 +40,52 @@ pub struct Shared {
     pub db: Db,
     pub cfg_path: PathBuf,
     pub data_dir: PathBuf,
+}
+
+impl Shared {
+    /// The only way to lock `app`. In debug builds the guard counts itself per thread so that
+    /// `assert_unlocked` (called by every engine entry point) panics if an engine call is made while
+    /// a guard is alive; release builds compile the counting away.
+    pub fn lock_app(&self) -> AppGuard<'_> {
+        let g = self.app.lock().unwrap();
+        #[cfg(debug_assertions)]
+        HELD.with(|h| h.set(h.get() + 1));
+        AppGuard(g)
+    }
+}
+
+#[cfg(debug_assertions)]
+thread_local! {
+    static HELD: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Panics (debug builds only) when this thread holds an `App` guard. Engine calls re-enter our handlers.
+#[track_caller]
+pub fn assert_unlocked() {
+    #[cfg(debug_assertions)]
+    HELD.with(|h| assert!(h.get() == 0, "engine call while the App lock is held"));
+}
+
+pub struct AppGuard<'a>(std::sync::MutexGuard<'a, App>);
+
+impl std::ops::Deref for AppGuard<'_> {
+    type Target = App;
+    fn deref(&self) -> &App {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for AppGuard<'_> {
+    fn deref_mut(&mut self) -> &mut App {
+        &mut self.0
+    }
+}
+
+#[cfg(debug_assertions)]
+impl Drop for AppGuard<'_> {
+    fn drop(&mut self) {
+        HELD.with(|h| h.set(h.get() - 1));
+    }
 }
 
 static SHARED: OnceLock<Shared> = OnceLock::new();
@@ -253,7 +306,7 @@ fn normalize(url: String) -> String {
 
 pub fn open_internal(app: &AppHandle, win: &str, view: &str) {
     let url = format!("aditus://{view}");
-    let existing = shared(app).app.lock().unwrap().tabs.iter().find(|t| t.win == win && t.url() == url).map(|t| t.id);
+    let existing = shared(app).lock_app().tabs.iter().find(|t| t.win == win && t.url() == url).map(|t| t.id);
     match existing {
         Some(id) => activate(app, id),
         None => {
@@ -351,7 +404,7 @@ fn emit(app: &AppHandle, save: bool) {
     let s = shared(app);
     // Prompts of tabs that have since closed would never be answered.
     let gone: Vec<u64> = {
-        let mut g = s.app.lock().unwrap();
+        let mut g = s.lock_app();
         let ids: Vec<u32> = g.tabs.iter().map(|t| t.id).collect();
         let gone = g.net_q.iter().filter(|p| !ids.contains(&p.tab)).map(|p| p.id).collect();
         g.net_q.retain(|p| ids.contains(&p.tab));
@@ -361,7 +414,7 @@ fn emit(app: &AppHandle, save: bool) {
         engine::net_answer(id, false, "", "");
     }
     let jsons: Vec<(String, String)> = {
-        let g = s.app.lock().unwrap();
+        let g = s.lock_app();
         crate::adblock::sync_cfg(g.cfg.settings.adblock, &g.cfg.allowlist);
         g.wins
             .iter()
@@ -435,7 +488,7 @@ fn emit(app: &AppHandle, save: bool) {
 
 fn save_cfg(app: &AppHandle) {
     let s = shared(app);
-    let g = s.app.lock().unwrap();
+    let g = s.lock_app();
     g.cfg.save(&s.cfg_path);
 }
 
@@ -444,7 +497,7 @@ fn save_cfg(app: &AppHandle) {
 /// The page area of window `win`: right of the sidebar, below the top bar.
 pub fn content_rect(app: &AppHandle, win: &str) -> Bounds {
     let (sidebar, top) = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let w = g.win(win);
         (w.sidebar, w.top)
     };
@@ -454,7 +507,7 @@ pub fn content_rect(app: &AppHandle, win: &str) -> Bounds {
 
 pub fn apply_layout(app: &AppHandle) {
     let wins: Vec<(String, Option<String>)> = {
-        let g = shared(app).app.lock().unwrap();
+        let g = shared(app).lock_app();
         g.wins.iter().map(|(name, w)| (name.clone(), g.tabs.iter().find(|t| t.id == w.active).map(|t| label(t.id, t.gen)))).collect()
     };
     for (win, tab) in wins {
@@ -475,7 +528,7 @@ pub fn apply_layout(app: &AppHandle) {
 /// Manual profile change for the active tab (no mapping change).
 pub fn switch_profile(app: &AppHandle, tab_id: u32, profile: &str) {
     let url = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         match g.tab(tab_id) {
             Some(t) if t.profile != profile => t.url(),
             _ => return,
@@ -483,7 +536,7 @@ pub fn switch_profile(app: &AppHandle, tab_id: u32, profile: &str) {
     };
     if is_blank(&url) {
         let (old, show) = {
-            let mut g = shared(app).app.lock().unwrap();
+            let mut g = shared(app).lock_app();
             let active = g.active(&g.win_of(tab_id));
             let Some(t) = g.tab(tab_id) else { return };
             let old = label(t.id, t.gen);
@@ -509,7 +562,7 @@ fn app_url(query: &str) -> String {
 fn build_webview(app: &AppHandle, tab_id: u32, show: bool) {
     let s = shared(app);
     let (gen, url, profile, win, private, zoom, adblock_on) = {
-        let mut g = s.app.lock().unwrap();
+        let mut g = s.lock_app();
         // The new view's native history is empty and its first load is the current entry.
         if let Some(t) = g.tab(tab_id) {
             t.hist.fresh_view();
@@ -553,7 +606,7 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) {
 pub fn on_view_ready(app: &AppHandle, label: &str) {
     let Some((id, gen)) = parse_label(label) else { return };
     let (zoom, muted) = {
-        let g = shared(app).app.lock().unwrap();
+        let g = shared(app).lock_app();
         (g.tabs.iter().find(|t| t.id == id && t.gen == gen).map(|t| t.zoom.unwrap_or(g.cfg.settings.page_zoom)), g.tabs.iter().any(|t| t.id == id && t.gen == gen && t.muted))
     };
     if muted {
@@ -580,7 +633,7 @@ pub fn on_navigation(app: &AppHandle, label: &str, u: &Url, user_gesture: bool, 
     let host = u.host_str().unwrap_or_default().to_string();
     let s = shared(app);
     let decision = {
-        let mut g = s.app.lock().unwrap();
+        let mut g = s.lock_app();
         // A redirect is not a new gesture, but it continues the click that started it.
         let recent = g.gestures.get(&tab_id).filter(|t| t.0.elapsed() < GESTURE_WINDOW).map(|t| t.1.clone());
         let user = user_gesture || recent.is_some();
@@ -611,7 +664,7 @@ pub fn on_navigation(app: &AppHandle, label: &str, u: &Url, user_gesture: bool, 
     match decision {
         Decision::Allow => true,
         Decision::Prompt(host) => {
-            s.app.lock().unwrap().prompt = Some(host);
+            s.lock_app().prompt = Some(host);
             emit_state(app);
             true
         }
@@ -628,7 +681,7 @@ pub fn on_navigation(app: &AppHandle, label: &str, u: &Url, user_gesture: bool, 
 pub fn on_permission(app: &AppHandle, label: &str, origin: &str, name: &str) -> bool {
     let Some((tab_id, _)) = parse_label(label) else { return false };
     let Some(host) = Url::parse(origin).ok().and_then(|u| u.host_str().map(String::from)) else { return false };
-    let mut g = shared(app).app.lock().unwrap();
+    let mut g = shared(app).lock_app();
     // Private tabs only see private answers, regular tabs only saved ones.
     let private = g.tab(tab_id).is_some_and(|t| t.private);
     let rules = if private { &g.perm_tmp } else { &g.cfg.permissions };
@@ -654,7 +707,7 @@ pub fn on_permission(app: &AppHandle, label: &str, origin: &str, name: &str) -> 
 pub fn on_net_prompt(app: &AppHandle, label: &str, cert: bool, host: &str, detail: &str) -> Net {
     let Some((tab_id, _)) = parse_label(label) else { return Net::Deny };
     let id = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let private = g.tabs.iter().find(|t| t.id == tab_id).is_some_and(|t| t.private);
         if cert && g.cert_ok.contains(&(host.to_string(), private)) {
             return Net::Allow;
@@ -671,7 +724,7 @@ pub fn on_net_prompt(app: &AppHandle, label: &str, cert: bool, host: &str, detai
 /// The card's answer. Proceeding past a certificate error is remembered for this session only.
 pub fn answer_net(app: &AppHandle, id: u64, allow: bool, user: &str, pass: &str) {
     {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let Some(i) = g.net_q.iter().position(|p| p.id == id) else { return };
         let p = g.net_q.remove(i);
         if p.cert && allow {
@@ -686,7 +739,7 @@ pub fn answer_net(app: &AppHandle, id: u64, allow: bool, user: &str, pass: &str)
 /// The sidebar card's answer. Private tabs keep it for the session only.
 pub fn answer_permission(app: &AppHandle, allow: bool) {
     let (rule, tab, private) = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         if g.perm_prompt.is_empty() {
             return;
         }
@@ -696,7 +749,7 @@ pub fn answer_permission(app: &AppHandle, allow: bool) {
     };
     {
         let s = shared(app);
-        let mut g = s.app.lock().unwrap();
+        let mut g = s.lock_app();
         if private {
             g.perm_tmp.push(rule);
         } else {
@@ -714,7 +767,7 @@ pub fn on_title(app: &AppHandle, label: &str, title: String) {
     let Some((id, gen)) = parse_label(label) else { return };
     let s = shared(app);
     let url = {
-        let mut g = s.app.lock().unwrap();
+        let mut g = s.lock_app();
         match g.tab(id) {
             Some(t) if t.gen == gen => {
                 if t.title == title {
@@ -743,7 +796,7 @@ fn error_target(url: &str) -> Option<String> {
 pub fn on_crash(app: &AppHandle, label: &str) {
     let Some((id, gen)) = parse_label(label) else { return };
     let url = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let Some(t) = g.tab(id).filter(|t| t.gen == gen && !t.discarded) else { return };
         t.url()
     };
@@ -766,7 +819,7 @@ pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool, fwd_bac
     let s = shared(app);
     let (mut visit, mut zoom, mut restore, mut reveal) = (None, None, None, None);
     {
-        let mut g = s.app.lock().unwrap();
+        let mut g = s.lock_app();
         let base = g.cfg.settings.page_zoom;
         let Some(t) = g.tab(tab_id) else { return };
         if t.gen != gen {
@@ -827,7 +880,7 @@ fn record_entry(t: &mut Tab, url: &str, load: bool) {
 fn reveal_swapped(app: &AppHandle, id: u32, gen: u32, old: String) {
     engine::close(&old);
     let (show, win) = {
-        let g = shared(app).app.lock().unwrap();
+        let g = shared(app).lock_app();
         let Some(t) = g.tabs.iter().find(|t| t.id == id && t.gen == gen) else { return };
         (g.active(&t.win) == id && !t.discarded, t.win.clone())
     };
@@ -840,7 +893,7 @@ fn reveal_swapped(app: &AppHandle, id: u32, gen: u32, old: String) {
 
 /// Safety net: if the new view never commits (blocked, hung), the swap completes anyway.
 fn finish_swap(app: &AppHandle, id: u32, gen: u32) {
-    let old = shared(app).app.lock().unwrap().tab(id).filter(|t| t.gen == gen).and_then(|t| t.retiring.take());
+    let old = shared(app).lock_app().tab(id).filter(|t| t.gen == gen).and_then(|t| t.retiring.take());
     if let Some(old) = old {
         reveal_swapped(app, id, gen, old);
     }
@@ -850,7 +903,7 @@ fn finish_swap(app: &AppHandle, id: u32, gen: u32) {
 /// The link the tab's last recent click landed on ("" when none), for `adblock::hijack`.
 pub fn clicked_link(app: &AppHandle, label: &str) -> String {
     let Some((id, _)) = parse_label(label) else { return String::new() };
-    let g = shared(app).app.lock().unwrap();
+    let g = shared(app).lock_app();
     g.gestures.get(&id).filter(|t| t.0.elapsed() < GESTURE_WINDOW).map(|t| t.1.clone()).unwrap_or_default()
 }
 
@@ -861,7 +914,7 @@ pub fn on_popup(app: &AppHandle, label: &str, url: &str) {
     }
     let opener = parse_label(label).map(|(id, _)| id);
     let (profile, win, front) = {
-        let g = shared(app).app.lock().unwrap();
+        let g = shared(app).lock_app();
         match opener.and_then(|id| g.tabs.iter().find(|t| t.id == id)) {
             Some(t) => (Some(t.profile.clone()), t.win.clone(), !g.cfg.settings.links_background),
             None => (None, g.focused.clone(), !g.cfg.settings.links_background),
@@ -873,12 +926,12 @@ pub fn on_popup(app: &AppHandle, label: &str, url: &str) {
 /// Back/forward availability of the tab behind `label`, for the page context menu.
 pub fn nav_state(app: &AppHandle, label: &str) -> (bool, bool) {
     let Some((id, _)) = parse_label(label) else { return (false, false) };
-    let g = shared(app).app.lock().unwrap();
+    let g = shared(app).lock_app();
     g.tabs.iter().find(|t| t.id == id).map_or((false, false), |t| (t.hist.can_back(), t.hist.can_forward()))
 }
 
 pub fn download_dir() -> Option<PathBuf> {
-    let g = shared(&AppHandle).app.lock().unwrap();
+    let g = shared(&AppHandle).lock_app();
     (!g.cfg.settings.download_dir.is_empty()).then(|| PathBuf::from(&g.cfg.settings.download_dir))
 }
 
@@ -892,7 +945,7 @@ fn download_fresh(last: Option<Instant>) -> bool {
 /// Our own UI starts a download in this view (Save Image As, Save Page): let it through.
 pub fn allow_download(app: &AppHandle, view_label: &str) {
     if let Some((id, _)) = parse_label(view_label) {
-        shared(app).app.lock().unwrap().dl_ok.insert(id, Instant::now());
+        shared(app).lock_app().dl_ok.insert(id, Instant::now());
     }
 }
 
@@ -901,7 +954,7 @@ pub fn allow_download(app: &AppHandle, view_label: &str) {
 pub fn download_allowed(app: &AppHandle, view_label: &str) -> bool {
     let Some((id, _)) = parse_label(view_label) else { return true };
     let ok = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let ok = download_fresh(g.dl_ok.get(&id).copied());
         if !ok {
             g.toast = Some(Toast { message: "Blocked an automatic download".into(), undo: false });
@@ -938,7 +991,7 @@ pub fn page_state(app: &AppHandle, view_label: &str, json: &str) {
     }
     // The URL comes from the engine, not the page.
     let Some(url) = engine::url_of(view_label).map(normalize) else { return };
-    if let Some(t) = shared(app).app.lock().unwrap().tab(id) {
+    if let Some(t) = shared(app).lock_app().tab(id) {
         if t.gen == gen && !t.discarded {
             t.snap = Some((url, json.to_string()));
         }
@@ -948,7 +1001,7 @@ pub fn page_state(app: &AppHandle, view_label: &str, json: &str) {
 /// Pointer rests on a sleeping tab: start loading it hidden so the click finds it (nearly) ready.
 pub fn prewake(app: &AppHandle, id: u32) {
     let go = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         g.tab(id).map_or(false, |t| {
             let wake = t.discarded;
             if wake {
@@ -969,7 +1022,7 @@ pub fn prewake(app: &AppHandle, id: u32) {
 /// Tells the window's UI where the pointer is over the active page (`x`, `y` as fractions of it), for the mascot.
 fn tell_pointer(app: &AppHandle, id: u32, json: &str) {
     let win = {
-        let g = shared(app).app.lock().unwrap();
+        let g = shared(app).lock_app();
         let win = g.win_of(id);
         if g.active(&win) != id {
             return;
@@ -992,7 +1045,7 @@ fn set_playing(t: &mut Tab, frame: &str, on: bool) -> bool {
 /// A subframe started a new load: whatever it was playing is gone.
 pub fn frame_reset(app: &AppHandle, view_label: &str, frame: &str) {
     let Some((id, _)) = parse_label(view_label) else { return };
-    let changed = shared(app).app.lock().unwrap().tab(id).is_some_and(|t| set_playing(t, frame, false));
+    let changed = shared(app).lock_app().tab(id).is_some_and(|t| set_playing(t, frame, false));
     if changed {
         emit_state(app);
     }
@@ -1003,7 +1056,7 @@ pub fn page_ping(app: &AppHandle, view_label: &str, frame: &str, kind: &str, hre
     let s = shared(app);
     match kind {
         "g" => {
-            let mut g = s.app.lock().unwrap();
+            let mut g = s.lock_app();
             g.gestures.insert(id, (Instant::now(), href.to_string()));
             g.dl_ok.insert(id, Instant::now());
             drop(g);
@@ -1013,7 +1066,7 @@ pub fn page_ping(app: &AppHandle, view_label: &str, frame: &str, kind: &str, hre
         "b" | "f" => go_history(app, id, if kind == "b" { -1 } else { 1 }),
         "p1" | "p0" => {
             let changed = {
-                let mut g = s.app.lock().unwrap();
+                let mut g = s.lock_app();
                 g.tab(id).is_some_and(|t| set_playing(t, frame, kind == "p1"))
             };
             if changed {
@@ -1024,7 +1077,7 @@ pub fn page_ping(app: &AppHandle, view_label: &str, frame: &str, kind: &str, hre
             // history.replaceState: the entry changed address, there is no new one.
             let Some(url) = engine::url_of(view_label) else { return };
             let changed = {
-                let mut g = s.app.lock().unwrap();
+                let mut g = s.lock_app();
                 g.tab(id).filter(|t| t.gen == gen).is_some_and(|t| {
                     let url = normalize(url);
                     let same = t.url() == url;
@@ -1041,7 +1094,7 @@ pub fn page_ping(app: &AppHandle, view_label: &str, frame: &str, kind: &str, hre
         "u" => {
             // SPA navigation: trust the engine's URL, not the page.
             let Some(url) = engine::url_of(view_label) else { return };
-            let mut g = s.app.lock().unwrap();
+            let mut g = s.lock_app();
             // Pages call replaceState constantly; only a real change is worth redrawing the UI.
             let before = g.tab(id).map(|t| t.url());
             if let Some(t) = g.tab(id) {
@@ -1063,7 +1116,7 @@ pub fn page_ping(app: &AppHandle, view_label: &str, frame: &str, kind: &str, hre
 pub fn page_link(app: &AppHandle, view_label: &str, url: &str) {
     let Some((id, gen)) = parse_label(view_label) else { return };
     let link = Url::parse(url).ok().filter(|u| matches!(u.scheme(), "http" | "https"));
-    if let Some(t) = shared(app).app.lock().unwrap().tab(id).filter(|t| t.gen == gen) {
+    if let Some(t) = shared(app).lock_app().tab(id).filter(|t| t.gen == gen) {
         t.link = link;
     }
 }
@@ -1071,7 +1124,7 @@ pub fn page_link(app: &AppHandle, view_label: &str, url: &str) {
 /// What a new tab or private window should open, and in which profile: the address bar's selected
 /// text (read as if Enter was pressed there), else the link selected in the active tab's page.
 pub fn selected_link(app: &AppHandle, win: &str, id: u32) -> Option<(Url, String)> {
-    let mut g = shared(app).app.lock().unwrap();
+    let mut g = shared(app).lock_app();
     let typed = g.win(win).address_sel.clone();
     let template = g.cfg.settings.search_template.clone();
     let t = g.tabs.iter().find(|t| t.id == id)?;
@@ -1083,7 +1136,7 @@ pub fn selected_link(app: &AppHandle, win: &str, id: u32) -> Option<(Url, String
 
 fn hide_all_except(app: &AppHandle, win: &str, keep: Option<(u32, u32)>) {
     let labels: Vec<String> = {
-        let g = shared(app).app.lock().unwrap();
+        let g = shared(app).lock_app();
         g.tabs.iter().filter(|t| t.win == win).flat_map(|t| [Some(label(t.id, t.gen)), t.retiring.clone()]).flatten().collect()
     };
     let keep = keep.map(|(i, g)| label(i, g));
@@ -1094,13 +1147,13 @@ fn hide_all_except(app: &AppHandle, win: &str, keep: Option<(u32, u32)>) {
 
 /// New tab in the window that last had focus.
 pub fn open_tab(app: &AppHandle, url: Option<Url>, profile: Option<String>, activate_it: bool) -> u32 {
-    let win = shared(app).app.lock().unwrap().focused.clone();
+    let win = shared(app).lock_app().focused.clone();
     open_tab_in(app, &win, url, profile, activate_it)
 }
 
 pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option<String>, activate_it: bool) -> u32 {
     let id = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         g.win(win);
         // No explicit profile: a mapped site opens in its profile, anything else in the default one.
         let mapped = url.as_ref().and_then(|u| u.host_str()).and_then(|h| nav::lookup(&g.cfg.mappings, h)).map(|m| m.profile.clone());
@@ -1149,7 +1202,7 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
 
 pub fn activate(app: &AppHandle, id: u32) {
     let (need_build, gen, win) = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let Some(win) = g.tabs.iter().find(|t| t.id == id).map(|t| t.win.clone()) else { return };
         g.win(&win).active = id;
         let Some(t) = g.tab(id) else { return };
@@ -1173,8 +1226,8 @@ pub fn activate(app: &AppHandle, id: u32) {
 }
 
 pub fn close_tab(app: &AppHandle, id: u32) {
-    let (lbl, next, win, left) = {
-        let mut g = shared(app).app.lock().unwrap();
+    let (lbl, next, win, left, retiring) = {
+        let mut g = shared(app).lock_app();
         let Some(pos) = g.tabs.iter().position(|t| t.id == id) else { return };
         let t = g.tabs.remove(pos);
         g.gestures.remove(&id);
@@ -1194,20 +1247,17 @@ pub fn close_tab(app: &AppHandle, id: u32) {
         } else {
             None
         };
-        if let Some(r) = &t.retiring {
-            engine::defer({
-                let r = r.clone();
-                move || engine::close(&r)
-            });
-        }
-        (label(t.id, t.gen), next, t.win.clone(), same.len())
+        (label(t.id, t.gen), next, t.win.clone(), same.len(), t.retiring.clone())
     };
+    if let Some(r) = retiring {
+        engine::defer(move || engine::close(&r));
+    }
     engine::close(&lbl);
     match next {
         Some(n) => activate(app, n),
         None if left == 0 => {
             // Last tab of a secondary window closes the window; the only window gets a blank tab.
-            let others = shared(app).app.lock().unwrap().wins.len() > 1;
+            let others = shared(app).lock_app().wins.len() > 1;
             if others && win != "main" {
                 engine::close_window(&win);
             } else {
@@ -1220,7 +1270,7 @@ pub fn close_tab(app: &AppHandle, id: u32) {
 
 /// Cmd/Ctrl+Shift+T: reopen the most recently closed tab in its profile.
 pub fn reopen_closed(app: &AppHandle) {
-    let last = shared(app).app.lock().unwrap().closed.pop();
+    let last = shared(app).lock_app().closed.pop();
     if let Some((url, profile)) = last {
         open_tab(app, Url::parse(&url).ok(), Some(profile), true);
     }
@@ -1234,7 +1284,7 @@ pub fn reopen_closed(app: &AppHandle) {
 /// request is replayed as a GET) and `window.opener`.
 pub fn swap(app: &AppHandle, tab_id: u32, profile: &str, url: &str, announce: bool) {
     let (old_label, is_active, drop_now, gen) = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let active = g.active(&g.win_of(tab_id));
         let Some(t) = g.tab(tab_id) else { return };
         if t.private {
@@ -1281,12 +1331,12 @@ pub fn swap(app: &AppHandle, tab_id: u32, profile: &str, url: &str, announce: bo
 
 pub fn undo_swap(app: &AppHandle) {
     let u = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         g.toast = None;
         g.undo.take()
     };
     if let Some(u) = u {
-        if let Some(t) = shared(app).app.lock().unwrap().tab(u.tab) {
+        if let Some(t) = shared(app).lock_app().tab(u.tab) {
             t.mode = Mode::Push;
         }
         swap(app, u.tab, &u.profile, &u.url, false);
@@ -1296,7 +1346,7 @@ pub fn undo_swap(app: &AppHandle) {
 
 pub fn dismiss_toast(app: &AppHandle) {
     {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         g.toast = None;
         g.undo = None;
     }
@@ -1307,7 +1357,7 @@ pub fn dismiss_toast(app: &AppHandle) {
 pub fn navigate(app: &AppHandle, tab_id: u32, url: Url, mode_push: bool) {
     let s = shared(app);
     let (decision, lbl, was_discarded, fresh_view) = {
-        let mut g = s.app.lock().unwrap();
+        let mut g = s.lock_app();
         let host = url.host_str().unwrap_or_default().to_string();
         let Some(t) = g.tabs.iter().find(|t| t.id == tab_id) else { return };
         let (profile, lbl, disc) = (t.profile.clone(), label(t.id, t.gen), t.discarded);
@@ -1329,12 +1379,12 @@ pub fn navigate(app: &AppHandle, tab_id: u32, url: Url, mode_push: bool) {
         Decision::Swap(p) => swap(app, tab_id, &p, url.as_str(), true),
         other => {
             if let Decision::Prompt(h) = other {
-                s.app.lock().unwrap().prompt = Some(h);
+                s.lock_app().prompt = Some(h);
             }
             if was_discarded {
                 // No view: seed the history entry, then recreate on activation.
                 {
-                    let mut g = s.app.lock().unwrap();
+                    let mut g = s.lock_app();
                     if let Some(t) = g.tab(tab_id) {
                         if mode_push {
                             let profile = t.profile.clone();
@@ -1360,7 +1410,7 @@ pub fn navigate(app: &AppHandle, tab_id: u32, url: Url, mode_push: bool) {
 /// or an error page in between.
 pub fn go_history(app: &AppHandle, tab_id: u32, delta: i32) {
     let (step, lbl, profile, cur_url) = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let Some(t) = g.tab(tab_id) else { return };
         let step = t.hist.step(delta, &t.profile);
         if step == Step::None {
@@ -1378,7 +1428,7 @@ pub fn go_history(app: &AppHandle, tab_id: u32, delta: i32) {
         Step::Native if engine::go(&lbl, delta) => return,
         Step::Native => {
             // No live view (sleeping tab) or the engine disagrees: load the target instead.
-            let mut g = shared(app).app.lock().unwrap();
+            let mut g = shared(app).lock_app();
             let Some(t) = g.tab(tab_id) else { return };
             t.hist.fresh_view();
             t.native_at = None;
@@ -1391,7 +1441,7 @@ pub fn go_history(app: &AppHandle, tab_id: u32, delta: i32) {
     let Ok(url) = Url::parse(&entry.url) else { return };
     // App pages (new tab, settings) and web pages need different views; so do profiles.
     let on_app_view = engine::url_of(&lbl).is_some_and(|u| u.starts_with(&format!("{}://", crate::app::SCHEME)));
-    let discarded = shared(app).app.lock().unwrap().tab(tab_id).is_some_and(|t| t.discarded);
+    let discarded = shared(app).lock_app().tab(tab_id).is_some_and(|t| t.discarded);
     let new_view = entry.profile != profile || (!discarded && (on_app_view || is_blank(&entry.url) || internal_view(&entry.url).is_some()));
     if new_view {
         swap(app, tab_id, &entry.profile, &entry.url, false);
@@ -1409,7 +1459,7 @@ pub fn open_urls<S: AsRef<str>>(app: &AppHandle, urls: impl IntoIterator<Item = 
     for u in urls {
         open_tab(app, Some(u), None, true);
     }
-    let win = shared(app).app.lock().unwrap().focused.clone();
+    let win = shared(app).lock_app().focused.clone();
     engine::raise_window(&win);
 }
 
@@ -1426,7 +1476,7 @@ pub fn open_external(url: &str) {
 /// Cmd/Ctrl +, -, 0: `step` is +1, -1, or 0 to reset. Remembered per tab so a rebuilt view keeps it.
 pub fn zoom(app: &AppHandle, tab_id: u32, step: i32) {
     let pct = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let base = g.cfg.settings.page_zoom;
         let Some(t) = g.tab(tab_id) else { return };
         let pct = if step == 0 { base } else { (t.zoom.unwrap_or(base) as i32 + step * 10).clamp(30, 300) as u32 };
@@ -1448,7 +1498,7 @@ pub fn active_url(app: &AppHandle, tab_id: u32) -> Option<String> {
 /// Star or unstar the page in a tab. Private windows keep no bookmarks.
 pub fn toggle_bookmark(app: &AppHandle, tab_id: u32) {
     let (url, title, profile) = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let Some(t) = g.tab(tab_id) else { return };
         if t.private {
             return;
@@ -1469,7 +1519,7 @@ pub fn toggle_bookmark(app: &AppHandle, tab_id: u32) {
 
 pub fn toggle_mute(app: &AppHandle, tab_id: u32) {
     let (lbl, muted) = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let Some(t) = g.tab(tab_id) else { return };
         t.muted = !t.muted;
         (label(t.id, t.gen), t.muted)
@@ -1492,11 +1542,11 @@ pub fn page_action(app: &AppHandle, tab_id: u32, act: &str) {
 
 pub fn label_private(app: &AppHandle, view_label: &str) -> bool {
     let Some((id, _)) = parse_label(view_label) else { return true };
-    shared(app).app.lock().unwrap().tabs.iter().find(|t| t.id == id).map_or(true, |t| t.private)
+    shared(app).lock_app().tabs.iter().find(|t| t.id == id).map_or(true, |t| t.private)
 }
 
 pub fn profile_of(app: &AppHandle, tab_id: u32) -> Option<(String, bool)> {
-    shared(app).app.lock().unwrap().profile_id(tab_id)
+    shared(app).lock_app().profile_id(tab_id)
 }
 
 /// Fill the active tab with its saved login; with several users saved for the origin, a menu at `pos` asks which.
@@ -1507,7 +1557,7 @@ pub fn fill_login(app: &AppHandle, tab_id: u32, pos: (i32, i32)) {
     let Some((pid, _)) = profile_of(app, tab_id) else { return };
     let mut users: Vec<String> = shared(app).db.logins(Some(&pid), Some(&origin)).into_iter().map(|l| l.1).collect();
     if users.len() > 1 {
-        let win = shared(app).app.lock().unwrap().tabs.iter().find(|t| t.id == tab_id).map(|t| t.win.clone()).unwrap_or_default();
+        let win = shared(app).lock_app().tabs.iter().find(|t| t.id == tab_id).map(|t| t.win.clone()).unwrap_or_default();
         let items =
             users.into_iter().map(|u| engine::Item::Entry { label: if u.is_empty() { "(no username)".into() } else { u.clone() }, id: format!("login:{u}"), enabled: true, checked: false }).collect();
         engine::popup(&win, items, pos);
@@ -1536,7 +1586,7 @@ pub fn reload(app: &AppHandle, tab_id: u32) {
 /// `pre` runs first in the page; it survives the reload only via storage.
 pub fn reload_with(app: &AppHandle, tab_id: u32, pre: &str) {
     let lbl = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let Some(t) = g.tab(tab_id) else { return };
         t.mode = Mode::Traverse;
         label(t.id, t.gen)
@@ -1546,7 +1596,7 @@ pub fn reload_with(app: &AppHandle, tab_id: u32, pre: &str) {
 
 pub fn address_bar(app: &AppHandle, tab_id: u32, input: &str) {
     let (template, internal, win) = {
-        let g = shared(app).app.lock().unwrap();
+        let g = shared(app).lock_app();
         (g.cfg.settings.search_template.clone(), g.tabs.iter().find(|t| t.id == tab_id).is_some_and(|t| internal_view(&t.url()).is_some()), g.win_of(tab_id))
     };
     if let Some(view) = internal_view(input.trim()).filter(|v| matches!(v.as_str(), "settings" | "history" | "downloads" | "bookmarks")) {
@@ -1554,7 +1604,7 @@ pub fn address_bar(app: &AppHandle, tab_id: u32, input: &str) {
     }
     // easter egg: ask the door nicely
     if input.trim().eq_ignore_ascii_case("open sesame") {
-        shared(app).app.lock().unwrap().toast = Some(Toast { message: "Aditus: the door was never locked.".into(), undo: false });
+        shared(app).lock_app().toast = Some(Toast { message: "Aditus: the door was never locked.".into(), undo: false });
         return emit(app, false);
     }
     let url = search::resolve(input, &template);
@@ -1573,7 +1623,7 @@ pub fn assign_mapping(app: &AppHandle, host: &str, profile: &str) {
         return;
     }
     let to_swap = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         g.prompt = None;
         g.cfg.mappings.retain(|m| m.pattern != host);
         g.cfg.mappings.push(nav::Mapping { pattern: host.into(), profile: profile.into() });
@@ -1590,7 +1640,7 @@ pub fn assign_mapping(app: &AppHandle, host: &str, profile: &str) {
 
 pub fn skip_prompt(app: &AppHandle) {
     {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         if let Some(h) = g.prompt.take() {
             g.skipped.insert(h);
         }
@@ -1601,7 +1651,7 @@ pub fn skip_prompt(app: &AppHandle) {
 /// Destroy views of tabs idle past the configured timeout.
 pub fn discard_idle(app: &AppHandle) {
     let victims: Vec<String> = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let limit = Duration::from_secs(g.cfg.settings.idle_minutes * 60);
         let actives: Vec<u32> = g.wins.values().map(|w| w.active).collect();
         g.tabs
@@ -1655,7 +1705,7 @@ fn apply_memory(app: &AppHandle, rows: &[(u32, u32, u64)]) -> u64 {
     }
     let mut changed = false;
     {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let mut users: HashMap<u32, u64> = HashMap::new();
         for p in g.tabs.iter().filter(|t| !t.discarded).filter_map(|t| t.pid) {
             *users.entry(p).or_default() += 1;
@@ -1678,7 +1728,7 @@ fn apply_memory(app: &AppHandle, rows: &[(u32, u32, u64)]) -> u64 {
 /// The renderer of a tab's main frame reported its process id (it changes when a navigation swaps processes).
 pub fn set_pid(app: &AppHandle, view_label: &str, pid: u32) {
     let Some((id, gen)) = parse_label(view_label) else { return };
-    if let Some(t) = shared(app).app.lock().unwrap().tab(id) {
+    if let Some(t) = shared(app).lock_app().tab(id) {
         if t.gen == gen {
             t.pid = Some(pid);
         }
@@ -1696,12 +1746,12 @@ fn sleep_for_memory(_app: &AppHandle) {
 
 fn sleep_for_memory_with(app: &AppHandle, rows: &[(u32, u32, u64)]) {
     let total = apply_memory(app, rows);
-    let limit = shared(app).app.lock().unwrap().cfg.settings.memory_limit_mb;
+    let limit = shared(app).lock_app().cfg.settings.memory_limit_mb;
     if limit == 0 || total <= limit {
         return;
     }
     let victim = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let actives: Vec<u32> = g.wins.values().map(|w| w.active).collect();
         g.tabs.iter_mut().filter(|t| !actives.contains(&t.id) && !t.pinned && !t.audible && !t.discarded).min_by_key(|t| t.last_active).map(|t| {
             t.discarded = true;
@@ -1718,7 +1768,7 @@ fn sleep_for_memory_with(app: &AppHandle, rows: &[(u32, u32, u64)]) {
 }
 
 pub fn with_tab(app: &AppHandle, id: u32, f: impl FnOnce(&mut Tab)) {
-    if let Some(t) = shared(app).app.lock().unwrap().tab(id) {
+    if let Some(t) = shared(app).lock_app().tab(id) {
         f(t);
     }
     emit_state(app);
@@ -1726,7 +1776,7 @@ pub fn with_tab(app: &AppHandle, id: u32, f: impl FnOnce(&mut Tab)) {
 
 pub fn reorder(app: &AppHandle, id: u32, to: usize) {
     {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let Some(from) = g.tabs.iter().position(|t| t.id == id) else { return };
         let win = g.tabs[from].win.clone();
         let t = g.tabs.remove(from);
@@ -1743,7 +1793,7 @@ pub fn reorder(app: &AppHandle, id: u32, to: usize) {
 
 pub fn cycle(app: &AppHandle, delta: i32) {
     let next = {
-        let g = shared(app).app.lock().unwrap();
+        let g = shared(app).lock_app();
         let ids: Vec<u32> = g.tabs.iter().filter(|t| t.win == g.focused).map(|t| t.id).collect();
         let Some(pos) = ids.iter().position(|&i| i == g.focused_active()) else { return };
         ids[((pos as i32 + delta).rem_euclid(ids.len() as i32)) as usize]
@@ -1754,7 +1804,7 @@ pub fn cycle(app: &AppHandle, delta: i32) {
 /// Cmd/Ctrl+1..9: the n-th tab of the focused window (1-based); 9 is always the last one.
 pub fn select(app: &AppHandle, n: usize) {
     let id = {
-        let g = shared(app).app.lock().unwrap();
+        let g = shared(app).lock_app();
         let ids: Vec<u32> = g.tabs.iter().filter(|t| t.win == g.focused).map(|t| t.id).collect();
         if n >= 9 {
             ids.last().copied()
@@ -1770,7 +1820,7 @@ pub fn select(app: &AppHandle, n: usize) {
 /// Label of the tab's live view, if it has one.
 pub fn active_view(app: &AppHandle, id: u32) -> Option<String> {
     let l = {
-        let g = shared(app).app.lock().unwrap();
+        let g = shared(app).lock_app();
         let t = g.tabs.iter().find(|t| t.id == id)?;
         label(t.id, t.gen)
     };
@@ -1780,27 +1830,27 @@ pub fn active_view(app: &AppHandle, id: u32) -> Option<String> {
 // ---------- windows ----------
 
 pub fn create_window(app: &AppHandle, label: &str, private: bool) -> bool {
-    shared(app).app.lock().unwrap().win(label);
+    shared(app).lock_app().win(label);
     engine::create_window(label, private)
 }
 
 /// New window with one blank tab; it takes focus.
 pub fn new_window(app: &AppHandle, incognito: bool, url: Option<Url>) {
     let label = {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         let n = g.next_win;
         g.next_win += 1;
         format!("w{n}")
     };
     {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         g.win(&label).incognito = incognito;
     }
     if !create_window(app, &label, incognito) {
-        shared(app).app.lock().unwrap().wins.remove(&label);
+        shared(app).lock_app().wins.remove(&label);
         return eprintln!("new window failed");
     }
-    shared(app).app.lock().unwrap().focused = label.clone();
+    shared(app).lock_app().focused = label.clone();
     if incognito {
         engine::set_title(&label, "Aditus (Private)");
     }
@@ -1808,7 +1858,7 @@ pub fn new_window(app: &AppHandle, incognito: bool, url: Option<Url>) {
 }
 
 pub fn set_focused(app: &AppHandle, win: &str) {
-    let mut g = shared(app).app.lock().unwrap();
+    let mut g = shared(app).lock_app();
     if g.wins.contains_key(win) {
         g.focused = win.to_string();
     }
@@ -1817,7 +1867,7 @@ pub fn set_focused(app: &AppHandle, win: &str) {
 /// A window went away: drop its tabs (remembered for "reopen closed tab") and its state.
 pub fn window_closed(app: &AppHandle, label: &str) {
     {
-        let mut g = shared(app).app.lock().unwrap();
+        let mut g = shared(app).lock_app();
         if g.wins.len() <= 1 {
             return; // last window: the app is quitting, keep the saved session intact
         }
@@ -1879,7 +1929,7 @@ pub fn clear_session(app: &AppHandle) {
 
 pub fn save_session(app: &AppHandle) {
     let session = {
-        let g = shared(app).app.lock().unwrap();
+        let g = shared(app).lock_app();
         Session {
             tabs: g
                 .tabs
@@ -1910,7 +1960,7 @@ pub fn save_session(app: &AppHandle) {
 pub fn restore_session(app: &AppHandle) {
     let session: Session = std::fs::read_to_string(session_path(app)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     let (startup, home) = {
-        let g = shared(app).app.lock().unwrap();
+        let g = shared(app).lock_app();
         (g.cfg.settings.startup.clone(), g.cfg.settings.home_url.clone())
     };
     if startup != "restore" || session.tabs.is_empty() {
@@ -1918,14 +1968,14 @@ pub fn restore_session(app: &AppHandle) {
         open_tab_in(app, "main", url, None, true);
         return;
     }
-    let profiles: Vec<String> = shared(app).app.lock().unwrap().cfg.profiles.iter().map(|p| p.name.clone()).collect();
+    let profiles: Vec<String> = shared(app).lock_app().cfg.profiles.iter().map(|p| p.name.clone()).collect();
     let mut to_activate: HashMap<String, u32> = HashMap::new();
     let mut first_of: HashMap<String, u32> = HashMap::new();
     let mut made: HashSet<String> = HashSet::from(["main".to_string()]);
     for s in session.tabs {
         if !made.contains(&s.win) {
             if let Some(n) = s.win.strip_prefix('w').and_then(|n| n.parse::<u32>().ok()) {
-                let mut g = shared(app).app.lock().unwrap();
+                let mut g = shared(app).lock_app();
                 g.next_win = g.next_win.max(n + 1);
             }
             if !create_window(app, &s.win, false) {
@@ -1934,7 +1984,7 @@ pub fn restore_session(app: &AppHandle) {
             made.insert(s.win.clone());
         }
         let profile = {
-            let g = shared(app).app.lock().unwrap();
+            let g = shared(app).lock_app();
             if g.cfg.profile(&s.profile).is_some() {
                 s.profile
             } else {
@@ -1969,14 +2019,14 @@ pub fn startup(app: &AppHandle) {
     crate::adblock::init(s.data_dir.join("filters"));
     crate::extensions::init_updates();
     {
-        let days = s.app.lock().unwrap().cfg.settings.history_days;
+        let days = s.lock_app().cfg.settings.history_days;
         if days > 0 {
             s.db.prune_history(days);
         }
     }
     restore_session(app);
     if crate::config::BACKED_UP.load(std::sync::atomic::Ordering::Relaxed) {
-        s.app.lock().unwrap().toast = Some(Toast { message: "config.toml was invalid; saved as config.toml.bak".into(), undo: false });
+        s.lock_app().toast = Some(Toast { message: "config.toml was invalid; saved as config.toml.bak".into(), undo: false });
     }
     open_urls(app, std::env::args().skip(1));
     crate::drain_open_queue();
@@ -2027,6 +2077,19 @@ mod tests {
         assert!(!download_fresh(None));
         assert!(download_fresh(Some(Instant::now())));
         assert!(!download_fresh(Instant::now().checked_sub(DOWNLOAD_WINDOW + Duration::from_secs(1))));
+    }
+
+    #[test]
+    fn guard_blocks_engine_calls_until_dropped() {
+        let s = Shared { app: Mutex::new(App::new(Config::default())), db: Db::open(std::path::Path::new(":memory:")).unwrap(), cfg_path: PathBuf::new(), data_dir: PathBuf::new() };
+        assert_unlocked();
+        let g = s.lock_app();
+        assert_eq!(g.focused, "main");
+        assert!(std::panic::catch_unwind(assert_unlocked).is_err());
+        drop(g);
+        assert_unlocked();
+        s.lock_app().focused = "w2".into();
+        assert_unlocked();
     }
 
     #[test]

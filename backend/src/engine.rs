@@ -1,6 +1,10 @@
 //! Windows, browser views and request contexts on top of CEF's Views framework.
 //!
 //! Everything here runs on the CEF UI thread (the macOS main thread); the registry is thread-local.
+//! `REG` owns the live CEF handles (views, windows, request contexts) and nothing serializable; all
+//! tab and config state lives in `tabs::App`. The one deliberate mirror is `PAGES` (labels of web-page
+//! views): the resource handler runs on IO threads where the thread-local `REG` is empty, so that
+//! one fact needs a global. It is written only where views are created, closed or become ready.
 //! Views are addressed by label (`ui`, `tab-3-0`, `palette-w2`, ...). Never hold the registry
 //! borrow across a CEF call: CEF calls back into our handlers synchronously, and those use it too.
 
@@ -101,6 +105,7 @@ fn set_page(label: &str, on: bool) {
 }
 
 fn reg<R>(f: impl FnOnce(&mut Reg) -> R) -> R {
+    tabs::assert_unlocked();
     REG.with(|r| f(&mut r.borrow_mut()))
 }
 
@@ -411,7 +416,7 @@ pub fn place_window_buttons(win: &str) {
     {
         let Some(h) = host(&tabs::wv_label("ui", win)) else { return };
         let (collapsed, w) = {
-            let g = tabs::shared(&tabs::AppHandle).app.lock().unwrap();
+            let g = tabs::shared(&tabs::AppHandle).lock_app();
             (g.cfg.settings.sidebar_collapsed, g.wins.get(win).map_or(250.0, |w| w.sidebar))
         };
         let p = h.window_handle() as usize;
@@ -631,7 +636,7 @@ fn dock_devtools(label: &str, popup: BrowserView) {
 }
 
 fn dock_mode() -> String {
-    tabs::shared(&tabs::AppHandle).app.lock().unwrap().cfg.settings.devtools_dock.clone()
+    tabs::shared(&tabs::AppHandle).lock_app().cfg.settings.devtools_dock.clone()
 }
 
 /// Called by the layout for the page showing in `win`: places its DevTools under it and returns the page's shorter area.
