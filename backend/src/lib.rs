@@ -11,6 +11,7 @@ pub mod menu;
 pub mod passwords;
 pub mod nav;
 pub mod scheme;
+pub mod scriptlets;
 pub mod scripts;
 pub mod search;
 pub mod tabs;

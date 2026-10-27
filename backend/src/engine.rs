@@ -133,6 +133,34 @@ fn frame(label: &str) -> Option<Frame> {
     view(label)?.browser()?.main_frame()
 }
 
+/// Hand the renderer the scriptlets for `url` (applied in `app.rs`). Sent at navigation start so the renderer
+/// has them when the document's context is created; `late` is the page script's own request, which also
+/// covers a navigation whose message lost the race (renderer swap, redirect). Empty early messages clear
+/// anything stale for the URL.
+fn send_scriptlets(frame: &Frame, url: &str, late: bool) {
+    let url = url.split('#').next().unwrap_or_default();
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return;
+    }
+    let script = crate::adblock::scriptlets(url);
+    if late && script.is_empty() {
+        return;
+    }
+    let Some(mut m) = process_message_create(Some(&CefString::from("aditus-scriptlets"))) else { return };
+    if let Some(a) = m.argument_list() {
+        a.set_string(0, Some(&CefString::from(url)));
+        a.set_string(1, Some(&CefString::from(script.as_str())));
+        a.set_bool(2, late as i32);
+    }
+    frame.send_process_message(ProcessId::from(sys::cef_process_id_t::PID_RENDERER), Some(&mut m));
+}
+
+pub fn send_scriptlets_late(label: &str, url: &str) {
+    if let Some(f) = frame(label) {
+        send_scriptlets(&f, url, true);
+    }
+}
+
 fn host(label: &str) -> Option<BrowserHost> {
     view(label)?.browser()?.host()
 }
@@ -1045,6 +1073,11 @@ wrap_request_handler! {
                     if !tabs::on_navigation(&tabs::AppHandle, &self.label, &u, user_gesture != 0, is_redirect != 0) {
                         return 1;
                     }
+                }
+            }
+            if kind == Kind::Page {
+                if let Some(f) = frame.as_ref() {
+                    send_scriptlets(f, &url, false);
                 }
             }
             ipc::router().on_before_browse(browser.cloned(), frame.cloned());
