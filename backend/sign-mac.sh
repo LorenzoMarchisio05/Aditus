@@ -7,10 +7,12 @@ set -e
 cd "$(dirname "$0")"
 APP=target/bundle/Aditus.app
 S="codesign --force --options runtime --timestamp --sign $SIGN_IDENTITY"
-# Inside out: framework, helpers, then the app.
+# Inside out: framework, helpers, then the app. Follows CEF's cefclient layout: only the helper processes (renderer, GPU:
+# V8 JIT) get entitlements.plist; the framework and the main app get none. disable-library-validation is dropped because
+# everything is signed with one identity; if a signed build fails to launch, add it to the helpers first.
 $S "$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
 for h in "$APP"/Contents/Frameworks/aditus\ Helper*.app; do $S --entitlements entitlements.plist "$h"; done
-$S --entitlements entitlements.plist "$APP"
+$S "$APP"
 codesign --verify --deep --strict "$APP"
 if [ -n "$NOTARY_PROFILE" ] || [ -n "$NOTARY_KEY" ]; then
   ditto -c -k --keepParent "$APP" target/bundle/notarize.zip

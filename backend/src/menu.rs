@@ -52,7 +52,7 @@ pub fn picked(id: &str) {
                 tabs::open_tab_in(&APP, &win, Some(u), None, true);
             }
         }
-        "fill-login" => tabs::fill_login(&APP, cur, None),
+        "fill-login" => tabs::fill_login(&APP, cur, (200, 100)),
         "bookmark" => tabs::toggle_bookmark(&APP, cur),
         "fullscreen" => engine::toggle_fullscreen(&win),
         "minimize" => engine::minimize(&win),
@@ -61,6 +61,7 @@ pub fn picked(id: &str) {
         "quit" => engine::quit(),
         "help-site" => tabs::open_external("https://github.com/LorenzoMarchisio05/Aditus"),
         "help-issue" => tabs::open_external("https://github.com/LorenzoMarchisio05/Aditus/issues/new"),
+        other if other.starts_with("login:") => tabs::fill_login_as(&APP, cur, &other[6..]),
         other if other.starts_with("select-tab:") => tabs::select(&APP, other[11..].parse().unwrap_or(1)),
         other => to_ui(other),
     }

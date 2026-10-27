@@ -66,13 +66,35 @@ pub(crate) fn data_dir() -> PathBuf {
     base.unwrap_or_else(|| PathBuf::from(".")).join("dev.aditus.browser")
 }
 
+/// Cookie and cache stores inside each profile's folder (`<cef>/p-<id>/`).
+const CLEARABLE: &[&str] = &["Cookies", "Cookies-journal", "Network", "Cache", "Code Cache", "GPUCache"];
+
+/// "Clear history on quit" also forgets cookies and cache. CEF's own clear APIs are async and need the loop that has
+/// just ended, and a running CEF owns its files, so quit leaves `.clear-on-start` and the next start (before CEF
+/// opens anything) removes them. Downloaded files are never touched.
+fn clear_marked_data(dir: &std::path::Path) {
+    if std::fs::remove_file(dir.join(".clear-on-start")).is_err() {
+        return;
+    }
+    for p in std::fs::read_dir(dir.join("cef")).into_iter().flatten().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("p-")) {
+        for name in CLEARABLE {
+            let path = p.path().join(name);
+            let _ = std::fs::remove_dir_all(&path).or_else(|_| std::fs::remove_file(&path));
+        }
+    }
+}
+
 fn load_state() -> Result<PathBuf, String> {
     let dir = data_dir();
     std::fs::create_dir_all(dir.join("cef")).map_err(|e| e.to_string())?;
+    clear_marked_data(&dir);
     let cfg_path = dir.join("config.toml");
     let cfg = config::Config::load(&cfg_path);
     cfg.save(&cfg_path);
     let db = db::Db::open(&dir.join("aditus.db")).map_err(|e| e.to_string())?;
+    if let Some(p) = cfg.profiles.first() {
+        db.claim_legacy_logins(&p.id);
+    }
     adblock::sync_cfg(cfg.settings.adblock, &cfg.allowlist);
     tabs::init_shared(tabs::Shared { app: Mutex::new(tabs::App::new(cfg)), db, cfg_path, data_dir: dir.clone() });
     Ok(dir)
@@ -149,6 +171,27 @@ pub fn run_browser() -> Result<(), String> {
     if s.app.lock().unwrap().cfg.settings.clear_history_on_quit {
         s.db.clear_history();
         tabs::clear_session(&tabs::AppHandle);
+        s.db.clear_downloads();
+        let _ = std::fs::write(s.data_dir.join(".clear-on-start"), "");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn clears_only_marked_profile_stores() {
+        let d = std::env::temp_dir().join(format!("aditus-clear-{}", std::process::id()));
+        let p = d.join("cef/p-1");
+        std::fs::create_dir_all(p.join("Cache")).unwrap();
+        std::fs::create_dir_all(p.join("Local Storage")).unwrap();
+        std::fs::write(p.join("Cookies"), "x").unwrap();
+        super::clear_marked_data(&d); // no marker: nothing happens
+        assert!(p.join("Cookies").exists());
+        std::fs::write(d.join(".clear-on-start"), "").unwrap();
+        super::clear_marked_data(&d);
+        assert!(!p.join("Cookies").exists() && !p.join("Cache").exists() && !d.join(".clear-on-start").exists());
+        assert!(p.join("Local Storage").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

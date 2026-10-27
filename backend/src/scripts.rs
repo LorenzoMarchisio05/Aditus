@@ -7,17 +7,20 @@ const q=window.cefQuery;if(!q)return;
 // Keep the only reference in this closure: page code can't call cefQuery to forge gesture/back/forward pings
 // (events are checked with isTrusted below), and the globals stop being a fingerprint.
 try{delete window.cefQuery;delete window.cefQueryCancel}catch(e){}
-const send=(cmd,args)=>new Promise((ok,no)=>{try{q({request:JSON.stringify({cmd,args}),onSuccess:ok,onFailure:(c,m)=>no(m)})}catch(e){no(e)}});
+// Builtins captured now, before page code runs (we are injected at context creation), so a page that later patches
+// them can't read or forge our pings. Limit: code that ran before us (extensions, earlier inline patches) is out of reach.
+const stringify=JSON.stringify,parse=JSON.parse,P=Promise,now=Date.now,st=setTimeout,ct=clearTimeout,si=setInterval;
+const send=(cmd,args)=>new P((ok,no)=>{try{q({request:stringify({cmd,args}),onSuccess:ok,onFailure:(c,m)=>no(m)})}catch(e){no(e)}});
 const ping=(k,href)=>{send('page_ping',{kind:k,href:href||''}).catch(()=>{})};
 // Real clicks only (an ad's synthetic a.click() is untrusted), with the link they landed on: popups and
 // navigations that follow may go there and nowhere else (see adblock::hijack).
 const lk=e=>{const a=e.composedPath().find(n=>n instanceof HTMLAnchorElement&&/^https?:/.test(n.href)&&!(n.hash&&n.href.split('#')[0]===location.href.split('#')[0]));return a?a.href:''};
 for(const t of ['click','auxclick'])addEventListener(t,e=>{if(e.isTrusted)ping('g',lk(e))},true);
-if(window===top){let lm=0;addEventListener('pointermove',e=>{const n=Date.now();if(n-lm<120)return;lm=n;send('page_ping',{kind:'m',x:e.clientX/innerWidth,y:e.clientY/innerHeight}).catch(()=>{})},true)}
+if(window===top){let lm=0;addEventListener('pointermove',e=>{const n=now();if(n-lm<120)return;lm=n;send('page_ping',{kind:'m',x:e.clientX/innerWidth,y:e.clientY/innerHeight}).catch(()=>{})},true)}
 addEventListener('keydown',e=>{if(e.key==='Enter'&&e.isTrusted)ping('g',lk(e))},true);
 // Two-finger horizontal swipe = back/forward, unless something under the pointer can scroll sideways.
 if(window===top){let acc=0,until=0,rs;const sx=(e,d)=>{for(let n=e.target;n&&n.nodeType===1;n=n.parentElement){const o=getComputedStyle(n).overflowX;if((o==='auto'||o==='scroll')&&(d<0?n.scrollLeft>0:n.scrollLeft+n.clientWidth<n.scrollWidth-1))return 1}};
-addEventListener('wheel',e=>{const n=Date.now();if(!e.isTrusted||n<until||Math.abs(e.deltaX)<Math.abs(e.deltaY)*2||sx(e,e.deltaX))return;acc+=e.deltaX;clearTimeout(rs);rs=setTimeout(()=>acc=0,150);if(Math.abs(acc)>=150){ping(acc<0?'b':'f');acc=0;until=n+800}},{passive:true})}
+addEventListener('wheel',e=>{const n=now();if(!e.isTrusted||n<until||Math.abs(e.deltaX)<Math.abs(e.deltaY)*2||sx(e,e.deltaX))return;acc+=e.deltaX;ct(rs);rs=st(()=>acc=0,150);if(Math.abs(acc)>=150){ping(acc<0?'b':'f');acc=0;until=n+800}},{passive:true})}
 addEventListener('submit',e=>{if(e.isTrusted)ping('g',e.target.action);try{const f=e.target,p=f.querySelector&&f.querySelector('input[type=password]');if(p&&p.value){const all=[...f.querySelectorAll('input')],u=all.slice(0,all.indexOf(p)).reverse().find(x=>/^(text|email|tel|)$/.test(x.type)&&x.value);send('page_login',{u:u?u.value:'',p:p.value}).catch(()=>{})}}catch(_){}},true);
 for(const m of ['pushState','replaceState']){const o=history[m];history[m]=function(){const r=o.apply(this,arguments);ping('u');return r}}
 addEventListener('popstate',()=>ping('u'));addEventListener('hashchange',()=>ping('u'));
@@ -25,20 +28,20 @@ addEventListener('popstate',()=>ping('u'));addEventListener('hashchange',()=>pin
 {const pl=new Set();let pa=false;const pu=e=>{const m=e.target;if(!(m instanceof HTMLMediaElement))return;pl[m.paused||m.ended||m.muted||!m.volume?'delete':'add'](m);const a=pl.size>0;if(a!==pa){pa=a;ping(a?'p1':'p0')}};
 for(const ev of ['playing','pause','ended','volumechange','emptied'])addEventListener(ev,pu,true)}
 if(window.top===window){let t,last='';
-const snap=()=>{try{const f=[];document.querySelectorAll('input,textarea,select').forEach((e,i)=>{const ty=(e.type||'').toLowerCase();if(['password','hidden','file','submit','button','image','reset'].includes(ty)||/^cc-/.test(e.autocomplete))return;const v=ty==='checkbox'||ty==='radio'?e.checked:e.value;if(v===''||v===false||v==null||(typeof v==='string'&&v.length>5000))return;f.push([i,v])});const m=[];document.querySelectorAll('video,audio').forEach((e,i)=>{if(e.currentTime>1)m.push([i,e.currentTime])});const s=JSON.stringify({x:scrollX,y:scrollY,f:f.slice(0,100),m:m.slice(0,4)});if(s!==last&&s.length<60000){last=s;send('page_state',{s}).catch(()=>{})}}catch(e){}};
-const lazy=()=>{clearTimeout(t);t=setTimeout(snap,1000)};
+const snap=()=>{try{const f=[];document.querySelectorAll('input,textarea,select').forEach((e,i)=>{const ty=(e.type||'').toLowerCase();if(['password','hidden','file','submit','button','image','reset'].includes(ty)||/^cc-/.test(e.autocomplete))return;const v=ty==='checkbox'||ty==='radio'?e.checked:e.value;if(v===''||v===false||v==null||(typeof v==='string'&&v.length>5000))return;f.push([i,v])});const m=[];document.querySelectorAll('video,audio').forEach((e,i)=>{if(e.currentTime>1)m.push([i,e.currentTime])});const s=stringify({x:scrollX,y:scrollY,f:f.slice(0,100),m:m.slice(0,4)});if(s!==last&&s.length<60000){last=s;send('page_state',{s}).catch(()=>{})}}catch(e){}};
+const lazy=()=>{ct(t);t=st(snap,1000)};
 addEventListener('scroll',lazy,{passive:true,capture:true});for(const ev of ['input','change','pause','seeked'])addEventListener(ev,lazy,true);
-addEventListener('visibilitychange',()=>{if(document.hidden)snap()});setInterval(()=>{if(!document.hidden)snap()},5000)}
+addEventListener('visibilitychange',()=>{if(document.hidden)snap()});si(()=>{if(!document.hidden)snap()},5000)}
 if(window===top){let ll='';const el=n=>n&&(n.nodeType===1?n:n.parentElement);
 document.addEventListener('selectionchange',()=>{let u='';try{const s=getSelection();if(s&&!s.isCollapsed){const a=[s.anchorNode,s.focusNode].map(n=>el(n)&&el(n).closest('a[href]')).find(Boolean),all=a?[]:s.getRangeAt(0).cloneContents().querySelectorAll('a[href]'),t=s.toString().trim();u=a?a.href:all.length===1?all[0].href:/^https?:\/\/\S+$/i.test(t)?t:/^www\.\S+\.\S+$/i.test(t)?'https://'+t:''}}catch(e){}if(u!==ll){ll=u;send('page_link',{u}).catch(()=>{})}})}
-if(window.top===window){const css=r=>{r=r&&JSON.parse(r);if(!r)return;const s=document.createElement('style');s.textContent=r;(document.head||document.documentElement).appendChild(s)};
+if(window.top===window){const css=r=>{r=r&&parse(r);if(!r)return;const s=document.createElement('style');s.textContent=r;(document.head||document.documentElement).appendChild(s)};
 send('cosmetic_css',{}).then(css).catch(()=>{});
 // Generic ##.class / ###id rules: report each class and id once, batched, and get the matching selectors back.
 const C=new Set,I=new Set;let nc=[],ni=[],gt=0;
 const seen=n=>{if(n.nodeType!==1)return;if(n.id&&!I.has(n.id)){I.add(n.id);ni.push(n.id)}if(n.classList)for(const c of n.classList)if(!C.has(c)){C.add(c);nc.push(c)}};
 const scan=n=>{seen(n);if(n.querySelectorAll)n.querySelectorAll('[class],[id]').forEach(seen)};
-const flush=()=>{gt=0;if(!nc.length&&!ni.length)return;const c=nc.slice(0,2000),i=ni.slice(0,2000);nc=nc.slice(2000);ni=ni.slice(2000);send('cosmetic_generic',{c,i}).then(css).catch(()=>{});if(nc.length||ni.length)gt=setTimeout(flush,500)};
-const sched=()=>{if(!gt)gt=setTimeout(flush,300)};
+const flush=()=>{gt=0;if(!nc.length&&!ni.length)return;const c=nc.slice(0,2000),i=ni.slice(0,2000);nc=nc.slice(2000);ni=ni.slice(2000);send('cosmetic_generic',{c,i}).then(css).catch(()=>{});if(nc.length||ni.length)gt=st(flush,500)};
+const sched=()=>{if(!gt)gt=st(flush,300)};
 const go=()=>{try{scan(document.documentElement);sched();new MutationObserver(m=>{for(const r of m){if(r.type==='attributes')seen(r.target);else r.addedNodes.forEach(scan)}if(nc.length||ni.length)sched()}).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['class','id']})}catch(e){}};
 document.readyState==='loading'?addEventListener('DOMContentLoaded',go):go()}
 })();"#;

@@ -61,6 +61,38 @@ fn fields(b: &[u8]) -> Option<Vec<(u64, &[u8])>> {
     Some(out)
 }
 
+/// One DER element at the start of `b`: (tag, content, rest).
+fn der(b: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let (&tag, b) = b.split_first()?;
+    let (&l, b) = b.split_first()?;
+    let (len, b) = if l < 0x80 {
+        (l as usize, b)
+    } else {
+        let n = (l & 0x7f) as usize;
+        let bytes = b.get(..n).filter(|_| n <= 4)?;
+        (bytes.iter().fold(0usize, |a, &x| a << 8 | x as usize), &b[n..])
+    };
+    Some((tag, b.get(..len)?, &b[len..]))
+}
+
+/// The raw key inside a SubjectPublicKeyInfo (PKCS#1 RSAPublicKey, or the EC point), which is what ring takes.
+fn spki_bits(spki: &[u8]) -> Option<&[u8]> {
+    let (0x30, body, _) = der(spki)? else { return None };
+    let (0x30, _, rest) = der(body)? else { return None };
+    let (0x03, bits, _) = der(rest)? else { return None };
+    bits.strip_prefix(&[0])
+}
+
+/// CRX3 signature check: the proof signs "CRX3 SignedData\0" + le32(len) + signed_header_data + zip.
+fn verify(alg: &'static dyn ring::signature::VerificationAlgorithm, spki: &[u8], sig: &[u8], signed: &[u8], zip: &[u8]) -> bool {
+    let Some(key) = spki_bits(spki) else { return false };
+    let mut msg = b"CRX3 SignedData\0".to_vec();
+    msg.extend((signed.len() as u32).to_le_bytes());
+    msg.extend(signed);
+    msg.extend(zip);
+    ring::signature::UnparsedPublicKey::new(alg, key).verify(&msg, sig).is_ok()
+}
+
 /// Splits a CRX3 file into its zip and the public key (base64) that its id was derived from.
 fn split_crx3(crx: &[u8], want_id: &str) -> Result<(Vec<u8>, String), String> {
     let bad = || "not a CRX3 extension file".to_string();
@@ -76,15 +108,23 @@ fn split_crx3(crx: &[u8], want_id: &str) -> Result<(Vec<u8>, String), String> {
     if id != want_id {
         return Err("the file is for a different extension".into());
     }
-    // The proof whose key hashes to the id carries the key the manifest needs to keep that id.
+    let signed = top.iter().find(|f| f.0 == 10000).map(|f| f.1).ok_or_else(bad)?;
+    // The proof whose key hashes to the id carries the key the manifest needs to keep that id, and must sign the zip.
     for (n, proof) in &top {
         if *n != 2 && *n != 3 {
             continue;
         }
-        let key = fields(proof).and_then(|p| p.iter().find(|f| f.0 == 1).map(|f| f.1.to_vec()));
-        if let Some(key) = key.filter(|k| Sha256::digest(k)[..16] == crx_id[..]) {
-            return Ok((zip, STANDARD.encode(key)));
+        let p = fields(proof).unwrap_or_default();
+        let get = |k| p.iter().find(|f| f.0 == k).map(|f| f.1);
+        let (Some(key), Some(sig)) = (get(1), get(2)) else { continue };
+        if Sha256::digest(key)[..16] != crx_id[..] {
+            continue;
         }
+        let alg: &'static dyn ring::signature::VerificationAlgorithm = if *n == 2 { &ring::signature::RSA_PKCS1_2048_8192_SHA256 } else { &ring::signature::ECDSA_P256_SHA256_ASN1 };
+        if !verify(alg, key, sig, signed, &zip) {
+            return Err("the extension's signature is invalid".into());
+        }
+        return Ok((zip, STANDARD.encode(key)));
     }
     Err("the file has no key matching its id".into())
 }
@@ -299,22 +339,53 @@ mod tests {
         assert_eq!(parse_id("https://example.com/abc"), None);
     }
 
-    #[test]
-    fn crx3() {
-        let key = b"fake public key der".to_vec();
-        let crx_id = Sha256::digest(&key)[..16].to_vec();
+    /// A CRX3 signed with a fresh P-256 key; `zip` is what gets signed, `tamper` swaps the shipped bytes.
+    fn signed_crx(zip: &[u8], tamper: &[u8]) -> (Vec<u8>, String) {
+        use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
+        let rng = ring::rand::SystemRandom::new();
+        let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
+        let kp = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng).unwrap();
+        let mut spki = hex_prefix();
+        spki.extend(kp.public_key().as_ref());
+        let crx_id = Sha256::digest(&spki)[..16].to_vec();
         let id: String = crx_id.iter().flat_map(|b| [b >> 4, b & 15]).map(|n| (b'a' + n) as char).collect();
-        let mut header = field(2, &field(1, &key));
-        header.extend(field(10000, &field(1, &crx_id)));
+        let signed = field(1, &crx_id);
+        let mut msg = b"CRX3 SignedData\0".to_vec();
+        msg.extend((signed.len() as u32).to_le_bytes());
+        msg.extend(&signed);
+        msg.extend(zip);
+        let sig = kp.sign(&rng, &msg).unwrap();
+        let mut proof = field(1, &spki);
+        proof.extend(field(2, sig.as_ref()));
+        let mut header = field(3, &proof);
+        header.extend(field(10000, &signed));
         let mut crx = b"Cr24".to_vec();
         crx.extend(3u32.to_le_bytes());
         crx.extend((header.len() as u32).to_le_bytes());
         crx.extend(&header);
-        crx.extend(b"PKzipbytes");
+        crx.extend(tamper);
+        (crx, id)
+    }
+
+    /// DER prefix of a P-256 SubjectPublicKeyInfo, up to the uncompressed point.
+    fn hex_prefix() -> Vec<u8> {
+        vec![0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00]
+    }
+
+    #[test]
+    fn crx3() {
+        let (crx, id) = signed_crx(b"PKzipbytes", b"PKzipbytes");
         let (zip, k) = split_crx3(&crx, &id).unwrap();
         assert_eq!(zip, b"PKzipbytes");
-        assert_eq!(STANDARD.decode(k).unwrap(), key);
+        assert_eq!(Sha256::digest(STANDARD.decode(k).unwrap())[..16], parse_crx_id(&id)[..]);
         assert!(split_crx3(&crx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").is_err());
         assert!(split_crx3(b"Cr24\x02\0\0\0", &id).is_err());
+        // Zip swapped after signing: rejected.
+        let (bad, id) = signed_crx(b"PKzipbytes", b"PKevilbytes");
+        assert!(split_crx3(&bad, &id).unwrap_err().contains("signature"));
+    }
+
+    fn parse_crx_id(id: &str) -> Vec<u8> {
+        id.as_bytes().chunks(2).map(|c| (c[0] - b'a') << 4 | (c[1] - b'a')).collect()
     }
 }

@@ -74,11 +74,17 @@ impl Db {
                profile TEXT NOT NULL, added_at INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS logins(origin TEXT NOT NULL, username TEXT NOT NULL, PRIMARY KEY(origin,username));",
         )?;
-        // Schema versioning: bump `user_version` and add an `if v < N` step when the schema changes.
-        // Tables use IF NOT EXISTS above, so v1 is just the baseline.
-        let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if v < 1 {
-            c.execute_batch("PRAGMA user_version=1")?;
+        // PRAGMA user_version migrations. 2: logins per profile ('' = saved before profiles, see claim_legacy_logins).
+        if c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < 2 {
+            c.execute_batch(
+                "BEGIN;
+                 CREATE TABLE logins2(profile TEXT NOT NULL DEFAULT '', origin TEXT NOT NULL, username TEXT NOT NULL, PRIMARY KEY(profile,origin,username));
+                 INSERT INTO logins2(origin,username) SELECT origin,username FROM logins;
+                 DROP TABLE logins;
+                 ALTER TABLE logins2 RENAME TO logins;
+                 PRAGMA user_version=2;
+                 COMMIT;",
+            )?;
         }
         // Nothing can be downloading at startup: an 'active' row is left over from a crash.
         c.execute("UPDATE downloads SET status='failed' WHERE status='active'", [])?;
@@ -142,17 +148,22 @@ impl Db {
     }
 
     /// Saved-login index. Passwords live in the OS keychain, never here.
-    pub fn add_login(&self, origin: &str, user: &str) {
-        let _ = crate::applog::check("db add_login", self.0.lock().unwrap().execute("INSERT OR IGNORE INTO logins VALUES(?1,?2)", params![origin, user]));
+    pub fn add_login(&self, profile: &str, origin: &str, user: &str) {
+        let _ = crate::applog::check("db add_login", self.0.lock().unwrap().execute("INSERT OR IGNORE INTO logins(profile,origin,username) VALUES(?1,?2,?3)", params![profile, origin, user]));
     }
 
-    pub fn remove_login(&self, origin: &str, user: &str) {
-        let _ = crate::applog::check("db remove_login", self.0.lock().unwrap().execute("DELETE FROM logins WHERE origin=?1 AND username=?2", params![origin, user]));
+    pub fn remove_login(&self, profile: &str, origin: &str, user: &str) {
+        let _ = crate::applog::check("db remove_login", self.0.lock().unwrap().execute("DELETE FROM logins WHERE profile=?1 AND origin=?2 AND username=?3", params![profile, origin, user]));
     }
 
-    /// `(origin, username)`, optionally for one origin.
-    pub fn logins(&self, origin: Option<&str>) -> Vec<(String, String)> {
-        self.rows("SELECT origin,username FROM logins WHERE ?1 IS NULL OR origin=?1 ORDER BY origin,username", params![origin], |r| Ok((r.get(0)?, r.get(1)?)))
+    /// Logins saved before profiles existed belong to the first one.
+    pub fn claim_legacy_logins(&self, profile: &str) {
+        let _ = self.0.lock().unwrap().execute("UPDATE OR IGNORE logins SET profile=?1 WHERE profile=''", params![profile]);
+    }
+
+    /// `(origin, username, profile)`, optionally for one profile and/or origin.
+    pub fn logins(&self, profile: Option<&str>, origin: Option<&str>) -> Vec<(String, String, String)> {
+        self.rows("SELECT origin,username,profile FROM logins WHERE (?1 IS NULL OR profile=?1) AND (?2 IS NULL OR origin=?2) ORDER BY origin,username", params![profile, origin], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
     }
 
     pub fn prune_history(&self, days: u32) {
@@ -243,6 +254,23 @@ mod tests {
         db.import_visits(&rows, "Default");
         assert_eq!(db.search_history("c.com", 10).len(), 1);
         assert_eq!(db.0.lock().unwrap().query_row("SELECT COUNT(*) FROM history WHERE url='https://c.com/'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+    }
+
+    #[test]
+    fn logins_per_profile_and_migration() {
+        let c = Connection::open_in_memory().unwrap();
+        // A version-1 database: logins without a profile column.
+        c.execute_batch("CREATE TABLE logins(origin TEXT NOT NULL, username TEXT NOT NULL, PRIMARY KEY(origin,username)); INSERT INTO logins VALUES('https://a.com','old');").unwrap();
+        let db = Db::init(c).unwrap();
+        db.claim_legacy_logins("p1");
+        assert_eq!(db.logins(Some("p1"), Some("https://a.com")), vec![("https://a.com".to_string(), "old".to_string(), "p1".to_string())]);
+        db.add_login("p2", "https://a.com", "old");
+        db.add_login("p2", "https://a.com", "new");
+        assert_eq!(db.logins(Some("p2"), Some("https://a.com")).len(), 2);
+        assert_eq!(db.logins(None, None).len(), 3);
+        db.remove_login("p2", "https://a.com", "old");
+        assert_eq!(db.logins(Some("p1"), None).len(), 1);
+        assert_eq!(db.logins(Some("p2"), None).len(), 1);
     }
 
     #[test]
