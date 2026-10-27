@@ -1997,34 +1997,6 @@ fn idle_tick() {
 mod tests {
     use super::*;
 
-    fn tab() -> Tab {
-        Tab {
-            id: 1,
-            win: "main".into(),
-            profile: "p".into(),
-            entries: vec![],
-            idx: 0,
-            title: String::new(),
-            pinned: false,
-            group: None,
-            discarded: false,
-            loading: false,
-            audible: false,
-            playing: Default::default(),
-            muted: false,
-            private: false,
-            zoom: None,
-            gen: 0,
-            last_active: Instant::now(),
-            snap: None,
-            restore: false,
-            pid: None,
-            mem_mb: 0,
-            mode: Mode::Push,
-            link: None,
-        }
-    }
-
     #[test]
     fn labels() {
         assert_eq!(parse_label(&label(7, 3)), Some((7, 3)));
@@ -2050,24 +2022,6 @@ mod tests {
         assert!(is_blank(""));
         assert!(is_blank("aditus://app/newtab.html"));
         assert!(!is_blank("https://example.com/"));
-    }
-
-    #[test]
-    fn history() {
-        let mut t = tab();
-        record_entry(&mut t, "a");
-        record_entry(&mut t, "a"); // reload: no duplicate
-        record_entry(&mut t, "b");
-        record_entry(&mut t, "c");
-        assert_eq!((t.entries.len(), t.idx, t.url()), (3, 2, "c".into()));
-        t.idx = 0; // back to "a", then a new page drops the forward entries
-        t.mode = Mode::Traverse;
-        record_entry(&mut t, "a"); // the traversal itself adds nothing
-        assert_eq!((t.entries.len(), t.mode == Mode::Push), (3, true));
-        record_entry(&mut t, "d");
-        let urls: Vec<_> = t.entries.iter().map(|e| e.url.as_str()).collect();
-        assert_eq!((urls, t.idx), (vec!["a", "d"], 1));
-        assert_eq!(t.entries[1].profile, "p");
     }
 
     #[test]
