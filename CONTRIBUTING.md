@@ -67,4 +67,4 @@ By contributing you agree your work is licensed under [GPL-3.0](LICENSE).
 
 ## Releases
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`, which uploads `Aditus-macos-arm64.zip`. That name is also `ASSET` in `backend/src/update.rs` (the in-app updater looks the zip up by it): change both together.
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which uploads `Aditus-macos-<arch>.zip` (`uname -m`, e.g. `arm64`). `asset_name()` in `backend/src/update.rs` derives the same name from the build arch (the in-app updater looks the zip up by it): keep both in step.

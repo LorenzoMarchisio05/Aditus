@@ -63,9 +63,12 @@ jobs:
           NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
         run: ./sign-mac.sh
       - name: Zip
-        run: ditto -c -k --keepParent backend/target/bundle/Aditus.app Aditus-macos-arm64.zip
+        run: |
+          ASSET="Aditus-macos-$(uname -m).zip"
+          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
+          ditto -c -k --keepParent backend/target/bundle/Aditus.app "$ASSET"
       - uses: softprops/action-gh-release@v2
         with:
           # Published, not a draft: the in-app updater only sees published releases.
           draft: false
-          files: Aditus-macos-arm64.zip
+          files: ${{ env.ASSET }}

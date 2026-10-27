@@ -8,7 +8,14 @@ use serde_json::{json, Value};
 use std::{path::{Path, PathBuf}, process::Command, time::Duration};
 
 const REPO: &str = "LorenzoMarchisio05/Aditus";
-const ASSET: &str = "Aditus-macos-arm64.zip";
+
+/// Release zip name for an arch; release.yml builds the same name from `uname -m`.
+fn asset_name(arch: &str) -> String {
+    format!("Aditus-macos-{}.zip", if arch == "aarch64" { "arm64" } else { arch })
+}
+fn asset() -> String {
+    asset_name(std::env::consts::ARCH)
+}
 
 /// Numeric `a.b.c` comparison; anything unparsable is "not newer".
 pub fn is_newer(latest: &str, current: &str) -> bool {
@@ -36,7 +43,7 @@ fn latest() -> Option<Release> {
         .into_string()
         .ok()?;
     let v: Value = serde_json::from_str(&body).ok()?;
-    let asset = v["assets"].as_array()?.iter().find(|a| a["name"] == ASSET).and_then(|a| {
+    let asset = v["assets"].as_array()?.iter().find(|a| a["name"] == asset().as_str()).and_then(|a| {
         let url = a["browser_download_url"].as_str()?;
         let sha = a["digest"].as_str()?.strip_prefix("sha256:")?;
         (url.starts_with(&format!("https://github.com/{REPO}/releases/download/")) || (cfg!(debug_assertions) && std::env::var_os("ADITUS_UPDATE_API").is_some())).then(|| (url.to_string(), sha.to_lowercase()))
@@ -98,7 +105,7 @@ fn install_inner() -> Result<(), String> {
     let dir = std::env::temp_dir().join(format!("aditus-update-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let zip = dir.join(ASSET);
+    let zip = dir.join(asset());
     let res = ureq::get(&url).set("User-Agent", "aditus").timeout(Duration::from_secs(900)).call().map_err(|e| e.to_string())?;
     std::io::copy(&mut res.into_reader(), &mut std::fs::File::create(&zip).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
 
@@ -149,5 +156,14 @@ mod tests {
         assert!(!super::is_newer("0.1.0", "0.1.0"));
         assert!(!super::is_newer("0.0.9", "0.1.0"));
         assert!(!super::is_newer("nightly", "0.1.0"));
+    }
+}
+
+#[cfg(test)]
+mod asset_tests {
+    #[test]
+    fn asset_names() {
+        assert_eq!(super::asset_name("aarch64"), "Aditus-macos-arm64.zip");
+        assert_eq!(super::asset_name("x86_64"), "Aditus-macos-x86_64.zip");
     }
 }

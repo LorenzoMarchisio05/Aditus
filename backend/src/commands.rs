@@ -42,6 +42,34 @@ fn view_url(view: &str, win: &str) -> String {
     format!("aditus://app/index.html?view={view}&win={win}")
 }
 
+/// Untrusted pages may call `cosmetic_generic`: at most `GENERIC_MAX_CALLS` per `GENERIC_WINDOW` per view.
+const GENERIC_MAX_CALLS: usize = 40;
+const GENERIC_WINDOW: Duration = Duration::from_secs(10);
+const GENERIC_CSS_MAX: usize = 256 * 1024;
+static GENERIC_CALLS: Mutex<Vec<(String, std::time::Instant)>> = Mutex::new(Vec::new());
+
+fn generic_rate_ok(label: &str, now: std::time::Instant) -> bool {
+    let mut g = GENERIC_CALLS.lock().unwrap();
+    g.retain(|(_, t)| now.duration_since(*t) < GENERIC_WINDOW);
+    if g.iter().filter(|(l, _)| l == label).count() >= GENERIC_MAX_CALLS {
+        return false;
+    }
+    g.push((label.to_string(), now));
+    true
+}
+
+#[cfg(test)]
+mod generic_limit_tests {
+    #[test]
+    fn limits_per_view() {
+        let t = std::time::Instant::now();
+        assert!((0..super::GENERIC_MAX_CALLS).all(|_| super::generic_rate_ok("rl-a", t)));
+        assert!(!super::generic_rate_ok("rl-a", t));
+        assert!(super::generic_rate_ok("rl-b", t));
+        assert!(super::generic_rate_ok("rl-a", t + super::GENERIC_WINDOW));
+    }
+}
+
 pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
     let win = ctx.win.as_str();
     let ok = |v: Value| reply.done(Ok(v));
@@ -436,8 +464,14 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
         }
         "cosmetic_generic" => {
             // Untrusted input: cap the batch and keep only strings.
-            let list = |k: &str| a[k].as_array().map(|v| v.iter().filter_map(|x| x.as_str().map(String::from)).take(2000).collect::<Vec<_>>()).unwrap_or_default();
-            let css = Url::parse(&ctx.frame_url).map(|u| adblock::generic_css(&u, &list("c"), &list("i"))).unwrap_or_default();
+            if !generic_rate_ok(&ctx.label, std::time::Instant::now()) {
+                return ok(Value::String(String::new()));
+            }
+            let list = |k: &str| a[k].as_array().map(|v| v.iter().filter_map(|x| x.as_str().filter(|s| s.len() <= 200).map(String::from)).take(2000).collect::<Vec<_>>()).unwrap_or_default();
+            let mut css = Url::parse(&ctx.frame_url).map(|u| adblock::generic_css(&u, &list("c"), &list("i"))).unwrap_or_default();
+            if css.len() > GENERIC_CSS_MAX {
+                css.truncate(css[..GENERIC_CSS_MAX].rfind('\n').unwrap_or(0)); // whole rules only
+            }
             ok(Value::String(css))
         }
         "page_login" => {

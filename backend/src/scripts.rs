@@ -51,7 +51,7 @@ pub const YOUTUBE: &str = r#"(()=>{
 if(!/(^|\.)youtube\.com$/.test(location.hostname))return;
 try{if(sessionStorage.getItem('__aditus_off'))return}catch(e){}
 const K=['adPlacements','playerAds','adSlots','adBreakParams','adBreakHeartbeatParams','adSafetyReason'];
-const strip=(o,d=0)=>{try{if(o&&typeof o==='object'&&d<5){for(const k of K)if(k in o){try{delete o[k]}catch(e){}console.debug('[aditus] stripped',k)}for(const k in o)if(o[k]&&typeof o[k]==='object')strip(o[k],d+1)}}catch(e){}return o};
+let S=0,dt;const strip=(o,d=0)=>{try{if(o&&typeof o==='object'&&d<5){for(const k of K)if(k in o){try{delete o[k]}catch(e){}S++;console.debug('[aditus] stripped',k)}for(const k in o)if(o[k]&&typeof o[k]==='object')strip(o[k],d+1)}}catch(e){}return o};
 const G=f=>()=>{try{f()}catch(e){}};// one failing patch must never break the page
 let v;try{Object.defineProperty(window,'ytInitialPlayerResponse',{configurable:true,get:()=>v,set:x=>{v=strip(x)}})}catch(e){}
 JSON.parse=new Proxy(JSON.parse,{apply:(t,th,a)=>strip(Reflect.apply(t,th,a))});
@@ -61,7 +61,8 @@ Response.prototype.json=new Proxy(Response.prototype.json,{apply:(t,th,a)=>Refle
 let V=0,stall=0;
 JSON.stringify=new Proxy(JSON.stringify,{apply(t,th,a){try{const o=a[0],cp=o&&o.attestationRequest&&o.playbackContext&&o.playbackContext.contentPlaybackContext,c=cp&&o.context&&o.context.client;
 if(c&&c.clientName==='WEB'&&!/[?&]list=/.test(location.href)&&!location.pathname.startsWith('/shorts/')){if(V===0)c.clientScreen='CHANNEL';if(V<2)cp.lactMilliseconds=String(Date.now());if(V===1)o.params='8AUB';if(V===2)o.params='YAHI';if(V===3)cp.referer=String(cp.referer||'').replace(/(#reloadxhr)?$/,'#reloadxhr')}}catch(e){}return Reflect.apply(t,th,a)}});
-addEventListener('yt-navigate-finish',()=>{V=0;stall=0});
+// Self-diagnosis: nothing stripped within 20s of a watch page loading hints that YouTube changed the player-response shape.
+addEventListener('yt-navigate-finish',()=>{V=0;stall=0;S=0;clearTimeout(dt);if(location.pathname.startsWith('/watch'))dt=setTimeout(()=>{if(!S)console.debug('[aditus] no ad fields stripped on this watch page; player response format may have changed')},20000)});
 setInterval(()=>{try{if(document.hidden||!location.pathname.startsWith('/watch'))return;const p=document.getElementById('movie_player'),s=p&&p.getStatsForNerds&&p.getStatsForNerds();if(!s)return;const st=p.getPlayerState();
 if(s.buffer_health_seconds==='0.00 s'&&s.resolution==='0x0'&&(st===3||st===-1)&&!p.classList.contains('ad-showing')&&!String(s.debug_info||'').startsWith('SSAP, AD'))stall++;else stall=0;
 if(stall>=2&&V<3){const r=p.getPlayerResponse&&p.getPlayerResponse();if(r&&r.videoDetails){V++;stall=0;console.debug('[aditus] stalled, retrying variant',V);p.loadVideoById(r.videoDetails.videoId,(r.playerConfig&&r.playerConfig.playbackStartConfig&&r.playerConfig.playbackStartConfig.startSeconds)||0)}}}catch(e){}},1000);
