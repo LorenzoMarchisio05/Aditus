@@ -694,10 +694,20 @@ pub fn suggest_ready(label: &str) {
     }
 }
 
+/// Hides the list. The view is created on first use and kept until its window is destroyed, so typing
+/// sessions do not pay for a new browser each time.
 fn close_suggest(win: &str) {
-    SUGGEST.lock().unwrap().retain(|(w, _)| w != win);
-    SUGGEST_FROM.lock().unwrap().retain(|(l, _)| *l != tabs::wv_label("suggest", win));
-    engine::close(&tabs::wv_label("suggest", win));
+    let was_shown = {
+        let mut g = SUGGEST.lock().unwrap();
+        let n = g.len();
+        g.retain(|(w, _)| w != win);
+        g.len() != n
+    };
+    let label = tabs::wv_label("suggest", win);
+    if was_shown && engine::has_view(&label) {
+        engine::set_visible(&label, false);
+        engine::emit_to(&label, "suggest-rows", "null");
+    }
 }
 
 /// Shows the list under an address input; `x`, `y`, `w` are in window coordinates, or ignored for the palette.
@@ -712,21 +722,31 @@ fn suggest_show(ctx: &Ctx, a: &Value) {
         (num(a, "x"), num(a, "y"), num(a, "w"))
     };
     let bounds = (x, y, w.max(200.0), rows * 38.0 + 16.0);
-    {
+    let was_shown = {
         let mut g = SUGGEST.lock().unwrap();
+        let n = g.len();
         g.retain(|(w, _)| w != win);
+        let was = g.len() != n;
         g.push((win.to_string(), payload.clone()));
-    }
+        was
+    };
     let label = tabs::wv_label("suggest", win);
-    if engine::has_view(&label) {
-        engine::set_bounds(&label, bounds);
-        engine::emit_to(&label, "suggest-rows", &payload.to_string());
-    } else {
-        // The list never takes the keyboard from the input being typed in (see `suggest_ready`).
+    // The list never takes the keyboard from the input being typed in (see `suggest_ready`).
+    {
         let mut sf = SUGGEST_FROM.lock().unwrap();
         sf.retain(|(l, _)| *l != label);
         sf.push((label.clone(), ctx.label.clone()));
-        drop(sf);
+    }
+    if engine::has_view(&label) {
+        engine::set_bounds(&label, bounds);
+        engine::emit_to(&label, "suggest-rows", &payload.to_string());
+        if !was_shown {
+            engine::set_visible(&label, true);
+            // Showing a view may pull the keyboard; the list must never keep it.
+            let from = ctx.label.clone();
+            engine::defer_after(60, move || engine::focus(&from));
+        }
+    } else {
         engine::create(overlay(&label, win, "suggest", bounds));
     }
 }
