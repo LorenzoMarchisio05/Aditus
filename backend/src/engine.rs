@@ -1042,6 +1042,7 @@ wrap_request_handler! {
             }
             if kind == Kind::Page && main && !is_app_url(&url) {
                 if let Ok(u) = url::Url::parse(&url) {
+                    NAV_HOST.with(|n| n.borrow_mut().insert(self.label.clone(), u.host_str().unwrap_or_default().to_string()));
                     if !tabs::on_navigation(&tabs::AppHandle, &self.label, &u, user_gesture != 0, is_redirect != 0) {
                         return 1;
                     }
@@ -1064,10 +1065,90 @@ wrap_request_handler! {
             PAGES.lock().unwrap().contains(&self.label).then(Blocker::new)
         }
 
+        fn auth_credentials(
+            &self,
+            _browser: Option<&mut Browser>,
+            _origin_url: Option<&CefString>,
+            is_proxy: i32,
+            host: Option<&CefString>,
+            _port: i32,
+            realm: Option<&CefString>,
+            _scheme: Option<&CefString>,
+            callback: Option<&mut AuthCallback>,
+        ) -> i32 {
+            let Some(cb) = callback else { return 0 };
+            if !reg(|r| r.views.get(&self.label).is_some_and(|v| v.kind == Kind::Page)) {
+                return 0;
+            }
+            let host = host.map(|h| h.to_string()).unwrap_or_default();
+            let realm = realm.map(|h| h.to_string()).unwrap_or_default();
+            let detail = if is_proxy != 0 { format!("proxy {realm}") } else { realm };
+            match tabs::on_net_prompt(&tabs::AppHandle, &self.label, false, &host, detail.trim()) {
+                tabs::Net::Wait(id) => NET.with(|n| n.borrow_mut().insert(id, Pending::Auth(cb.clone()))),
+                _ => {
+                    cb.cancel();
+                    None
+                }
+            };
+            1
+        }
+
+        fn on_certificate_error(
+            &self,
+            browser: Option<&mut Browser>,
+            cert_error: Errorcode,
+            request_url: Option<&CefString>,
+            _ssl_info: Option<&mut Sslinfo>,
+            callback: Option<&mut Callback>,
+        ) -> i32 {
+            let Some(cb) = callback else { return 0 };
+            if !reg(|r| r.views.get(&self.label).is_some_and(|v| v.kind == Kind::Page)) {
+                return 0;
+            }
+            // Only the page being navigated to is worth asking about; sub-resources fail quietly.
+            let url = request_url.map(|u| u.to_string()).unwrap_or_default();
+            let Some(host) = url::Url::parse(&url).ok().and_then(|u| u.host_str().map(String::from)) else { return 0 };
+            if NAV_HOST.with(|n| n.borrow().get(&self.label).cloned()).as_deref() != Some(host.as_str()) {
+                return 0;
+            }
+            let text = tabs::cert_error_text(sys::cef_errorcode_t::from(cert_error) as i32);
+            match tabs::on_net_prompt(&tabs::AppHandle, &self.label, true, &host, text) {
+                tabs::Net::Allow => cb.cont(),
+                tabs::Net::Wait(id) => {
+                    NET.with(|n| n.borrow_mut().insert(id, Pending::Cert(cb.clone())));
+                }
+                tabs::Net::Deny => cb.cancel(),
+            }
+            1
+        }
+
         fn on_render_process_terminated(&self, browser: Option<&mut Browser>, _status: TerminationStatus, _code: i32, _text: Option<&CefString>) {
             ipc::router().on_render_process_terminated(browser.cloned());
             tabs::on_crash(&tabs::AppHandle, &self.label);
         }
+    }
+}
+
+/// Engine callbacks waiting for the user's answer in the sidebar, by prompt id (UI thread only).
+enum Pending {
+    Auth(AuthCallback),
+    Cert(Callback),
+}
+
+thread_local! {
+    /// Host each page view last started a main-frame navigation to.
+    static NAV_HOST: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+    static NET: RefCell<HashMap<u64, Pending>> = RefCell::new(HashMap::new());
+}
+
+/// Finish a held login or certificate request. Without `allow` it is cancelled.
+pub fn net_answer(id: u64, allow: bool, user: &str, pass: &str) {
+    match NET.with(|n| n.borrow_mut().remove(&id)) {
+        Some(Pending::Auth(cb)) if allow => cb.cont(Some(&s(user)), Some(&s(pass))),
+        Some(Pending::Auth(cb)) => cb.cancel(),
+        Some(Pending::Cert(cb)) if allow => cb.cont(),
+        Some(Pending::Cert(cb)) => cb.cancel(),
+        None => {}
     }
 }
 

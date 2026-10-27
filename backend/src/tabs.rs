@@ -125,6 +125,11 @@ pub struct App {
     perm_prompt: Option<(String, String, u32)>,
     /// Answers given in private windows; never written to disk.
     perm_tmp: Vec<config::PermRule>,
+    /// Pending HTTP-auth / certificate prompts, oldest first; the engine holds their callbacks by id.
+    net_q: Vec<NetPrompt>,
+    next_net: u64,
+    /// Hosts the user chose to proceed to despite a certificate error: (host, private). Session only.
+    cert_ok: HashSet<(String, bool)>,
     skipped: HashSet<String>,
     toast: Option<Toast>,
     undo: Option<Undo>,
@@ -146,6 +151,9 @@ impl App {
             prompt: None,
             perm_prompt: None,
             perm_tmp: vec![],
+            net_q: vec![],
+            next_net: 1,
+            cert_ok: HashSet::new(),
             skipped: HashSet::new(),
             toast: None,
             undo: None,
@@ -258,6 +266,37 @@ struct TabView {
     can_forward: bool,
 }
 
+/// A held engine request waiting for the user: a login (`cert` false) or a bad certificate.
+#[derive(Serialize, Clone)]
+pub struct NetPrompt {
+    id: u64,
+    cert: bool,
+    host: String,
+    /// Realm for logins, a short reason for certificates.
+    detail: String,
+    #[serde(skip)]
+    tab: u32,
+}
+
+pub enum Net {
+    Allow,
+    Deny,
+    Wait(u64),
+}
+
+/// Short reason for a certificate error code (`net::ERR_CERT_*`).
+pub fn cert_error_text(code: i32) -> &'static str {
+    match code {
+        -200 => "the certificate is for a different site",
+        -201 => "the certificate has expired or is not yet valid",
+        -202 => "the certificate is not from a trusted authority",
+        -207 => "the certificate is invalid",
+        -208 => "the certificate uses a weak algorithm",
+        -211 => "the certificate has been revoked",
+        _ => "the certificate could not be verified",
+    }
+}
+
 #[derive(Serialize)]
 struct Snapshot<'a> {
     win: &'a str,
@@ -266,6 +305,7 @@ struct Snapshot<'a> {
     cfg: &'a Config,
     prompt: Option<String>,
     perm: Option<(&'a str, &'a str)>,
+    net: Option<&'a NetPrompt>,
     toast: Option<Toast>,
     adblock_site: bool,
     bookmarked: bool,
@@ -280,6 +320,17 @@ pub fn emit_state(app: &AppHandle) {
 /// One snapshot per window, tagged with its label; each frontend keeps only its own.
 fn emit(app: &AppHandle, save: bool) {
     let s = shared(app);
+    // Prompts of tabs that have since closed would never be answered.
+    let gone: Vec<u64> = {
+        let mut g = s.app.lock().unwrap();
+        let ids: Vec<u32> = g.tabs.iter().map(|t| t.id).collect();
+        let gone = g.net_q.iter().filter(|p| !ids.contains(&p.tab)).map(|p| p.id).collect();
+        g.net_q.retain(|p| ids.contains(&p.tab));
+        gone
+    };
+    for id in gone {
+        engine::net_answer(id, false, "", "");
+    }
     let jsons: Vec<String> = {
         let g = s.app.lock().unwrap();
         crate::adblock::sync_cfg(g.cfg.settings.adblock, &g.cfg.allowlist);
@@ -325,6 +376,7 @@ fn emit(app: &AppHandle, save: bool) {
                     cfg: &g.cfg,
                     prompt: g.prompt.clone(),
                     perm: g.perm_prompt.as_ref().filter(|p| g.win_of(p.2) == *win).map(|p| (p.0.as_str(), p.1.as_str())),
+                    net: g.net_q.iter().find(|p| g.win_of(p.tab) == *win),
                     toast: g.toast.clone(),
                     adblock_site: !g.cfg.allowlist.contains(&active_host),
                     bookmarked: s.db.is_bookmarked(&active_url),
@@ -543,6 +595,41 @@ pub fn on_permission(app: &AppHandle, label: &str, origin: &str, name: &str) -> 
             false
         }
     }
+}
+
+/// A page needs a login (basic auth, proxy) or has a bad certificate. The engine keeps the callback
+/// and the answer arrives from the sidebar card. A certificate the user already accepted this
+/// session goes straight through; nothing here is ever written to disk.
+pub fn on_net_prompt(app: &AppHandle, label: &str, cert: bool, host: &str, detail: &str) -> Net {
+    let Some((tab_id, _)) = parse_label(label) else { return Net::Deny };
+    let id = {
+        let mut g = shared(app).app.lock().unwrap();
+        let private = g.tabs.iter().find(|t| t.id == tab_id).is_some_and(|t| t.private);
+        if cert && g.cert_ok.contains(&(host.to_string(), private)) {
+            return Net::Allow;
+        }
+        let id = g.next_net;
+        g.next_net += 1;
+        g.net_q.push(NetPrompt { id, cert, host: host.into(), detail: detail.into(), tab: tab_id });
+        id
+    };
+    emit_state(app);
+    Net::Wait(id)
+}
+
+/// The card's answer. Proceeding past a certificate error is remembered for this session only.
+pub fn answer_net(app: &AppHandle, id: u64, allow: bool, user: &str, pass: &str) {
+    {
+        let mut g = shared(app).app.lock().unwrap();
+        let Some(i) = g.net_q.iter().position(|p| p.id == id) else { return };
+        let p = g.net_q.remove(i);
+        if p.cert && allow {
+            let private = g.tabs.iter().find(|t| t.id == p.tab).is_some_and(|t| t.private);
+            g.cert_ok.insert((p.host, private));
+        }
+    }
+    engine::net_answer(id, allow, user, pass);
+    emit_state(app);
 }
 
 /// The sidebar card's answer. Private tabs keep it for the session only.
@@ -1634,4 +1721,16 @@ fn idle_tick() {
         discard_idle(&AppHandle);
         idle_tick();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cert_errors_have_reasons() {
+        assert!(cert_error_text(-201).contains("expired"));
+        assert!(cert_error_text(-200).contains("different site"));
+        assert!(cert_error_text(-999).contains("could not be verified"));
+    }
 }
