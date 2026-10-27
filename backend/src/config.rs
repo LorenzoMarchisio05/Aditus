@@ -189,19 +189,23 @@ impl Config {
 
     /// Hand-edit hygiene: drop blank/duplicate profile names (first wins) and mappings to unknown profiles.
     pub fn sanitize(&mut self) {
-        let mut seen = std::collections::HashSet::new();
-        self.profiles.retain(|p| !p.name.trim().is_empty() && seen.insert(p.name.clone()));
+        let (mut names, mut ids) = (std::collections::HashSet::new(), std::collections::HashSet::new());
+        self.profiles.retain(|p| !p.name.trim().is_empty() && !p.id.is_empty() && names.insert(p.name.clone()) && ids.insert(p.id.clone()));
         if self.profiles.is_empty() {
             *self = Self::default();
             return;
         }
-        let names = &self.profiles;
-        self.mappings.retain(|m| {
-            let ok = names.iter().any(|p| p.name == m.profile);
-            if !ok {
-                crate::applog::log(&format!("config: dropped mapping {} -> unknown profile {}", m.pattern, m.profile));
+        // Mappings are keyed by profile id; a name (old configs, hand edits) is converted to its id.
+        let ps = &self.profiles;
+        self.mappings.retain_mut(|m| match ps.iter().find(|p| p.id == m.profile).or_else(|| ps.iter().find(|p| p.name == m.profile)) {
+            Some(p) => {
+                m.profile = p.id.clone();
+                true
             }
-            ok
+            None => {
+                crate::applog::log(&format!("config: dropped mapping {} -> unknown profile {}", m.pattern, m.profile));
+                false
+            }
         });
     }
 
@@ -212,8 +216,22 @@ impl Config {
         }
     }
 
-    pub fn profile(&self, name: &str) -> Option<&Profile> {
-        self.profiles.iter().find(|p| p.name == name)
+    /// Position of a profile by id, falling back to name (the UI and old data still say names).
+    pub fn profile_idx(&self, key: &str) -> Option<usize> {
+        self.profiles.iter().position(|p| p.id == key).or_else(|| self.profiles.iter().position(|p| p.name == key))
+    }
+
+    pub fn profile(&self, key: &str) -> Option<&Profile> {
+        self.profile_idx(key).map(|i| &self.profiles[i])
+    }
+
+    /// Display name for an id (or a legacy name); ids of deleted profiles show as empty.
+    pub fn name_of(&self, key: &str) -> String {
+        match self.profile(key) {
+            Some(p) => p.name.clone(),
+            None if uuid::Uuid::parse_str(key).is_ok() => String::new(),
+            None => key.to_string(),
+        }
     }
 
     pub fn data_dir(base: &Path, p: &Profile) -> PathBuf {
@@ -261,6 +279,23 @@ mod tests {
         assert_eq!(c.profiles.len(), 1);
         assert_eq!(c.profiles[0].id, "1");
         assert_eq!(c.mappings.len(), 1);
+    }
+
+    #[test]
+    fn mappings_follow_ids_across_renames() {
+        let mut c: Config = toml::from_str(
+            "profiles = [{name='A',id='ida'},{name='B',id='idb'}]\nmappings = [{pattern='x',profile='B'},{pattern='y',profile='ida'},{pattern='z',profile='nope'}]\n[settings]\nadblock = false",
+        )
+        .unwrap();
+        c.sanitize(); // old name-keyed mapping becomes an id, orphan dropped
+        assert_eq!(c.mappings.iter().map(|m| m.profile.as_str()).collect::<Vec<_>>(), ["idb", "ida"]);
+        c.profiles[1].name = "Renamed".into(); // hand-edited rename
+        c.sanitize();
+        assert_eq!(c.mappings[0].profile, "idb");
+        assert_eq!(c.name_of("idb"), "Renamed");
+        assert_eq!(c.profile("Renamed").unwrap().id, "idb");
+        assert_eq!(c.name_of(&uuid::Uuid::new_v4().to_string()), "");
+        assert_eq!(crate::nav::lookup(&c.mappings, "x").unwrap().profile, "idb");
     }
 
     #[test]

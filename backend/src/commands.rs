@@ -198,8 +198,8 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             let valid = |c: &str| c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|h| h.is_ascii_hexdigit());
             let color = a["color"].as_str().filter(|c| valid(c)).map(String::from);
             mutate_cfg(|c| {
-                if let Some(p) = c.profiles.iter_mut().find(|p| p.name == name) {
-                    p.color = color;
+                if let Some(i) = c.profile_idx(&name) {
+                    c.profiles[i].color = color;
                 }
             });
             ok(Value::Null)
@@ -246,16 +246,14 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             ok(Value::Null)
         }
         "delete_profile" => {
-            let name = str_arg(&a, "name");
-            if !shared(&APP).lock_app().tabs.iter().any(|t| t.profile == name) {
-                let dir = shared(&APP).lock_app().cfg.profile(&name).map(|p| config::Config::data_dir(&shared(&APP).data_dir.join("cef"), p));
+            let key = str_arg(&a, "name"); // a name or an id
+            let found = shared(&APP).lock_app().cfg.profile(&key).map(|p| (p.id.clone(), config::Config::data_dir(&shared(&APP).data_dir.join("cef"), p)));
+            if let Some((id, dir)) = found.filter(|(id, _)| !shared(&APP).lock_app().tabs.iter().any(|t| &t.profile == id)) {
                 mutate_cfg(|c| {
                     if c.profiles.len() > 1 {
-                        if let Some(d) = &dir {
-                            let _ = std::fs::remove_dir_all(d);
-                        }
-                        c.profiles.retain(|p| p.name != name);
-                        c.mappings.retain(|m| m.profile != name);
+                        let _ = std::fs::remove_dir_all(&dir);
+                        c.profiles.retain(|p| p.id != id);
+                        c.mappings.retain(|m| m.profile != id);
                     }
                 });
             }
@@ -336,7 +334,13 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
         }
         "history_search" => {
             let q = str_arg(&a, "q");
-            std::thread::spawn(move || reply.done(Ok(serde_json::to_value(shared(&APP).db.search_history(&q, 200)).unwrap_or(Value::Null))));
+            std::thread::spawn(move || {
+                let mut rows = shared(&APP).db.search_history(&q, 200);
+                let g = shared(&APP).lock_app();
+                rows.iter_mut().for_each(|r| r.profile = g.cfg.name_of(&r.profile)); // rows hold ids; the UI shows names
+                drop(g);
+                reply.done(Ok(serde_json::to_value(rows).unwrap_or(Value::Null)))
+            });
         }
         "bookmark_toggle" => {
             tabs::toggle_bookmark(&APP, active_id(win));
@@ -344,7 +348,13 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
         }
         "bookmark_search" => {
             let q = str_arg(&a, "q");
-            std::thread::spawn(move || reply.done(Ok(serde_json::to_value(shared(&APP).db.search_bookmarks(&q, 200)).unwrap_or(Value::Null))));
+            std::thread::spawn(move || {
+                let mut rows = shared(&APP).db.search_bookmarks(&q, 200);
+                let g = shared(&APP).lock_app();
+                rows.iter_mut().for_each(|r| r.profile = g.cfg.name_of(&r.profile));
+                drop(g);
+                reply.done(Ok(serde_json::to_value(rows).unwrap_or(Value::Null)))
+            });
         }
         "bookmark_remove" => {
             shared(&APP).db.remove_bookmark(&str_arg(&a, "url"));
@@ -387,7 +397,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             if flag("cookies") || flag("cache") {
                 let only = a["profile"].as_str().filter(|p| !p.is_empty());
                 let profiles = s.lock_app().cfg.profiles.clone();
-                for p in profiles.iter().filter(|p| only.is_none_or(|n| n == p.name)) {
+                for p in profiles.iter().filter(|p| only.is_none_or(|n| n == p.name || n == p.id)) {
                     let dir = config::Config::data_dir(&s.data_dir.join("cef"), p);
                     engine::clear_site_data(&format!("profile-{}", p.id), &dir, flag("cookies"), flag("cache"));
                 }
@@ -757,7 +767,7 @@ fn profile_menu(win: &str, pos: (i32, i32)) {
     let (names, cur) = {
         let g = shared(&APP).lock_app();
         let active = g.active(win);
-        let cur = g.tabs.iter().find(|t| t.id == active).map(|t| t.profile.clone()).unwrap_or_default();
+        let cur = g.tabs.iter().find(|t| t.id == active).map(|t| g.cfg.name_of(&t.profile)).unwrap_or_default();
         (g.cfg.profiles.iter().map(|p| p.name.clone()).collect::<Vec<_>>(), cur)
     };
     let items = names.into_iter().map(|n| Item::Entry { id: format!("profile:{n}"), checked: n == cur, label: n, enabled: true }).collect();
@@ -773,7 +783,7 @@ fn tab_menu(win: &str, id: u32, pos: (i32, i32)) {
         let mut groups: Vec<String> = g.tabs.iter().filter_map(|t| t.group.clone()).collect();
         groups.sort();
         groups.dedup();
-        (t.pinned, t.group.clone(), t.profile.clone(), site && !t.private, site, groups, g.cfg.profiles.iter().map(|p| p.name.clone()).collect::<Vec<_>>())
+        (t.pinned, t.group.clone(), g.cfg.name_of(&t.profile), site && !t.private, site, groups, g.cfg.profiles.iter().map(|p| p.name.clone()).collect::<Vec<_>>())
     };
     let plain = |act: &str, label: &str| Item::Entry { id: format!("tabm:{act}:{id}"), label: label.into(), enabled: true, checked: false };
     let mut group_items: Vec<Item> = groups.iter().map(|n| Item::Entry { id: format!("tabm:group:{id}:{n}"), label: n.clone(), enabled: true, checked: group.as_deref() == Some(n) }).collect();
