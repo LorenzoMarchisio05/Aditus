@@ -8,6 +8,7 @@ use crate::{
     config::{self, Config},
     db::Db,
     engine::{self, Bounds, Kind, Spec},
+    history::{Entry, Hist, Step},
     nav::{self, Decision},
     search,
 };
@@ -44,12 +45,6 @@ pub fn shared(_: &AppHandle) -> &'static Shared {
     SHARED.get().expect("state not initialised")
 }
 
-#[derive(Clone)]
-pub struct Entry {
-    pub url: String,
-    pub profile: String,
-}
-
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
     Push,
@@ -60,8 +55,7 @@ pub struct Tab {
     pub id: u32,
     pub win: String,
     pub profile: String,
-    pub entries: Vec<Entry>,
-    pub idx: usize,
+    pub hist: Hist,
     pub title: String,
     pub pinned: bool,
     pub group: Option<String>,
@@ -86,6 +80,15 @@ pub struct Tab {
     pid: Option<u32>,
     mem_mb: u32,
     mode: Mode,
+    /// The view was just created and has not committed a page yet: a different address is a redirect.
+    fresh: bool,
+    /// The engine reported the load in flight as a history traversal.
+    fwd_back: bool,
+    /// When a native go_back/go_forward was issued: the next commit within a few seconds belongs to it.
+    /// (Not `Mode::Traverse`: a bfcache restore commits nothing, and that mode would then swallow a later push.)
+    native_at: Option<Instant>,
+    /// Label of the view this tab showed before a profile swap; kept on screen until the new view commits.
+    retiring: Option<String>,
     /// Link inside the page's text selection, reported by the page script: Cmd+T / Cmd+Shift+N open it.
     link: Option<Url>,
 }
@@ -213,7 +216,7 @@ pub fn wv_label(kind: &str, win: &str) -> String {
 
 impl Tab {
     pub fn url(&self) -> String {
-        self.entries.get(self.idx).map(|e| e.url.clone()).unwrap_or_default()
+        self.hist.url()
     }
 }
 
@@ -389,8 +392,8 @@ fn emit(app: &AppHandle, save: bool) {
                                 audible: t.audible,
                                 muted: t.muted,
                                 mem_mb: t.mem_mb,
-                                can_back: t.idx > 0,
-                                can_forward: t.idx + 1 < t.entries.len(),
+                                can_back: t.hist.can_back(),
+                                can_forward: t.hist.can_forward(),
                             }
                         })
                         .collect(),
@@ -503,7 +506,14 @@ fn app_url(query: &str) -> String {
 fn build_webview(app: &AppHandle, tab_id: u32, show: bool) {
     let s = shared(app);
     let (gen, url, profile, win, private, zoom, adblock_on) = {
-        let g = s.app.lock().unwrap();
+        let mut g = s.app.lock().unwrap();
+        // The new view's native history is empty and its first load is the current entry.
+        if let Some(t) = g.tab(tab_id) {
+            t.hist.fresh_view();
+            t.fresh = true;
+            t.fwd_back = false;
+            t.native_at = None;
+        }
         let Some(t) = g.tabs.iter().find(|t| t.id == tab_id) else { return };
         let Some(p) = g.cfg.profile(&t.profile).or(g.cfg.profiles.first()).cloned() else { return };
         (t.gen, t.url(), p, t.win.clone(), t.private, t.zoom.unwrap_or(g.cfg.settings.page_zoom), g.cfg.settings.adblock)
@@ -743,7 +753,7 @@ fn label_of(id: u32, gen: u32) -> String {
     label(id, gen)
 }
 
-pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool) {
+pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool, fwd_back: bool) {
     let Some((tab_id, gen)) = parse_label(label) else { return };
     // An error page stands for the page that failed: same address, no history entry, no visit.
     let (url, errored) = match error_target(&url) {
@@ -751,7 +761,7 @@ pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool) {
         None => (normalize(url), false),
     };
     let s = shared(app);
-    let (mut visit, mut zoom, mut restore) = (None, None, None);
+    let (mut visit, mut zoom, mut restore, mut reveal) = (None, None, None, None);
     {
         let mut g = s.app.lock().unwrap();
         let base = g.cfg.settings.page_zoom;
@@ -761,6 +771,9 @@ pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool) {
         }
         t.loading = started;
         if started {
+            t.fwd_back = fwd_back;
+            // The new view of a profile swap has committed a page: it can replace the old one on screen.
+            reveal = t.retiring.take();
             t.link = None;
             t.playing.clear();
             t.audible = false;
@@ -771,13 +784,19 @@ pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool) {
                 t.title.clear();
             }
         } else {
-            record_entry(t, &url);
+            record_entry(t, &url, true);
+            if errored {
+                t.hist.fence();
+            }
             zoom = Some(t.zoom.unwrap_or(base));
             if std::mem::take(&mut t.restore) {
                 restore = t.snap.take().filter(|(u, _)| *u == url).map(|(_, j)| j);
             }
             visit = (!errored && !t.private && !is_blank(&url) && internal_view(&url).is_none()).then(|| (url, t.title.clone(), t.profile.clone()));
         }
+    }
+    if let Some(old) = reveal {
+        engine::defer(move || reveal_swapped(&AppHandle, tab_id, gen, old));
     }
     if let Some(j) = restore {
         engine::eval(label, &format!("({RESTORE})({})", serde_json::to_string(&j).unwrap()));
@@ -792,17 +811,35 @@ pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool) {
     emit_state(app);
 }
 
-fn record_entry(t: &mut Tab, url: &str) {
-    match t.mode {
-        Mode::Traverse => t.mode = Mode::Push,
-        Mode::Push => {
-            if t.entries.get(t.idx).map(|e| e.url.as_str()) == Some(url) {
-                return;
-            }
-            t.entries.truncate(t.idx + 1);
-            t.entries.push(Entry { url: url.into(), profile: t.profile.clone() });
-            t.idx = t.entries.len() - 1;
-        }
+/// A main-frame page committed (`load`) or an in-page navigation happened (`!load`).
+fn record_entry(t: &mut Tab, url: &str, load: bool) {
+    let native = t.native_at.take().is_some_and(|at| at.elapsed() < Duration::from_secs(5));
+    let traverse = std::mem::replace(&mut t.mode, Mode::Push) == Mode::Traverse || native;
+    // Only a real load settles "fresh" and "traversal"; an early pushState must not use them up.
+    let (fresh, fwd_back) = if load { (std::mem::take(&mut t.fresh), std::mem::take(&mut t.fwd_back)) } else { (false, false) };
+    t.hist.commit(url, &t.profile, traverse, fresh, fwd_back);
+}
+
+/// The new view of a swap committed (or gave up waiting): drop the old one and show the new.
+fn reveal_swapped(app: &AppHandle, id: u32, gen: u32, old: String) {
+    engine::close(&old);
+    let (show, win) = {
+        let g = shared(app).app.lock().unwrap();
+        let Some(t) = g.tabs.iter().find(|t| t.id == id && t.gen == gen) else { return };
+        (g.active(&t.win) == id && !t.discarded, t.win.clone())
+    };
+    if show {
+        engine::set_visible(&label(id, gen), true);
+        hide_all_except(app, &win, Some((id, gen)));
+        apply_layout(app);
+    }
+}
+
+/// Safety net: if the new view never commits (blocked, hung), the swap completes anyway.
+fn finish_swap(app: &AppHandle, id: u32, gen: u32) {
+    let old = shared(app).app.lock().unwrap().tab(id).filter(|t| t.gen == gen).and_then(|t| t.retiring.take());
+    if let Some(old) = old {
+        reveal_swapped(app, id, gen, old);
     }
 }
 
@@ -834,7 +871,7 @@ pub fn on_popup(app: &AppHandle, label: &str, url: &str) {
 pub fn nav_state(app: &AppHandle, label: &str) -> (bool, bool) {
     let Some((id, _)) = parse_label(label) else { return (false, false) };
     let g = shared(app).app.lock().unwrap();
-    g.tabs.iter().find(|t| t.id == id).map_or((false, false), |t| (t.idx > 0, t.idx + 1 < t.entries.len()))
+    g.tabs.iter().find(|t| t.id == id).map_or((false, false), |t| (t.hist.can_back(), t.hist.can_forward()))
 }
 
 pub fn download_dir() -> Option<PathBuf> {
@@ -980,6 +1017,24 @@ pub fn page_ping(app: &AppHandle, view_label: &str, frame: &str, kind: &str, hre
                 emit_state(app);
             }
         }
+        "r" => {
+            // history.replaceState: the entry changed address, there is no new one.
+            let Some(url) = engine::url_of(view_label) else { return };
+            let changed = {
+                let mut g = s.app.lock().unwrap();
+                g.tab(id).filter(|t| t.gen == gen).is_some_and(|t| {
+                    let url = normalize(url);
+                    let same = t.url() == url;
+                    if !same {
+                        t.hist.replace(&url);
+                    }
+                    !same
+                })
+            };
+            if changed {
+                emit_state(app);
+            }
+        }
         "u" => {
             // SPA navigation: trust the engine's URL, not the page.
             let Some(url) = engine::url_of(view_label) else { return };
@@ -988,7 +1043,7 @@ pub fn page_ping(app: &AppHandle, view_label: &str, frame: &str, kind: &str, hre
             let before = g.tab(id).map(|t| t.url());
             if let Some(t) = g.tab(id) {
                 if t.gen == gen {
-                    record_entry(t, &url);
+                    record_entry(t, &url, false);
                 }
             }
             let changed = g.tab(id).map(|t| t.url()) != before;
@@ -1025,7 +1080,7 @@ pub fn selected_link(app: &AppHandle, win: &str, id: u32) -> Option<(Url, String
 fn hide_all_except(app: &AppHandle, win: &str, keep: Option<(u32, u32)>) {
     let labels: Vec<String> = {
         let g = shared(app).app.lock().unwrap();
-        g.tabs.iter().filter(|t| t.win == win).map(|t| label(t.id, t.gen)).collect()
+        g.tabs.iter().filter(|t| t.win == win).flat_map(|t| [Some(label(t.id, t.gen)), t.retiring.clone()]).flatten().collect()
     };
     let keep = keep.map(|(i, g)| label(i, g));
     for l in labels {
@@ -1056,15 +1111,12 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
         let id = g.next_id;
         g.next_id += 1;
         let private = g.wins.get(win).is_some_and(|w| w.incognito);
-        let entries = url
-            .map(|u| vec![Entry { url: u.to_string(), profile: profile.clone() }])
-            .unwrap_or_default();
+        let hist = url.map(|u| Hist::seeded(u.as_str(), &profile)).unwrap_or_default();
         g.tabs.push(Tab {
             id,
             win: win.to_string(),
             profile,
-            entries,
-            idx: 0,
+            hist,
             title: String::new(),
             pinned: false,
             group: None,
@@ -1082,6 +1134,10 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
             pid: None,
             mem_mb: 0,
             mode: Mode::Push,
+            fresh: false,
+            fwd_back: false,
+            native_at: None,
+            retiring: None,
             link: None,
         });
         id
@@ -1141,6 +1197,12 @@ pub fn close_tab(app: &AppHandle, id: u32) {
         } else {
             None
         };
+        if let Some(r) = &t.retiring {
+            engine::defer({
+                let r = r.clone();
+                move || engine::close(&r)
+            });
+        }
         (label(t.id, t.gen), next, t.win.clone(), same.len())
     };
     engine::close(&lbl);
@@ -1168,8 +1230,13 @@ pub fn reopen_closed(app: &AppHandle) {
 }
 
 /// Replace the tab's view with one in `profile`, loading `url`.
+///
+/// A view is bound to one request context, so another profile needs a new view (CEF cannot move a
+/// browser between contexts). The old view stays on screen until the new one commits a page, so the
+/// tab never flashes blank. What cannot survive: the page's JS state, a POST body (the cancelled
+/// request is replayed as a GET) and `window.opener`.
 pub fn swap(app: &AppHandle, tab_id: u32, profile: &str, url: &str, announce: bool) {
-    let (old_label, is_active) = {
+    let (old_label, is_active, drop_now, gen) = {
         let mut g = shared(app).app.lock().unwrap();
         let active = g.active(&g.win_of(tab_id));
         let Some(t) = g.tab(tab_id) else { return };
@@ -1177,7 +1244,15 @@ pub fn swap(app: &AppHandle, tab_id: u32, profile: &str, url: &str, announce: bo
             return;
         }
         let previous = Undo { tab: tab_id, profile: t.profile.clone(), url: t.url() };
+        let had_view = !t.discarded;
         let old = label(t.id, t.gen);
+        // A swap still waiting on its page: that unfinished view goes at once, the first old view stays up.
+        let (keep, drop_now) = match t.retiring.take() {
+            Some(first) if had_view => (Some(first), Some(old)),
+            _ if had_view => (Some(old), None),
+            _ => (None, Some(old)),
+        };
+        t.retiring = keep.clone();
         t.gen += 1;
         t.profile = profile.to_string();
         t.title.clear();
@@ -1186,19 +1261,24 @@ pub fn swap(app: &AppHandle, tab_id: u32, profile: &str, url: &str, announce: bo
         if t.mode == Mode::Traverse {
             // History entry already exists; keep idx and mode.
         } else {
-            t.entries.truncate(t.idx + 1);
-            t.entries.push(Entry { url: url.into(), profile: profile.into() });
-            t.idx = t.entries.len() - 1;
+            t.hist.push(url, profile);
             t.mode = Mode::Traverse; // the load below must not push a second entry
         }
         if announce {
             g.undo = Some(previous);
             g.toast = Some(Toast { message: format!("Switched to profile {profile}"), undo: true });
         }
-        (old, active == tab_id)
+        let gen = g.tab(tab_id).map_or(0, |t| t.gen);
+        (keep, active == tab_id, drop_now, gen)
     };
-    engine::close(&old_label);
-    build_webview(app, tab_id, is_active);
+    if let Some(d) = drop_now {
+        engine::close(&d);
+    }
+    // The old view (if any) keeps the screen; the new one is created hidden and revealed on commit.
+    build_webview(app, tab_id, is_active && old_label.is_none());
+    if old_label.is_some() {
+        engine::defer_after(8000, move || finish_swap(&AppHandle, tab_id, gen));
+    }
     emit_state(app);
 }
 
@@ -1260,9 +1340,8 @@ pub fn navigate(app: &AppHandle, tab_id: u32, url: Url, mode_push: bool) {
                     let mut g = s.app.lock().unwrap();
                     if let Some(t) = g.tab(tab_id) {
                         if mode_push {
-                            t.entries.truncate(t.idx + 1);
-                            t.entries.push(Entry { url: url.to_string(), profile: t.profile.clone() });
-                            t.idx = t.entries.len() - 1;
+                            let profile = t.profile.clone();
+                            t.hist.push(url.as_str(), &profile);
                             t.mode = Mode::Traverse;
                         }
                     }
@@ -1278,22 +1357,47 @@ pub fn navigate(app: &AppHandle, tab_id: u32, url: Url, mode_push: bool) {
     }
 }
 
+/// Back/forward. Inside the current view's native history this is CEF's own `go_back` / `go_forward`
+/// (bfcache, scroll and form restore, POST re-submit); the tab's own list only decides when that is
+/// not possible: another profile, a view built after the entry was visited (restart, wake-up, swap),
+/// or an error page in between.
 pub fn go_history(app: &AppHandle, tab_id: u32, delta: i32) {
-    let target = {
+    let (step, lbl, profile, cur_url) = {
         let mut g = shared(app).app.lock().unwrap();
         let Some(t) = g.tab(tab_id) else { return };
-        let new = t.idx as i32 + delta;
-        if new < 0 || new as usize >= t.entries.len() {
+        let step = t.hist.step(delta, &t.profile);
+        if step == Step::None {
             return;
         }
-        t.idx = new as usize;
-        t.mode = Mode::Traverse;
-        t.entries[t.idx].clone()
+        let cur_url = t.url(); // already the target
+        if step == Step::Native {
+            t.native_at = Some(Instant::now());
+        } else {
+            t.mode = Mode::Traverse;
+        }
+        (step, label(t.id, t.gen), t.profile.clone(), cur_url)
     };
-    let Ok(url) = Url::parse(&target.url) else { return };
-    let cur_profile = shared(app).app.lock().unwrap().tab(tab_id).map(|t| t.profile.clone());
-    if cur_profile.as_deref() != Some(target.profile.as_str()) {
-        swap(app, tab_id, &target.profile, &target.url, false);
+    let entry = match step {
+        Step::Native if engine::go(&lbl, delta) => return,
+        Step::Native => {
+            // No live view (sleeping tab) or the engine disagrees: load the target instead.
+            let mut g = shared(app).app.lock().unwrap();
+            let Some(t) = g.tab(tab_id) else { return };
+            t.hist.fresh_view();
+            t.native_at = None;
+            t.mode = Mode::Traverse;
+            Entry { url: cur_url, profile: profile.clone() }
+        }
+        Step::Load(e) => e,
+        Step::None => return,
+    };
+    let Ok(url) = Url::parse(&entry.url) else { return };
+    // App pages (new tab, settings) and web pages need different views; so do profiles.
+    let on_app_view = engine::url_of(&lbl).is_some_and(|u| u.starts_with(&format!("{}://", crate::app::SCHEME)));
+    let discarded = shared(app).app.lock().unwrap().tab(tab_id).is_some_and(|t| t.discarded);
+    let new_view = entry.profile != profile || (!discarded && (on_app_view || is_blank(&entry.url) || internal_view(&entry.url).is_some()));
+    if new_view {
+        swap(app, tab_id, &entry.profile, &entry.url, false);
     } else {
         navigate(app, tab_id, url, false);
     }
@@ -1507,11 +1611,12 @@ pub fn discard_idle(app: &AppHandle) {
         g.tabs
             .iter_mut()
             .filter(|t| !actives.contains(&t.id) && !t.pinned && !t.audible && !t.discarded && t.last_active.elapsed() > limit)
-            .map(|t| {
+            .flat_map(|t| {
                 t.discarded = true;
                 t.loading = false;
-                label(t.id, t.gen)
+                [Some(label(t.id, t.gen)), t.retiring.take()]
             })
+            .flatten()
             .collect()
     };
     for l in &victims {
@@ -1609,11 +1714,13 @@ fn sleep_for_memory_with(app: &AppHandle, rows: &[(u32, u32, u64)]) {
             .map(|t| {
                 t.discarded = true;
                 t.loading = false;
-                label(t.id, t.gen)
+                [Some(label(t.id, t.gen)), t.retiring.take()]
             })
     };
-    if let Some(l) = victim {
-        engine::close(&l);
+    if let Some(ls) = victim {
+        for l in ls.into_iter().flatten() {
+            engine::close(&l);
+        }
         emit_state(app);
     }
 }
@@ -1753,6 +1860,11 @@ struct Saved {
     /// Selected tab of its window.
     #[serde(default)]
     active: bool,
+    /// Back/forward list around the current page (older sessions have none).
+    #[serde(default)]
+    history: Vec<Entry>,
+    #[serde(default)]
+    idx: usize,
 }
 
 #[derive(Serialize, serde::Deserialize, Default)]
@@ -1777,7 +1889,9 @@ pub fn save_session(app: &AppHandle) {
                 .tabs
                 .iter()
                 .filter(|t| !t.private)
-                .map(|t| Saved {
+                .map(|t| {
+                    let (history, idx) = t.hist.for_save();
+                    Saved {
                     url: t.url(),
                     profile: t.profile.clone(),
                     pinned: t.pinned,
@@ -1785,7 +1899,9 @@ pub fn save_session(app: &AppHandle) {
                     title: t.title.clone(),
                     win: t.win.clone(),
                     active: g.active(&t.win) == t.id,
-                })
+                    history,
+                    idx,
+                }})
                 .collect(),
         }
     };
@@ -1808,6 +1924,7 @@ pub fn restore_session(app: &AppHandle) {
         open_tab_in(app, "main", url, None, true);
         return;
     }
+    let profiles: Vec<String> = shared(app).app.lock().unwrap().cfg.profiles.iter().map(|p| p.name.clone()).collect();
     let mut to_activate: HashMap<String, u32> = HashMap::new();
     let mut first_of: HashMap<String, u32> = HashMap::new();
     let mut made: HashSet<String> = HashSet::from(["main".to_string()]);
@@ -1828,6 +1945,8 @@ pub fn restore_session(app: &AppHandle) {
         };
         let id = open_tab_in(app, &s.win, Url::parse(&s.url).ok(), Some(profile), false);
         with_tab(app, id, |t| {
+            let profile = t.profile.clone();
+            t.hist.restore(s.history, s.idx, &s.url, &profile, |p| profiles.iter().any(|x| x == p));
             t.pinned = s.pinned;
             t.group = s.group;
             t.title = s.title;

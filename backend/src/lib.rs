@@ -6,6 +6,7 @@ pub mod config;
 pub mod db;
 pub mod engine;
 pub mod extensions;
+pub mod history;
 pub mod import;
 pub mod ipc;
 pub mod menu;
