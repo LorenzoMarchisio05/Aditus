@@ -68,6 +68,8 @@ pub struct Tab {
     pub discarded: bool,
     pub loading: bool,
     pub audible: bool,
+    /// Frames currently playing media; `audible` is "any of them" (an iframe pausing must not silence the page).
+    pub playing: HashSet<String>,
     /// The user silenced this tab (kept across sleep).
     pub muted: bool,
     /// Private-window tab: no history, no saved session, no profile swaps, throwaway storage.
@@ -130,6 +132,8 @@ pub struct App {
     undo: Option<Undo>,
     /// Last user gesture per tab (click, Enter, submit) and the link it landed on, reported by the page script.
     gestures: HashMap<u32, (Instant, String)>,
+    /// Last moment a download was legitimate per tab: a user gesture or one of our own UI actions.
+    dl_ok: HashMap<u32, Instant>,
     /// Recently closed tabs (url, profile), newest last.
     closed: Vec<(String, String)>,
 }
@@ -150,6 +154,7 @@ impl App {
             toast: None,
             undo: None,
             gestures: HashMap::new(),
+            dl_ok: HashMap::new(),
             closed: vec![],
         }
     }
@@ -501,6 +506,8 @@ pub fn on_navigation(app: &AppHandle, label: &str, u: &Url, user_gesture: bool, 
         }
         if user && !is_redirect {
             g.gestures.remove(&tab_id);
+            // The click may be on a file link: the download starts after this navigation.
+            g.dl_ok.insert(tab_id, Instant::now());
         }
         let Some(t) = g.tabs.iter().find(|t| t.id == tab_id && t.gen == gen) else { return true };
         let (profile, private) = (t.profile.clone(), t.private);
@@ -634,6 +641,8 @@ pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool) {
         t.loading = started;
         if started {
             t.link = None;
+            t.playing.clear();
+            t.audible = false;
             // Keep the old title while a page on the same site reloads (a login click often does),
             // so the tab label doesn't flash its address.
             let host = |u: &str| Url::parse(u).ok().and_then(|u| u.host_str().map(String::from));
@@ -713,6 +722,38 @@ pub fn download_dir() -> Option<PathBuf> {
 }
 
 /// `finished`: `None` when it starts, `Some(ok)` when it ends.
+/// How long after a click (or one of our own download actions) a tab may start downloads.
+const DOWNLOAD_WINDOW: Duration = Duration::from_secs(10);
+
+fn download_fresh(last: Option<Instant>) -> bool {
+    last.is_some_and(|t| t.elapsed() < DOWNLOAD_WINDOW)
+}
+
+/// Our own UI starts a download in this view (Save Image As, Save Page): let it through.
+pub fn allow_download(app: &AppHandle, view_label: &str) {
+    if let Some((id, _)) = parse_label(view_label) {
+        shared(app).app.lock().unwrap().dl_ok.insert(id, Instant::now());
+    }
+}
+
+/// May this view start a download now? Views that are not tabs (app pages) always may; a page that
+/// starts one with no recent user gesture is refused, with a toast.
+pub fn download_allowed(app: &AppHandle, view_label: &str) -> bool {
+    let Some((id, _)) = parse_label(view_label) else { return true };
+    let ok = {
+        let mut g = shared(app).app.lock().unwrap();
+        let ok = download_fresh(g.dl_ok.get(&id).copied());
+        if !ok {
+            g.toast = Some(Toast { message: "Blocked an automatic download".into(), undo: false });
+        }
+        ok
+    };
+    if !ok {
+        emit_state(app);
+    }
+    ok
+}
+
 pub fn on_download(app: &AppHandle, url: &str, path: &str, finished: Option<bool>) {
     let s = shared(app);
     match finished {
@@ -767,7 +808,7 @@ pub fn prewake(app: &AppHandle, id: u32) {
 /// Tells the window's UI where the pointer is over the active page (`x`, `y` as fractions of it), for the mascot.
 fn tell_pointer(app: &AppHandle, id: u32, json: &str) {
     let win = {
-        let mut g = shared(app).app.lock().unwrap();
+        let g = shared(app).app.lock().unwrap();
         let win = g.win_of(id);
         if g.active(&win) != id {
             return;
@@ -777,12 +818,34 @@ fn tell_pointer(app: &AppHandle, id: u32, json: &str) {
     engine::emit_to(&wv_label("ui", &win), "page-pointer", json);
 }
 
-pub fn page_ping(app: &AppHandle, view_label: &str, kind: &str, href: &str, x: f64, y: f64) {
+/// Records one frame's playing state; true when the tab's audibility changed.
+fn set_playing(t: &mut Tab, frame: &str, on: bool) -> bool {
+    if on {
+        t.playing.insert(frame.to_string());
+    } else {
+        t.playing.remove(frame);
+    }
+    std::mem::replace(&mut t.audible, !t.playing.is_empty()) != !t.playing.is_empty()
+}
+
+/// A subframe started a new load: whatever it was playing is gone.
+pub fn frame_reset(app: &AppHandle, view_label: &str, frame: &str) {
+    let Some((id, _)) = parse_label(view_label) else { return };
+    let changed = shared(app).app.lock().unwrap().tab(id).is_some_and(|t| set_playing(t, frame, false));
+    if changed {
+        emit_state(app);
+    }
+}
+
+pub fn page_ping(app: &AppHandle, view_label: &str, frame: &str, kind: &str, href: &str, x: f64, y: f64) {
     let Some((id, gen)) = parse_label(view_label) else { return };
     let s = shared(app);
     match kind {
         "g" => {
-            s.app.lock().unwrap().gestures.insert(id, (Instant::now(), href.to_string()));
+            let mut g = s.app.lock().unwrap();
+            g.gestures.insert(id, (Instant::now(), href.to_string()));
+            g.dl_ok.insert(id, Instant::now());
+            drop(g);
             tell_pointer(app, id, r#"{"c":1}"#);
         }
         "m" => tell_pointer(app, id, &format!(r#"{{"x":{:.2},"y":{:.2}}}"#, x.clamp(0.0, 1.0), y.clamp(0.0, 1.0))),
@@ -790,7 +853,7 @@ pub fn page_ping(app: &AppHandle, view_label: &str, kind: &str, href: &str, x: f
         "p1" | "p0" => {
             let changed = {
                 let mut g = s.app.lock().unwrap();
-                g.tab(id).is_some_and(|t| std::mem::replace(&mut t.audible, kind == "p1") != (kind == "p1"))
+                g.tab(id).is_some_and(|t| set_playing(t, frame, kind == "p1"))
             };
             if changed {
                 emit_state(app);
@@ -887,6 +950,7 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
             discarded: true,
             loading: false,
             audible: false,
+            playing: HashSet::new(),
             muted: false,
             private,
             zoom: None,
@@ -940,6 +1004,7 @@ pub fn close_tab(app: &AppHandle, id: u32) {
         let Some(pos) = g.tabs.iter().position(|t| t.id == id) else { return };
         let t = g.tabs.remove(pos);
         g.gestures.remove(&id);
+        g.dl_ok.remove(&id);
         let url = t.url();
         if !t.private && !is_blank(&url) && internal_view(&url).is_none() {
             g.closed.push((url, t.profile.clone()));
@@ -1196,7 +1261,10 @@ pub fn page_action(app: &AppHandle, tab_id: u32, act: &str) {
     match act {
         "print" => engine::print(&l),
         "reader" => engine::eval(&l, crate::scripts::READER),
-        _ => engine::eval(&l, "(()=>{const a=document.createElement('a');a.href=location.href;a.download=(document.title||'page')+'.html';document.body.appendChild(a);a.click();a.remove()})()"),
+        _ => {
+            allow_download(app, &l);
+            engine::eval(&l, "(()=>{const a=document.createElement('a');a.href=location.href;a.download=(document.title||'page')+'.html';document.body.appendChild(a);a.click();a.remove()})()");
+        }
     }
 }
 
@@ -1634,4 +1702,16 @@ fn idle_tick() {
         discard_idle(&AppHandle);
         idle_tick();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn download_needs_recent_gesture() {
+        assert!(!download_fresh(None));
+        assert!(download_fresh(Some(Instant::now())));
+        assert!(!download_fresh(Instant::now().checked_sub(DOWNLOAD_WINDOW + Duration::from_secs(1))));
+    }
 }

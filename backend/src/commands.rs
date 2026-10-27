@@ -222,10 +222,10 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
                 if c.allowlist.contains(&host) {
                     c.allowlist.retain(|h| h != &host);
                 } else {
-                    c.allowlist.push(host);
+                    c.allowlist.push(host.clone());
                 }
             });
-            adblock::refresh(&APP);
+            adblock::refresh_host(&APP, &host);
             ok(Value::Null)
         }
         "pin_tab" => {
@@ -472,7 +472,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             ok(Value::Null)
         }
         "page_ping" => {
-            tabs::page_ping(&APP, &ctx.label, &str_arg(&a, "kind"), &str_arg(&a, "href"), num(&a, "x"), num(&a, "y"));
+            tabs::page_ping(&APP, &ctx.label, &ctx.frame, &str_arg(&a, "kind"), &str_arg(&a, "href"), num(&a, "x"), num(&a, "y"));
             ok(Value::Null)
         }
         _ => reply.done(Err(format!("unknown command {cmd}"))),
@@ -603,8 +603,20 @@ fn show_palette(ctx: &Ctx) {
 /// Rows last pushed to each window's suggestion list, for a list that is still loading.
 static SUGGEST: Mutex<Vec<(String, Value)>> = Mutex::new(Vec::new());
 
+/// Suggestion view label -> the view whose input must keep the keyboard while the list is up.
+static SUGGEST_FROM: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+
+/// The suggestion view was created / finished loading (it may grab focus then): hand the keyboard back.
+pub fn suggest_ready(label: &str) {
+    let from = SUGGEST_FROM.lock().unwrap().iter().find(|(l, _)| l == label).map(|(_, f)| f.clone());
+    if let Some(from) = from {
+        engine::focus(&from);
+    }
+}
+
 fn close_suggest(win: &str) {
     SUGGEST.lock().unwrap().retain(|(w, _)| w != win);
+    SUGGEST_FROM.lock().unwrap().retain(|(l, _)| *l != tabs::wv_label("suggest", win));
     engine::close(&tabs::wv_label("suggest", win));
 }
 
@@ -630,12 +642,12 @@ fn suggest_show(ctx: &Ctx, a: &Value) {
         engine::set_bounds(&label, bounds);
         engine::emit_to(&label, "suggest-rows", &payload.to_string());
     } else {
+        // The list never takes the keyboard from the input being typed in (see `suggest_ready`).
+        let mut sf = SUGGEST_FROM.lock().unwrap();
+        sf.retain(|(l, _)| *l != label);
+        sf.push((label.clone(), ctx.label.clone()));
+        drop(sf);
         engine::create(overlay(&label, win, "suggest", bounds));
-        // The list never takes the keyboard from the input being typed in.
-        let from = ctx.label.clone();
-        let again = from.clone();
-        engine::defer_after(60, move || engine::focus(&from));
-        engine::defer_after(400, move || engine::focus(&again));
     }
 }
 
