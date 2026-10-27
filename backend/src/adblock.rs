@@ -53,9 +53,22 @@ pub fn build(texts: &[String]) -> (Engine, usize) {
         set.add_filter_list(popup_as_document(t), ParseOptions::default());
         rules += t.lines().filter(|l| !l.is_empty() && !l.starts_with('!') && !l.starts_with('[')).count();
     }
+    set.add_filter_list(youtube_rules(), ParseOptions::default());
     let mut engine = Engine::new_with_filter_set(set);
     engine.use_resources(crate::scriptlets::resources());
     (engine, rules)
+}
+
+/// Built-in scriptlet rules stripping YouTube's ad fields from player responses (list: `scripts::YT_AD_FIELDS`).
+/// The remaining ad handling is the DOM fallback in `scripts::YOUTUBE`.
+fn youtube_rules() -> String {
+    let f = crate::scripts::YT_AD_FIELDS;
+    let paths: Vec<String> = f.iter().map(|x| x.to_string()).chain(f.iter().map(|x| format!("playerResponse.{x}"))).collect();
+    let mut out = format!("youtube.com##+js(json-prune, {})\n", paths.join(" "));
+    for x in f {
+        out.push_str(&format!("youtube.com##+js(set-constant, ytInitialPlayerResponse.{x}, undefined)\n"));
+    }
+    out
 }
 
 /// adblock-rust ignores `$popup`, and only popups are ever checked as "document" (main-frame loads skip the filter),
@@ -164,17 +177,41 @@ pub fn hijack(url: &str, source: &str, link: &str) -> bool {
     enabled_for(&host) && is_hijack(url, source, link)
 }
 
-/// Sign-in and payment popups open from script buttons (no link), so they look like hijacks; popunders never use these.
-const AUTH_HOSTS: &[&str] =
-    &["accounts.google.com", "appleid.apple.com", "login.microsoftonline.com", "login.live.com", "www.facebook.com", "github.com", "paypal.com", "stripe.com", "checkout.stripe.com"];
+/// Sign-in popups open from script buttons (no link), so they look like hijacks; popunders never use these.
+const AUTH_HOSTS: &[&str] = &["accounts.google.com", "appleid.apple.com", "login.microsoftonline.com", "login.live.com", "www.facebook.com", "github.com"];
+
+/// Checkout and 3-D Secure pages, opened the same way.
+const PAYMENT_HOSTS: &[&str] =
+    &["stripe.com", "paypal.com", "adyen.com", "braintreegateway.com", "klarna.com", "checkout.com", "mollie.com", "worldpay.com", "cardinalcommerce.com", "3dsecure.io", "secure.checkout.visa.com"];
+
+fn host_of(url: &str) -> String {
+    url::Url::parse(url).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default()
+}
+
+/// Registrable domain (eTLD+1) via the public suffix list; the host itself for IPs and unknown suffixes.
+fn site(host: &str) -> &str {
+    psl::domain_str(host).unwrap_or(host)
+}
+
+fn listed(hosts: &[&str], host: &str) -> bool {
+    hosts.iter().any(|h| host == *h || host.strip_suffix(h).is_some_and(|p| p.ends_with('.')))
+}
+
+/// Should a page-started popup/navigation from `opener` to `target` (hosts) be treated as a hijack?
+/// `link` is the href of the link the user's click landed on ("" if none). Allowed: same site, the clicked link's
+/// site, known sign-in hosts, known payment hosts. Everything else is blocked.
+/// (Callers only get here after a user gesture, so there is no "no gesture" input.)
+fn is_hijack_host(opener: &str, target: &str, link: &str) -> bool {
+    if target.is_empty() {
+        return true;
+    }
+    let same = |h: &str| !h.is_empty() && site(h) == site(target);
+    let ok = same(opener) || same(&host_of(link)) || listed(AUTH_HOSTS, target) || listed(PAYMENT_HOSTS, target);
+    !ok
+}
 
 fn is_hijack(url: &str, source: &str, link: &str) -> bool {
-    let host = url::Url::parse(url).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
-    if AUTH_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}"))) {
-        return false;
-    }
-    let third = |from: &str| Request::new(url, from, "document", "GET").map_or(true, |r| r.is_third_party);
-    third(source) && (link.is_empty() || third(link))
+    is_hijack_host(&host_of(source), &host_of(url), link)
 }
 
 /// Settings or allowlist changed: reload the active tab so it is re-filtered.
@@ -346,6 +383,43 @@ mod tests {
         assert!(!is_hijack("https://accounts.google.com/o/oauth2/auth", "https://shop.com/", ""));
         assert!(!is_hijack("https://www.paypal.com/checkout", "https://shop.com/", ""));
         assert!(is_hijack("https://notpaypal.com/x", "https://shop.com/", ""));
+    }
+
+    #[test]
+    fn hijack_decision_table() {
+        // (opener host, target host, clicked link, hijack?)
+        let t = [
+            ("shop.com", "accounts.google.com", "", false), // OAuth
+            ("shop.com", "login.microsoftonline.com", "", false),
+            ("shop.com", "checkout.stripe.com", "", false), // payment
+            ("shop.com", "hooks.stripe.com", "", false),    // 3DS
+            ("shop.com", "www.paypal.com", "", false),
+            ("shop.com", "notpaypal.com", "", true),
+            ("shop.com", "evil-stripe.com", "", true),
+            ("anime.ac", "ocbwmegh.in", "", true), // tab-under ad
+            ("anime.ac", "ocbwmegh.in", "https://anime.ac/news", true),
+            ("anime.ac", "t.me", "https://t.me/x", false),  // click on a link to that site
+            ("www.anime.ac", "static.anime.ac", "", false), // same site, subdomains
+            ("anime.ac", "www.anime.ac", "", false),
+            ("a.co.uk", "b.co.uk", "", true), // a public suffix is not a site
+            ("a.github.io", "b.github.io", "", true),
+            ("a.co.uk", "x.a.co.uk", "", false),
+            ("anime.ac", "", "", true), // about:blank
+        ];
+        for (o, tg, l, want) in t {
+            assert_eq!(is_hijack_host(o, tg, l), want, "{o} -> {tg} (link {l:?})");
+        }
+        assert!(is_hijack("about:blank", "https://anime.ac/", ""));
+    }
+
+    #[test]
+    fn youtube_ads_are_pruned_by_scriptlets() {
+        let (e, _) = build(&[FALLBACK.into()]);
+        let js = e.url_cosmetic_resources("https://www.youtube.com/watch?v=x").injected_script;
+        assert!(js.contains("aditusJsonPrune(\"adPlacements playerAds"), "{js}");
+        assert!(js.contains("playerResponse.adSlots"), "{js}");
+        assert!(js.contains("aditusSet(\"ytInitialPlayerResponse.playerAds\", \"undefined\")"), "{js}");
+        assert!(e.url_cosmetic_resources("https://example.org/").injected_script.is_empty());
     }
 
     #[test]

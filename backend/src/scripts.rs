@@ -46,19 +46,19 @@ const go=()=>{try{scan(document.documentElement);sched();new MutationObserver(m=
 document.readyState==='loading'?addEventListener('DOMContentLoaded',go):go()}
 })();"#;
 
-/// YouTube serves ads from its own origin, so network and cosmetic filters can't touch them:
-/// strip ad data from player responses and skip any ad that still plays.
-/// ponytail: hand-written, breaks when YouTube renames fields; port uBO scriptlets if it keeps breaking.
-/// Paused per tab via sessionStorage (set by adblock::refresh).
+/// Ad fields YouTube puts in player responses. The one place to edit when YouTube renames them: `adblock::youtube_rules`
+/// turns this list into `json-prune` / `set-constant` scriptlet rules (see `scriptlets.rs`), so the stripping itself
+/// is generic and goes through the filter pipeline; `YOUTUBE` below is only the DOM fallback.
+pub const YT_AD_FIELDS: &[&str] = &["adPlacements", "playerAds", "adSlots", "adBreakParams", "adBreakHeartbeatParams", "adSafetyReason"];
+
+/// YouTube serves ads from its own origin, so network and cosmetic filters can't touch them. Ad data is stripped by the
+/// scriptlets (`YT_AD_FIELDS`); this is the thin fallback for what still plays: skip via `.ad-showing` and the skip
+/// button, the stall retry, the enforcement wall. Paused per tab via sessionStorage (set by adblock::refresh).
 pub const YOUTUBE: &str = r#"(()=>{
 if(!/(^|\.)youtube\.com$/.test(location.hostname))return;
 try{if(sessionStorage.getItem('__aditus_off'))return}catch(e){}
-const K=['adPlacements','playerAds','adSlots','adBreakParams','adBreakHeartbeatParams','adSafetyReason'];
-let S=0,dt;const strip=(o,d=0)=>{try{if(o&&typeof o==='object'&&d<5){for(const k of K)if(k in o){try{delete o[k]}catch(e){}S++;console.debug('[aditus] stripped',k)}for(const k in o)if(o[k]&&typeof o[k]==='object')strip(o[k],d+1)}}catch(e){}return o};
-const G=f=>()=>{try{f()}catch(e){}};// one failing patch must never break the page
-let v;try{Object.defineProperty(window,'ytInitialPlayerResponse',{configurable:true,get:()=>v,set:x=>{v=strip(x)}})}catch(e){}
-JSON.parse=new Proxy(JSON.parse,{apply:(t,th,a)=>strip(Reflect.apply(t,th,a))});
-Response.prototype.json=new Proxy(Response.prototype.json,{apply:(t,th,a)=>Reflect.apply(t,th,a).then(strip)});
+// Dev diagnostic: the json-prune scriptlet counts what it pruned in window.__aditusPruned.
+setTimeout(()=>{try{if(!window.__aditusPruned)console.debug('[aditus] no ad fields pruned after 20s: YouTube may have renamed them (scripts::YT_AD_FIELDS)')}catch(e){}},20000);
 // uBO's trick: YouTube holds the video back for the length of an ad it still schedules server-side. Player requests are
 // rewritten (V=0 channel screen, then other variants) and, if the video stalls with nothing playing, reloaded with the next one.
 let V=0,stall=0;
