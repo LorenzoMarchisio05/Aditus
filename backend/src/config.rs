@@ -167,21 +167,46 @@ impl Default for Config {
     }
 }
 
+/// Set when `Config::load` had to move an unreadable config aside; startup shows a toast.
+pub static BACKED_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 impl Config {
     pub fn load(path: &Path) -> Self {
         let Ok(s) = std::fs::read_to_string(path) else { return Self::default() };
         match toml::from_str(&s).ok().filter(|c: &Config| !c.profiles.is_empty()) {
-            Some(c) => c,
+            Some(mut c) => {
+                c.sanitize();
+                c
+            }
             None => {
                 // Keep the broken file so a typo doesn't cost the user their profiles.
-                let _ = std::fs::rename(path, path.with_extension("toml.bak"));
+                let _ = crate::applog::check("config backup", std::fs::rename(path, path.with_extension("toml.bak")));
+                BACKED_UP.store(true, std::sync::atomic::Ordering::Relaxed);
                 Self::default()
             }
         }
     }
 
+    /// Hand-edit hygiene: drop blank/duplicate profile names (first wins) and mappings to unknown profiles.
+    pub fn sanitize(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        self.profiles.retain(|p| !p.name.trim().is_empty() && seen.insert(p.name.clone()));
+        if self.profiles.is_empty() {
+            *self = Self::default();
+            return;
+        }
+        let names = &self.profiles;
+        self.mappings.retain(|m| {
+            let ok = names.iter().any(|p| p.name == m.profile);
+            if !ok {
+                crate::applog::log(&format!("config: dropped mapping {} -> unknown profile {}", m.pattern, m.profile));
+            }
+            ok
+        });
+    }
+
     pub fn save(&self, path: &Path) {
-        if let Ok(s) = toml::to_string_pretty(self) {
+        if let Ok(s) = crate::applog::check("config serialize", toml::to_string_pretty(self)) {
             let _ = std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")));
             let _ = crate::applog::check("config save", write_atomic(path, s));
         }
@@ -225,6 +250,15 @@ mod tests {
         let c: Config = toml::from_str("profiles = [{ name = \"W\", id = \"x\" }]\n[settings]\nadblock = false").unwrap();
         assert!(!c.settings.adblock && c.settings.idle_minutes == 10);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn sanitize_dedupes_and_drops_orphans() {
+        let mut c: Config = toml::from_str("profiles = [{name='A',id='1'},{name='A',id='2'},{name=' ',id='3'}]\nmappings = [{pattern='x',profile='A'},{pattern='y',profile='Z'}]\n[settings]\nadblock = false").unwrap();
+        c.sanitize();
+        assert_eq!(c.profiles.len(), 1);
+        assert_eq!(c.profiles[0].id, "1");
+        assert_eq!(c.mappings.len(), 1);
     }
 
     #[test]

@@ -69,7 +69,7 @@ pub fn chrome_passwords_csv(text: &str) -> Vec<(String, String, String)> {
 /// copy, because Chrome keeps the original locked while it runs.
 pub fn chrome_history(db: &std::path::Path) -> Option<Vec<(String, String, i64)>> {
     let tmp = std::env::temp_dir().join(format!("aditus-import-{}.db", std::process::id()));
-    std::fs::copy(db, &tmp).ok()?;
+    crate::applog::check("import copy history", std::fs::copy(db, &tmp)).ok()?;
     let rows = (|| -> rusqlite::Result<_> {
         let c = rusqlite::Connection::open_with_flags(&tmp, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         let mut st = c.prepare("SELECT url,title,last_visit_time FROM urls WHERE url LIKE 'http%' ORDER BY last_visit_time DESC LIMIT 5000")?;

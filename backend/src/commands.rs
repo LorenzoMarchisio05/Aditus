@@ -32,6 +32,7 @@ fn mutate_cfg(f: impl FnOnce(&mut Config)) {
     {
         let mut g = s.app.lock().unwrap();
         f(&mut g.cfg);
+        g.cfg.sanitize();
         g.cfg.save(&s.cfg_path);
     }
     tabs::emit_state(&APP);
@@ -301,12 +302,18 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             }
             ok(Value::Null)
         }
-        "history_search" => ok(serde_json::to_value(shared(&APP).db.search_history(&str_arg(&a, "q"), 200)).unwrap_or(Value::Null)),
+        "history_search" => {
+            let q = str_arg(&a, "q");
+            std::thread::spawn(move || reply.done(Ok(serde_json::to_value(shared(&APP).db.search_history(&q, 200)).unwrap_or(Value::Null))));
+        }
         "bookmark_toggle" => {
             tabs::toggle_bookmark(&APP, active_id(win));
             ok(Value::Null)
         }
-        "bookmark_search" => ok(serde_json::to_value(shared(&APP).db.search_bookmarks(&str_arg(&a, "q"), 200)).unwrap_or(Value::Null)),
+        "bookmark_search" => {
+            let q = str_arg(&a, "q");
+            std::thread::spawn(move || reply.done(Ok(serde_json::to_value(shared(&APP).db.search_bookmarks(&q, 200)).unwrap_or(Value::Null))));
+        }
         "bookmark_remove" => {
             shared(&APP).db.remove_bookmark(&str_arg(&a, "url"));
             tabs::emit_state(&APP);

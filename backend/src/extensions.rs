@@ -209,7 +209,7 @@ fn update_all() {
         // An up-to-date extension makes the store answer with nothing, which fails to parse: no update.
         let Ok(new) = stage_id(&id, Some(&have)) else { discard(&id); continue };
         if text(&new, "version") != have && perms(&new).iter().all(|p| perms(&old).contains(p)) {
-            let _ = commit(&id);
+            let _ = crate::applog::check("extension update commit", commit(&id));
         } else {
             discard(&id);
         }
@@ -236,7 +236,7 @@ pub fn set_enabled(id: &str, on: bool) {
         d.push(id.to_string());
     }
     let _ = fs::create_dir_all(root());
-    let _ = crate::config::write_atomic(&root().join("state.json"), json!({ "disabled": d }).to_string());
+    let _ = crate::applog::check("extensions state", crate::config::write_atomic(&root().join("state.json"), json!({ "disabled": d }).to_string()));
 }
 
 pub fn remove(id: &str) {

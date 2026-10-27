@@ -414,7 +414,7 @@ pub fn switch_profile(app: &AppHandle, tab_id: u32, profile: &str) {
         let (old, show) = {
             let mut g = shared(app).app.lock().unwrap();
             let active = g.active(&g.win_of(tab_id));
-            let t = g.tab(tab_id).unwrap();
+            let Some(t) = g.tab(tab_id) else { return };
             let old = label(t.id, t.gen);
             t.gen += 1;
             t.profile = profile.into();
@@ -894,7 +894,7 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
         let profile = profile
             .or(mapped)
             .filter(|p| g.cfg.profile(p).is_some())
-            .unwrap_or_else(|| g.cfg.profiles[0].name.clone());
+            .unwrap_or_else(|| g.cfg.profiles.first().map(|p| p.name.clone()).unwrap_or_default());
         let id = g.next_id;
         g.next_id += 1;
         let private = g.wins.get(win).is_some_and(|w| w.incognito);
@@ -940,7 +940,7 @@ pub fn activate(app: &AppHandle, id: u32) {
         let mut g = shared(app).app.lock().unwrap();
         let Some(win) = g.tabs.iter().find(|t| t.id == id).map(|t| t.win.clone()) else { return };
         g.win(&win).active = id;
-        let t = g.tab(id).unwrap();
+        let Some(t) = g.tab(id) else { return };
         t.last_active = Instant::now();
         let nb = t.discarded;
         t.discarded = false;
@@ -1378,7 +1378,7 @@ fn apply_memory(app: &AppHandle, rows: &[(u32, u32, u64)]) -> u64 {
         }
         for t in g.tabs.iter_mut() {
             let mb = match t.pid.filter(|_| !t.discarded) {
-                Some(p) => rows.iter().find(|r| r.0 == p).map_or(0, |r| r.2 / 1024 / users[&p]) as u32,
+                Some(p) => rows.iter().find(|r| r.0 == p).map_or(0, |r| r.2 / 1024 / users.get(&p).copied().unwrap_or(1).max(1)) as u32,
                 None => 0,
             };
             changed |= mb.abs_diff(t.mem_mb) >= 5;
@@ -1641,7 +1641,7 @@ pub fn restore_session(app: &AppHandle) {
         }
         let profile = {
             let g = shared(app).app.lock().unwrap();
-            if g.cfg.profile(&s.profile).is_some() { s.profile } else { g.cfg.profiles[0].name.clone() }
+            if g.cfg.profile(&s.profile).is_some() { s.profile } else { g.cfg.profiles.first().map(|p| p.name.clone()).unwrap_or_default() }
         };
         let id = open_tab_in(app, &s.win, Url::parse(&s.url).ok(), Some(profile), false);
         with_tab(app, id, |t| {
@@ -1675,6 +1675,9 @@ pub fn startup(app: &AppHandle) {
         }
     }
     restore_session(app);
+    if crate::config::BACKED_UP.load(std::sync::atomic::Ordering::Relaxed) {
+        s.app.lock().unwrap().toast = Some(Toast { message: "config.toml was invalid; saved as config.toml.bak".into(), undo: false });
+    }
     open_urls(app, std::env::args().skip(1));
     crate::drain_open_queue();
     idle_tick();

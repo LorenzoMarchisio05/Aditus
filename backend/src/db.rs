@@ -93,10 +93,10 @@ impl Db {
     }
 
     pub fn set_title(&self, url: &str, title: &str) {
-        let _ = self.0.lock().unwrap().execute(
+        let _ = crate::applog::check("db set_title", self.0.lock().unwrap().execute(
             "UPDATE history SET title=?2 WHERE id=(SELECT MAX(id) FROM history WHERE url=?1)",
             params![url, title],
-        );
+        ));
     }
 
     pub fn search_history(&self, q: &str, limit: i64) -> Vec<HistoryRow> {
@@ -127,7 +127,7 @@ impl Db {
     }
 
     pub fn remove_bookmark(&self, url: &str) {
-        let _ = self.0.lock().unwrap().execute("DELETE FROM bookmarks WHERE url=?1", params![url]);
+        let _ = crate::applog::check("db remove_bookmark", self.0.lock().unwrap().execute("DELETE FROM bookmarks WHERE url=?1", params![url]));
     }
 
     pub fn is_bookmarked(&self, url: &str) -> bool {
@@ -143,11 +143,11 @@ impl Db {
 
     /// Saved-login index. Passwords live in the OS keychain, never here.
     pub fn add_login(&self, origin: &str, user: &str) {
-        let _ = self.0.lock().unwrap().execute("INSERT OR IGNORE INTO logins VALUES(?1,?2)", params![origin, user]);
+        let _ = crate::applog::check("db add_login", self.0.lock().unwrap().execute("INSERT OR IGNORE INTO logins VALUES(?1,?2)", params![origin, user]));
     }
 
     pub fn remove_login(&self, origin: &str, user: &str) {
-        let _ = self.0.lock().unwrap().execute("DELETE FROM logins WHERE origin=?1 AND username=?2", params![origin, user]);
+        let _ = crate::applog::check("db remove_login", self.0.lock().unwrap().execute("DELETE FROM logins WHERE origin=?1 AND username=?2", params![origin, user]));
     }
 
     /// `(origin, username)`, optionally for one origin.
@@ -156,23 +156,23 @@ impl Db {
     }
 
     pub fn prune_history(&self, days: u32) {
-        let _ = self.0.lock().unwrap().execute(
+        let _ = crate::applog::check("db prune_history", self.0.lock().unwrap().execute(
             "DELETE FROM history WHERE visited_at < strftime('%s','now') - ?1 * 86400",
             params![days],
-        );
+        ));
     }
 
     /// History from the last `hours` hours; 0 clears everything.
     pub fn clear_history_since(&self, hours: u32) {
-        let _ = self.0.lock().unwrap().execute("DELETE FROM history WHERE ?1 = 0 OR visited_at >= strftime('%s','now') - ?1 * 3600", params![hours]);
+        let _ = crate::applog::check("db clear_history_since", self.0.lock().unwrap().execute("DELETE FROM history WHERE ?1 = 0 OR visited_at >= strftime('%s','now') - ?1 * 3600", params![hours]));
     }
 
     pub fn clear_downloads(&self) {
-        let _ = self.0.lock().unwrap().execute("DELETE FROM downloads", []);
+        let _ = crate::applog::check("db clear_downloads", self.0.lock().unwrap().execute("DELETE FROM downloads", []));
     }
 
     pub fn clear_history(&self) {
-        let _ = self.0.lock().unwrap().execute("DELETE FROM history", []);
+        let _ = crate::applog::check("db clear_history", self.0.lock().unwrap().execute("DELETE FROM history", []));
     }
 
     pub fn add_download(&self, url: &str, path: &str) -> i64 {
