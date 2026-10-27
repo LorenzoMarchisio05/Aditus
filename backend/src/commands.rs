@@ -412,20 +412,21 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             // Origin is the browser's view of the calling frame; the payload only carries what was typed.
             let (user, pw) = (str_arg(&a, "u"), str_arg(&a, "p"));
             let origin = passwords::origin_of(&ctx.frame_url);
+            let who = tabs::parse_label(&ctx.label).and_then(|(id, _)| tabs::profile_of(&APP, id));
             let skip = pw.is_empty() || pw.len() > 1024 || user.len() > 512 || tabs::label_private(&APP, &ctx.label);
-            if let (Some(origin), false) = (origin, skip) {
-                if passwords::get(passwords::SERVICE, &origin, &user).as_deref() != Some(pw.as_str()) {
+            if let (Some(origin), Some((pid, first)), false) = (origin, who, skip) {
+                if passwords::get(passwords::SERVICE, &pid, &origin, &user, first).as_deref() != Some(pw.as_str()) {
                     let ev = json!({"label": ctx.label, "origin": origin, "username": user}).to_string();
-                    passwords::offer(&ctx.label, origin, user, pw);
+                    passwords::offer(&ctx.label, pid, origin, user, pw);
                     engine::emit_to(&tabs::wv_label("ui", &ctx.win), "login-offer", &ev);
                 }
             }
             ok(Value::Null)
         }
         "login_save" => match passwords::take(&str_arg(&a, "label")) {
-            Some(o) => match passwords::save(passwords::SERVICE, &o.origin, &o.user, &o.pw) {
+            Some(o) => match passwords::save(passwords::SERVICE, &o.profile, &o.origin, &o.user, &o.pw) {
                 Ok(()) => {
-                    shared(&APP).db.add_login(&o.origin, &o.user);
+                    shared(&APP).db.add_login(&o.profile, &o.origin, &o.user);
                     tabs::emit_state(&APP);
                     ok(Value::Null)
                 }
@@ -437,23 +438,25 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             passwords::take(&str_arg(&a, "label"));
             ok(Value::Null)
         }
-        "login_list" => ok(json!(shared(&APP).db.logins(None))),
+        "login_list" => ok(json!(shared(&APP).db.logins(None, None))),
         "login_remove" => {
-            let (o, u) = (str_arg(&a, "origin"), str_arg(&a, "username"));
-            passwords::delete(passwords::SERVICE, &o, &u);
-            shared(&APP).db.remove_login(&o, &u);
+            let (o, u, p) = (str_arg(&a, "origin"), str_arg(&a, "username"), str_arg(&a, "profile"));
+            let first = shared(&APP).app.lock().unwrap().cfg.profiles.first().is_some_and(|f| f.id == p);
+            passwords::delete(passwords::SERVICE, &p, &o, &u, first);
+            shared(&APP).db.remove_login(&p, &o, &u);
             tabs::emit_state(&APP);
             ok(Value::Null)
         }
         "login_fill" => {
-            tabs::fill_login(&APP, active_id(win));
+            tabs::fill_login(&APP, active_id(win), at(&a, win));
             ok(Value::Null)
         }
         "import_passwords_csv" => {
             let mut n = 0;
+            let Some((pid, _)) = tabs::profile_of(&APP, active_id(win)) else { return reply.done(Err("no profile".into())) };
             for (origin, user, pw) in crate::import::chrome_passwords_csv(&str_arg(&a, "text")) {
-                if passwords::save(passwords::SERVICE, &origin, &user, &pw).is_ok() {
-                    shared(&APP).db.add_login(&origin, &user);
+                if passwords::save(passwords::SERVICE, &pid, &origin, &user, &pw).is_ok() {
+                    shared(&APP).db.add_login(&pid, &origin, &user);
                     n += 1;
                 }
             }

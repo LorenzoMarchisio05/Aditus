@@ -159,6 +159,14 @@ impl App {
         self.prompt.clone()
     }
 
+    /// The tab's profile id (what logins are filed under) and whether it is the first profile (owner of legacy keychain entries).
+    fn profile_id(&self, id: u32) -> Option<(String, bool)> {
+        let t = self.tabs.iter().find(|t| t.id == id)?;
+        let first = self.cfg.profiles.first()?;
+        let p = self.cfg.profile(&t.profile).unwrap_or(first);
+        Some((p.id.clone(), p.id == first.id))
+    }
+
     fn tab(&mut self, id: u32) -> Option<&mut Tab> {
         self.tabs.iter_mut().find(|t| t.id == id)
     }
@@ -328,7 +336,7 @@ fn emit(app: &AppHandle, save: bool) {
                     toast: g.toast.clone(),
                     adblock_site: !g.cfg.allowlist.contains(&active_host),
                     bookmarked: s.db.is_bookmarked(&active_url),
-                    has_login: !w.incognito && crate::passwords::origin_of(&active_url).is_some_and(|o| !s.db.logins(Some(&o)).is_empty()),
+                    has_login: !w.incognito && crate::passwords::origin_of(&active_url).is_some_and(|o| !s.db.logins(g.profile_id(w.active).map(|p| p.0).as_deref(), Some(&o)).is_empty()),
                     incognito: w.incognito,
                 };
                 serde_json::to_string(&snap).ok()
@@ -1205,14 +1213,36 @@ pub fn label_private(app: &AppHandle, view_label: &str) -> bool {
     shared(app).app.lock().unwrap().tabs.iter().find(|t| t.id == id).map_or(true, |t| t.private)
 }
 
-/// Fill the active tab with its saved login. The origin is read from the engine right here, and
-/// only that exact origin's entry is used.
-pub fn fill_login(app: &AppHandle, tab_id: u32) {
+pub fn profile_of(app: &AppHandle, tab_id: u32) -> Option<(String, bool)> {
+    shared(app).app.lock().unwrap().profile_id(tab_id)
+}
+
+/// Fill the active tab with its saved login; with several users saved for the origin, a menu at `pos` asks which.
+/// The origin is read from the engine right here, and only that exact origin's entry is used.
+pub fn fill_login(app: &AppHandle, tab_id: u32, pos: (i32, i32)) {
     let Some(l) = active_view(app, tab_id) else { return };
     let Some(origin) = engine::url_of(&l).and_then(|u| crate::passwords::origin_of(&u)) else { return };
-    let Some((_, user)) = shared(app).db.logins(Some(&origin)).into_iter().next() else { return };
-    if let Some(pw) = crate::passwords::get(crate::passwords::SERVICE, &origin, &user) {
-        engine::eval(&l, &crate::passwords::fill_js(&user, &pw));
+    let Some((pid, _)) = profile_of(app, tab_id) else { return };
+    let mut users: Vec<String> = shared(app).db.logins(Some(&pid), Some(&origin)).into_iter().map(|l| l.1).collect();
+    if users.len() > 1 {
+        let win = shared(app).app.lock().unwrap().tabs.iter().find(|t| t.id == tab_id).map(|t| t.win.clone()).unwrap_or_default();
+        let items = users.into_iter().map(|u| engine::Item::Entry { label: if u.is_empty() { "(no username)".into() } else { u.clone() }, id: format!("login:{u}"), enabled: true, checked: false }).collect();
+        engine::popup(&win, items, pos);
+    } else if let Some(user) = users.pop() {
+        fill_login_as(app, tab_id, &user);
+    }
+}
+
+/// Fills `user`'s saved password into the active tab (menu pick or the single saved login).
+pub fn fill_login_as(app: &AppHandle, tab_id: u32, user: &str) {
+    let Some(l) = active_view(app, tab_id) else { return };
+    let Some(origin) = engine::url_of(&l).and_then(|u| crate::passwords::origin_of(&u)) else { return };
+    let Some((pid, first)) = profile_of(app, tab_id) else { return };
+    if !shared(app).db.logins(Some(&pid), Some(&origin)).iter().any(|l| l.1 == user) {
+        return;
+    }
+    if let Some(pw) = crate::passwords::get(crate::passwords::SERVICE, &pid, &origin, user, first) {
+        engine::eval(&l, &crate::passwords::fill_js(user, &pw));
     }
 }
 

@@ -13,26 +13,47 @@ pub fn origin_of(url: &str) -> Option<String> {
     Some(u.origin().ascii_serialization())
 }
 
-fn entry(service: &str, origin: &str, user: &str) -> keyring::Result<keyring::Entry> {
-    keyring::Entry::new(service, &format!("{origin}\t{user}"))
+/// Keychain account: per profile since 0.1.5. Older entries (`origin\tuser`) belong to the first profile.
+fn account(profile: &str, origin: &str, user: &str) -> String {
+    format!("{profile}\t{origin}\t{user}")
 }
 
-pub fn save(service: &str, origin: &str, user: &str, pw: &str) -> Result<(), String> {
-    entry(service, origin, user).and_then(|e| e.set_password(pw)).map_err(|e| e.to_string())
+fn entry(service: &str, account: &str) -> keyring::Result<keyring::Entry> {
+    keyring::Entry::new(service, account)
 }
 
-pub fn get(service: &str, origin: &str, user: &str) -> Option<String> {
-    entry(service, origin, user).ok()?.get_password().ok()
+pub fn save(service: &str, profile: &str, origin: &str, user: &str, pw: &str) -> Result<(), String> {
+    entry(service, &account(profile, origin, user)).and_then(|e| e.set_password(pw)).map_err(|e| e.to_string())
 }
 
-pub fn delete(service: &str, origin: &str, user: &str) {
-    if let Ok(e) = entry(service, origin, user) {
-        let _ = e.delete_credential();
+/// `legacy`: this is the first profile, which owns pre-profile entries. Those are copied to the new key when read.
+pub fn get(service: &str, profile: &str, origin: &str, user: &str, legacy: bool) -> Option<String> {
+    if let Some(pw) = entry(service, &account(profile, origin, user)).ok().and_then(|e| e.get_password().ok()) {
+        return Some(pw);
+    }
+    let old = entry(service, &format!("{origin}\t{user}")).ok().filter(|_| legacy)?;
+    let pw = old.get_password().ok()?;
+    if save(service, profile, origin, user, &pw).is_ok() {
+        let _ = old.delete_credential();
+    }
+    Some(pw)
+}
+
+pub fn delete(service: &str, profile: &str, origin: &str, user: &str, legacy: bool) {
+    let mut accounts = vec![account(profile, origin, user)];
+    if legacy {
+        accounts.push(format!("{origin}\t{user}"));
+    }
+    for a in accounts {
+        if let Ok(e) = entry(service, &a) {
+            let _ = e.delete_credential();
+        }
     }
 }
 
 /// A submitted login waiting for the user's yes. Memory only, one per page view, short-lived.
 pub struct Offer {
+    pub profile: String,
     pub origin: String,
     pub user: String,
     pub pw: String,
@@ -43,8 +64,8 @@ thread_local! {
     static PENDING: RefCell<HashMap<String, Offer>> = RefCell::new(HashMap::new());
 }
 
-pub fn offer(label: &str, origin: String, user: String, pw: String) {
-    PENDING.with(|p| p.borrow_mut().insert(label.into(), Offer { origin, user, pw, at: Instant::now() }));
+pub fn offer(label: &str, profile: String, origin: String, user: String, pw: String) {
+    PENDING.with(|p| p.borrow_mut().insert(label.into(), Offer { profile, origin, user, pw, at: Instant::now() }));
 }
 
 /// Take the pending offer (accept or dismiss); stale ones (> 5 min) are dropped.
@@ -69,6 +90,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn accounts() {
+        assert_eq!(account("p1", "https://a.com", "me"), "p1\thttps://a.com\tme");
+        assert_ne!(account("p1", "https://a.com", "me"), account("p2", "https://a.com", "me"));
+    }
+
+    #[test]
     fn origin() {
         assert_eq!(origin_of("https://a.com/x?y").as_deref(), Some("https://a.com"));
         assert_eq!(origin_of("http://a.com:8080/").as_deref(), Some("http://a.com:8080"));
@@ -81,9 +108,10 @@ mod tests {
     #[ignore]
     fn keychain_roundtrip() {
         let svc = "dev.aditus.test.passwords";
-        save(svc, "https://t.example", "me", "s3cret").unwrap();
-        assert_eq!(get(svc, "https://t.example", "me").as_deref(), Some("s3cret"));
-        delete(svc, "https://t.example", "me");
-        assert_eq!(get(svc, "https://t.example", "me"), None);
+        save(svc, "p1", "https://t.example", "me", "s3cret").unwrap();
+        assert_eq!(get(svc, "p1", "https://t.example", "me", false).as_deref(), Some("s3cret"));
+        assert_eq!(get(svc, "p2", "https://t.example", "me", false), None);
+        delete(svc, "p1", "https://t.example", "me", false);
+        assert_eq!(get(svc, "p1", "https://t.example", "me", false), None);
     }
 }

@@ -168,7 +168,7 @@
   let logins = $state([]);
   const loadLogins = () => call('login_list').then((l) => (logins = l)).catch(() => {});
   async function removeLogin(l) {
-    await call('login_remove', { origin: l[0], username: l[1] });
+    await call('login_remove', { origin: l[0], username: l[1], profile: l[2] });
     loadLogins();
   }
   async function importCsv(e) {
