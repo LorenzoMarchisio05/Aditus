@@ -446,19 +446,23 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             ok(Value::Null)
         }
         "login_fill" => {
-            tabs::fill_login(&APP, active_id(win));
+            tabs::fill_login(&APP, active_id(win), Some(str_arg(&a, "username")).filter(|u| !u.is_empty()));
             ok(Value::Null)
         }
         "import_passwords_csv" => {
-            let mut n = 0;
-            for (origin, user, pw) in crate::import::chrome_passwords_csv(&str_arg(&a, "text")) {
-                if passwords::save(passwords::SERVICE, &origin, &user, &pw).is_ok() {
-                    shared(&APP).db.add_login(&origin, &user);
-                    n += 1;
+            // Keychain writes are slow (one per row): keep them off the UI thread.
+            let text = str_arg(&a, "text");
+            std::thread::spawn(move || {
+                let mut n = 0;
+                for (origin, user, pw) in crate::import::chrome_passwords_csv(&text) {
+                    if passwords::save(passwords::SERVICE, &origin, &user, &pw).is_ok() {
+                        shared(&APP).db.add_login(&origin, &user);
+                        n += 1;
+                    }
                 }
-            }
-            tabs::emit_state(&APP);
-            ok(json!(n))
+                engine::defer_from_thread(|| tabs::emit_state(&APP));
+                reply.done(Ok(json!(n)));
+            });
         }
         "page_state" => {
             tabs::page_state(&APP, &ctx.label, &str_arg(&a, "s"));

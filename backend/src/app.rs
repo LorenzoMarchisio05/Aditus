@@ -125,7 +125,7 @@ wrap_app! {
                 return;
             }
             let Some(cl) = command_line else { return };
-            if let Ok(p) = std::env::var("ADITUS_NETLOG") {
+            if let Some(p) = std::env::var("ADITUS_NETLOG").ok().filter(|_| cfg!(debug_assertions)) {
                 cl.append_switch_with_value(Some(&CefString::from("log-net-log")), Some(&CefString::from(p.as_str())));
                 cl.append_switch_with_value(Some(&CefString::from("net-log-capture-mode")), Some(&CefString::from("Everything")));
             }
@@ -147,7 +147,7 @@ wrap_app! {
             if let Some(dirs) = crate::extensions::load_arg() {
                 cl.append_switch_with_value(Some(&CefString::from("load-extension")), Some(&CefString::from(dirs.as_str())));
             }
-            if std::env::var_os("NOFLAGS").is_some() {
+            if cfg!(debug_assertions) && std::env::var_os("NOFLAGS").is_some() {
                 return;
             }
             for (k, v) in [

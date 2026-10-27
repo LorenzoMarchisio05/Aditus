@@ -70,6 +70,16 @@ fn bundle_id(app: &Path) -> Result<String, String> {
     run(Command::new("/usr/libexec/PlistBuddy").args(["-c", "Print :CFBundleIdentifier"]).arg(app.join("Contents/Info.plist")))
 }
 
+/// Developer ID Team ID from `codesign -dv` output (it goes to stderr); `None` for ad-hoc/unsigned bundles.
+fn team_id(codesign_out: &str) -> Option<String> {
+    codesign_out.lines().find_map(|l| l.strip_prefix("TeamIdentifier=")).map(str::trim).filter(|t| !t.is_empty() && *t != "not set").map(String::from)
+}
+
+fn bundle_team(app: &Path) -> Option<String> {
+    let o = Command::new("codesign").args(["-dv"]).arg(app).output().ok()?;
+    team_id(&String::from_utf8_lossy(&o.stderr))
+}
+
 /// Download, verify and stage the new bundle, then start the swap that runs after this process exits.
 /// Returns once the caller may quit.
 pub fn install() -> Result<(), String> {
@@ -98,6 +108,13 @@ pub fn install() -> Result<(), String> {
     if bundle_id(&new)? != bundle_id(&cur)? {
         return Err("Downloaded app has a different identity".into());
     }
+    // A Developer-ID-signed install only accepts updates from the same team, so a forged release can't swap in
+    // another signer. Ad-hoc builds have no Team ID to pin (the bundle id above is all they can check).
+    if let Some(team) = bundle_team(&cur) {
+        if bundle_team(&new) != Some(team) {
+            return Err("Downloaded app is signed by a different team".into());
+        }
+    }
 
     // Wait for us to exit, swap with a backup, relaunch; roll back if the move fails.
     let script = r#"while kill -0 "$1" 2>/dev/null; do sleep 0.3; done
@@ -110,6 +127,13 @@ rm -rf "$2.old"; mv "$2" "$2.old" && mv "$3" "$2" && { rm -rf "$2.old" "$4"; ope
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn team_ids() {
+        assert_eq!(super::team_id("Identifier=x\nTeamIdentifier=AB12CD34EF\n").as_deref(), Some("AB12CD34EF"));
+        assert_eq!(super::team_id("TeamIdentifier=not set\n"), None);
+        assert_eq!(super::team_id("Signature=adhoc\n"), None);
+    }
+
     #[test]
     fn newer() {
         assert!(super::is_newer("0.2.0", "0.1.0"));

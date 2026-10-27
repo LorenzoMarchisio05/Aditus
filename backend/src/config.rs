@@ -62,7 +62,7 @@ pub struct Settings {
     #[serde(default = "yes")]
     pub auto_update: bool,
     /// Ask the search engine for suggestions while typing in the address bar (not in private windows).
-    #[serde(default = "yes")]
+    #[serde(default)]
     pub search_suggestions: bool,
     /// Page zoom in percent.
     #[serde(default = "default_zoom")]
@@ -128,7 +128,7 @@ impl Default for Settings {
             compact_tabs: false,
             links_background: false,
             auto_update: true,
-            search_suggestions: true,
+            search_suggestions: false,
             page_zoom: default_zoom(),
         }
     }
@@ -198,6 +198,13 @@ pub fn store_identifier(p: &Profile) -> [u8; 16] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn suggestions_off_by_default() {
+        assert!(!Config::default().settings.search_suggestions);
+        let old = "[settings]\nsearch_template='x'\nidle_minutes=1\nsidebar_collapsed=false\ntopbar_visible=true\nadblock=true\nsearch_suggestions=true\n[[profiles]]\nname='a'\nid='b'\n";
+        assert!(toml::from_str::<Config>(old).unwrap().settings.search_suggestions);
+    }
 
     #[test]
     fn roundtrip_keeps_profile_id() {

@@ -3,8 +3,10 @@
 
 /// Click/keyboard gesture pings, SPA navigation pings, media state, the selected link, cosmetic ad-hiding CSS.
 pub const PAGE: &str = r#"(()=>{
-if(window.__aditus)return;window.__aditus=1;
 const q=window.cefQuery;if(!q)return;
+// Keep the only reference in this closure: page code can't call cefQuery to forge gesture/back/forward pings
+// (events are checked with isTrusted below), and the globals stop being a fingerprint.
+try{delete window.cefQuery;delete window.cefQueryCancel}catch(e){}
 const send=(cmd,args)=>new Promise((ok,no)=>{try{q({request:JSON.stringify({cmd,args}),onSuccess:ok,onFailure:(c,m)=>no(m)})}catch(e){no(e)}});
 const ping=(k,href)=>{send('page_ping',{kind:k,href:href||''}).catch(()=>{})};
 // Real clicks only (an ad's synthetic a.click() is untrusted), with the link they landed on: popups and
@@ -15,7 +17,7 @@ if(window===top){let lm=0;addEventListener('pointermove',e=>{const n=Date.now();
 addEventListener('keydown',e=>{if(e.key==='Enter'&&e.isTrusted)ping('g',lk(e))},true);
 // Two-finger horizontal swipe = back/forward, unless something under the pointer can scroll sideways.
 if(window===top){let acc=0,until=0,rs;const sx=(e,d)=>{for(let n=e.target;n&&n.nodeType===1;n=n.parentElement){const o=getComputedStyle(n).overflowX;if((o==='auto'||o==='scroll')&&(d<0?n.scrollLeft>0:n.scrollLeft+n.clientWidth<n.scrollWidth-1))return 1}};
-addEventListener('wheel',e=>{const n=Date.now();if(n<until||Math.abs(e.deltaX)<Math.abs(e.deltaY)*2||sx(e,e.deltaX))return;acc+=e.deltaX;clearTimeout(rs);rs=setTimeout(()=>acc=0,150);if(Math.abs(acc)>=150){ping(acc<0?'b':'f');acc=0;until=n+800}},{passive:true})}
+addEventListener('wheel',e=>{const n=Date.now();if(!e.isTrusted||n<until||Math.abs(e.deltaX)<Math.abs(e.deltaY)*2||sx(e,e.deltaX))return;acc+=e.deltaX;clearTimeout(rs);rs=setTimeout(()=>acc=0,150);if(Math.abs(acc)>=150){ping(acc<0?'b':'f');acc=0;until=n+800}},{passive:true})}
 addEventListener('submit',e=>{if(e.isTrusted)ping('g',e.target.action);try{const f=e.target,p=f.querySelector&&f.querySelector('input[type=password]');if(p&&p.value){const all=[...f.querySelectorAll('input')],u=all.slice(0,all.indexOf(p)).reverse().find(x=>/^(text|email|tel|)$/.test(x.type)&&x.value);send('page_login',{u:u?u.value:'',p:p.value}).catch(()=>{})}}catch(_){}},true);
 for(const m of ['pushState','replaceState']){const o=history[m];history[m]=function(){const r=o.apply(this,arguments);ping('u');return r}}
 addEventListener('popstate',()=>ping('u'));addEventListener('hashchange',()=>ping('u'));

@@ -52,7 +52,7 @@ pub fn picked(id: &str) {
                 tabs::open_tab_in(&APP, &win, Some(u), None, true);
             }
         }
-        "fill-login" => tabs::fill_login(&APP, cur),
+        "fill-login" => tabs::fill_login(&APP, cur, None),
         "bookmark" => tabs::toggle_bookmark(&APP, cur),
         "fullscreen" => engine::toggle_fullscreen(&win),
         "minimize" => engine::minimize(&win),

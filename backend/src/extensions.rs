@@ -91,6 +91,9 @@ fn split_crx3(crx: &[u8], want_id: &str) -> Result<(Vec<u8>, String), String> {
 
 fn unzip(zip: &[u8], to: &Path) -> Result<(), String> {
     let mut a = zip::ZipArchive::new(std::io::Cursor::new(zip)).map_err(|e| e.to_string())?;
+    if a.len() > 20_000 {
+        return Err("extension has too many files".into());
+    }
     let mut total = 0u64;
     for i in 0..a.len() {
         let mut f = a.by_index(i).map_err(|e| e.to_string())?;
@@ -100,15 +103,16 @@ fn unzip(zip: &[u8], to: &Path) -> Result<(), String> {
             fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
             continue;
         }
-        total += f.size();
-        if total > 400 << 20 {
-            return Err("extension is too large".into());
-        }
         if let Some(d) = dest.parent() {
             fs::create_dir_all(d).map_err(|e| e.to_string())?;
         }
         let mut out = fs::File::create(&dest).map_err(|e| e.to_string())?;
-        std::io::copy(&mut f.by_ref().take(300 << 20), &mut out).map_err(|e| e.to_string())?;
+        // Count what is actually written: the declared size in the zip header can lie.
+        let budget = (400u64 << 20) - total;
+        total += std::io::copy(&mut f.by_ref().take(budget + 1), &mut out).map_err(|e| e.to_string())?;
+        if total > 400 << 20 {
+            return Err("extension is too large".into());
+        }
         out.flush().ok();
     }
     Ok(())

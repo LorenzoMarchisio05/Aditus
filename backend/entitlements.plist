@@ -2,6 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>com.apple.security.cs.allow-jit</key><true/>
+<!-- Kept deliberately: allow-jit is what V8 needs; unsigned-executable-memory and disable-library-validation
+     cover Chromium/CEF helpers and the (ad-hoc or third-party signed) framework, which fail to load without them.
+     Not removed untested: that would need a signed release build to verify. -->
 <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
 <key>com.apple.security.cs.disable-library-validation</key><true/>
 </dict></plist>

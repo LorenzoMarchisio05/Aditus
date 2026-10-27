@@ -45,7 +45,7 @@ try {
     await evalIn(ui, `new Promise((s) => cefQuery({ request: JSON.stringify({ cmd: 'new_tab', args: { url: 'http://127.0.0.1:${webPort}/' } }), onSuccess: s, onFailure: s }))`);
     const page = await until(async () => (await targets()).find((t) => t.url.startsWith(`http://127.0.0.1:${webPort}`) && t.title === 'smoke'));
     check('http page loads in a tab', !!page);
-    if (page) check('page script injected', (await evalIn(page, 'window.__aditus')) === 1);
+    if (page) check('page script injected', (await evalIn(page, 'typeof window.cefQuery')) === 'undefined');
   }
 } finally {
   app.kill();
