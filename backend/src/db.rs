@@ -91,6 +91,22 @@ impl Db {
         Ok(Self(Mutex::new(c)))
     }
 
+    /// PRAGMA user_version 3: history and bookmarks were filed under the profile's name; file them under its id.
+    /// `profiles` is `(name, id)`. Rows naming no profile (imports, deleted profiles) are left alone.
+    pub fn migrate_profile_ids(&self, profiles: &[(String, String)]) -> rusqlite::Result<()> {
+        let c = self.0.lock().unwrap();
+        if c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? >= 3 {
+            return Ok(());
+        }
+        c.execute_batch("BEGIN")?;
+        for (name, id) in profiles {
+            for t in ["history", "bookmarks"] {
+                c.execute(&format!("UPDATE {t} SET profile=?2 WHERE profile=?1"), params![name, id])?;
+            }
+        }
+        c.execute_batch("PRAGMA user_version=3; COMMIT")
+    }
+
     pub fn add_visit(&self, url: &str, title: &str, profile: &str) {
         let _ = crate::applog::check(
             "db add_visit",
@@ -264,6 +280,23 @@ mod tests {
         db.remove_login("p2", "https://a.com", "old");
         assert_eq!(db.logins(Some("p1"), None).len(), 1);
         assert_eq!(db.logins(Some("p2"), None).len(), 1);
+    }
+
+    #[test]
+    fn profile_names_migrate_to_ids_once() {
+        let db = Db::init(Connection::open_in_memory().unwrap()).unwrap();
+        db.add_visit("https://a.com/", "A", "Work");
+        db.add_visit("https://b.com/", "B", "Gone");
+        db.add_bookmark("https://a.com/", "A", "Work");
+        let ps = vec![("Work".to_string(), "id-w".to_string())];
+        db.migrate_profile_ids(&ps).unwrap();
+        assert_eq!(db.search_history("a.com", 10)[0].profile, "id-w");
+        assert_eq!(db.search_history("b.com", 10)[0].profile, "Gone");
+        assert_eq!(db.search_bookmarks("", 10)[0].profile, "id-w");
+        // Already at version 3: a later row named like a profile must not be rewritten.
+        db.add_visit("https://c.com/", "C", "Work");
+        db.migrate_profile_ids(&ps).unwrap();
+        assert_eq!(db.search_history("c.com", 10)[0].profile, "Work");
     }
 
     #[test]

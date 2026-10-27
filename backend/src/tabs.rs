@@ -375,7 +375,7 @@ struct Snapshot<'a> {
     win: &'a str,
     tabs: Vec<TabView>,
     active: u32,
-    cfg: &'a Config,
+    cfg: serde_json::Value,
     prompt: Option<String>,
     perm: Option<(&'a str, &'a str)>,
     net: Option<&'a NetPrompt>,
@@ -416,6 +416,11 @@ fn emit(app: &AppHandle, save: bool) {
     let jsons: Vec<(String, String)> = {
         let g = s.lock_app();
         crate::adblock::sync_cfg(g.cfg.settings.adblock, &g.cfg.allowlist);
+        // The UI shows and sends profile names; mappings are stored by id.
+        let mut cfg_view = serde_json::to_value(&g.cfg).unwrap_or_default();
+        for m in cfg_view["mappings"].as_array_mut().into_iter().flatten() {
+            m["profile"] = g.cfg.name_of(m["profile"].as_str().unwrap_or_default()).into();
+        }
         g.wins
             .iter()
             .filter_map(|(win, w)| {
@@ -443,7 +448,7 @@ fn emit(app: &AppHandle, save: bool) {
                                 },
                                 host: if is_blank(&url) || internal_view(&url).is_some() { String::new() } else { parsed.as_ref().and_then(|u| u.host_str().map(String::from)).unwrap_or_default() },
                                 url: if is_blank(&url) { String::new() } else { url },
-                                profile: t.profile.clone(),
+                                profile: g.cfg.name_of(&t.profile),
                                 pinned: t.pinned,
                                 group: t.group.clone(),
                                 discarded: t.discarded,
@@ -457,7 +462,7 @@ fn emit(app: &AppHandle, save: bool) {
                         })
                         .collect(),
                     active: w.active,
-                    cfg: &g.cfg,
+                    cfg: cfg_view.clone(),
                     prompt: g.prompt.clone(),
                     perm: g.perm_prompt.iter().find(|p| g.win_of(p.2) == *win).map(|p| (p.0.as_str(), p.1.as_str())),
                     net: g.net_q.iter().find(|p| g.win_of(p.tab) == *win),
@@ -527,6 +532,8 @@ pub fn apply_layout(app: &AppHandle) {
 
 /// Manual profile change for the active tab (no mapping change).
 pub fn switch_profile(app: &AppHandle, tab_id: u32, profile: &str) {
+    let Some(profile) = shared(app).lock_app().cfg.profile(profile).map(|p| p.id.clone()) else { return };
+    let profile = profile.as_str();
     let url = {
         let mut g = shared(app).lock_app();
         match g.tab(tab_id) {
@@ -1157,7 +1164,7 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
         g.win(win);
         // No explicit profile: a mapped site opens in its profile, anything else in the default one.
         let mapped = url.as_ref().and_then(|u| u.host_str()).and_then(|h| nav::lookup(&g.cfg.mappings, h)).map(|m| m.profile.clone());
-        let profile = profile.or(mapped).filter(|p| g.cfg.profile(p).is_some()).unwrap_or_else(|| g.cfg.profiles.first().map(|p| p.name.clone()).unwrap_or_default());
+        let profile = profile.or(mapped).and_then(|p| g.cfg.profile(&p).map(|p| p.id.clone())).unwrap_or_else(|| g.cfg.profiles.first().map(|p| p.id.clone()).unwrap_or_default());
         let id = g.next_id;
         g.next_id += 1;
         let private = g.wins.get(win).is_some_and(|w| w.incognito);
@@ -1313,7 +1320,7 @@ pub fn swap(app: &AppHandle, tab_id: u32, profile: &str, url: &str, announce: bo
         }
         if announce {
             g.undo = Some(previous);
-            g.toast = Some(Toast { message: format!("Switched to profile {profile}"), undo: true });
+            g.toast = Some(Toast { message: format!("Switched to profile {}", g.cfg.name_of(profile)), undo: true });
         }
         let gen = g.tab(tab_id).map_or(0, |t| t.gen);
         (keep, active == tab_id, drop_now, gen)
@@ -1616,6 +1623,8 @@ pub fn address_bar(app: &AppHandle, tab_id: u32, input: &str) {
 }
 
 pub fn assign_mapping(app: &AppHandle, host: &str, profile: &str) {
+    let Some(profile) = shared(app).lock_app().cfg.profile(profile).map(|p| p.id.clone()) else { return };
+    let profile = profile.as_str();
     // Mappings match on the host only: drop scheme, path, query and port if a full URL was typed.
     let host = nav::clean_pattern(host);
     let host = host.as_str();
@@ -1968,11 +1977,12 @@ pub fn restore_session(app: &AppHandle) {
         open_tab_in(app, "main", url, None, true);
         return;
     }
-    let profiles: Vec<String> = shared(app).lock_app().cfg.profiles.iter().map(|p| p.name.clone()).collect();
+    // Sessions saved before profile ids hold names; `profile()` takes either, entries are rewritten to ids.
+    let profiles: Vec<String> = shared(app).lock_app().cfg.profiles.iter().map(|p| p.id.clone()).collect();
     let mut to_activate: HashMap<String, u32> = HashMap::new();
     let mut first_of: HashMap<String, u32> = HashMap::new();
     let mut made: HashSet<String> = HashSet::from(["main".to_string()]);
-    for s in session.tabs {
+    for mut s in session.tabs {
         if !made.contains(&s.win) {
             if let Some(n) = s.win.strip_prefix('w').and_then(|n| n.parse::<u32>().ok()) {
                 let mut g = shared(app).lock_app();
@@ -1985,11 +1995,13 @@ pub fn restore_session(app: &AppHandle) {
         }
         let profile = {
             let g = shared(app).lock_app();
-            if g.cfg.profile(&s.profile).is_some() {
-                s.profile
-            } else {
-                g.cfg.profiles.first().map(|p| p.name.clone()).unwrap_or_default()
+            for e in &mut s.history {
+                if let Some(p) = g.cfg.profile(&e.profile) {
+                    e.profile = p.id.clone();
+                }
             }
+            // open_tab_in resolves a name or id and falls back to the first profile.
+            s.profile.clone()
         };
         let id = open_tab_in(app, &s.win, Url::parse(&s.url).ok(), Some(profile), false);
         with_tab(app, id, |t| {

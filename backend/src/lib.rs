@@ -97,6 +97,7 @@ fn load_state() -> Result<PathBuf, String> {
     if let Some(p) = cfg.profiles.first() {
         db.claim_legacy_logins(&p.id);
     }
+    let _ = applog::check("db profile migration", db.migrate_profile_ids(&cfg.profiles.iter().map(|p| (p.name.clone(), p.id.clone())).collect::<Vec<_>>()));
     adblock::sync_cfg(cfg.settings.adblock, &cfg.allowlist);
     tabs::init_shared(tabs::Shared { app: Mutex::new(tabs::App::new(cfg)), db, cfg_path, data_dir: dir.clone() });
     Ok(dir)
