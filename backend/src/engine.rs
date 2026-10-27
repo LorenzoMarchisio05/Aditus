@@ -423,7 +423,8 @@ pub fn place_window_buttons(win: &str) {
         let place = move || crate::mac::place_window_buttons(p as *mut std::ffi::c_void, collapsed, w);
         place();
         // Timer on purpose: AppKit re-lays the buttons out after resizes and focus changes with no callback
-        // we can hook, so place them again once it has settled.
+        // we can hook (the WindowDelegate bounds/activation callbacks fire before AppKit's own pass, which
+        // is the race), so place them again once it has settled.
         defer_after(120, place);
     }
     #[cfg(not(target_os = "macos"))]
@@ -457,6 +458,8 @@ pub fn set_bounds(label: &str, b: Bounds) {
             };
             place_view(&host_v, b);
             // The native view of a page does not follow its host moving; a nudge makes it re-attach.
+            // Kept: the views delegate has no callback for the native view re-attaching (on_layout_changed
+            // fires for the host, which is exactly what did not propagate).
             if moved {
                 place_view(&View::from(&bv), (1.0, 0.0, b.2, b.3));
                 place_view(&View::from(&bv), (0.0, 0.0, b.2, b.3));
@@ -619,6 +622,10 @@ pub fn print(label: &str) {
 
 thread_local! {
     /// Browsers that cannot be destroyed without crashing CEF, kept alive and hidden.
+    /// Not reusable: a DevTools popup is bound to the page it was opened for at `show_dev_tools`
+    /// (the cef crate has no retarget/attach call), and the inspected page's browser belongs to a
+    /// closed tab's profile context. So each docked DevTools costs two idle browsers until the app
+    /// quits; fixing it needs CEF to survive destroying a docked DevTools, not a reuse scheme.
     static PARK: RefCell<Vec<BrowserView>> = RefCell::new(Vec::new());
     /// Docked DevTools by inspected page: (window, its view, shown). A DevTools view is never taken out
     /// of its window or closed (both crash CEF); it is only hidden.
@@ -718,6 +725,15 @@ fn emit_js(event: &str, json: &str) -> String {
 pub fn emit(event: &str, json: &str) {
     let js = emit_js(event, json);
     for l in trusted_labels() {
+        eval(&l, &js);
+    }
+}
+
+/// Broadcast to the app pages of one window only.
+pub fn emit_win(win: &str, event: &str, json: &str) {
+    let js = emit_js(event, json);
+    let labels: Vec<String> = reg(|r| r.views.iter().filter(|(_, v)| v.win == win && (v.app_page || v.kind != Kind::Page)).map(|(l, _)| l.clone()).collect());
+    for l in labels {
         eval(&l, &js);
     }
 }
@@ -1057,6 +1073,8 @@ wrap_life_span_handler! {
             }
             // Click-hijacking ads too (animeworld's even ask for a sized popup window, so that is no sign of a
             // sign-in). Delayed so the click's page ping, sent just before but itself deferred, has landed.
+            // Kept: the ping (cefQuery) and the popup request are separate renderer->browser messages with no
+            // ordering guarantee and CEF offers no signal for "the click ping arrived".
             let label = self.label.clone();
             defer_after(50, move || {
                 if !crate::adblock::hijack(&url, &source, &tabs::clicked_link(&tabs::AppHandle, &label)) {

@@ -5,7 +5,8 @@ use serde::Serialize;
 use std::path::Path;
 use std::sync::Mutex;
 
-pub struct Db(Mutex<Connection>);
+/// Connection, plus a counter bumped on every bookmark/login write (invalidates the UI-state cache).
+pub struct Db(Mutex<Connection>, std::sync::atomic::AtomicU64);
 
 #[derive(Serialize)]
 pub struct HistoryRow {
@@ -88,7 +89,15 @@ impl Db {
         }
         // Nothing can be downloading at startup: an 'active' row is left over from a crash.
         c.execute("UPDATE downloads SET status='failed' WHERE status='active'", [])?;
-        Ok(Self(Mutex::new(c)))
+        Ok(Self(Mutex::new(c), Default::default()))
+    }
+
+    fn bump(&self) {
+        self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn flags_ver(&self) -> u64 {
+        self.1.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn add_visit(&self, url: &str, title: &str, profile: &str) {
@@ -123,6 +132,7 @@ impl Db {
     }
 
     pub fn add_bookmark(&self, url: &str, title: &str, profile: &str) {
+        self.bump();
         let _ = crate::applog::check(
             "db add_bookmark",
             self.0.lock().unwrap().execute("INSERT OR REPLACE INTO bookmarks(url,title,profile,added_at) VALUES(?1,?2,?3,strftime('%s','now'))", params![url, title, profile]),
@@ -130,6 +140,7 @@ impl Db {
     }
 
     pub fn remove_bookmark(&self, url: &str) {
+        self.bump();
         let _ = crate::applog::check("db remove_bookmark", self.0.lock().unwrap().execute("DELETE FROM bookmarks WHERE url=?1", params![url]));
     }
 
@@ -146,15 +157,18 @@ impl Db {
 
     /// Saved-login index. Passwords live in the OS keychain, never here.
     pub fn add_login(&self, profile: &str, origin: &str, user: &str) {
+        self.bump();
         let _ = crate::applog::check("db add_login", self.0.lock().unwrap().execute("INSERT OR IGNORE INTO logins(profile,origin,username) VALUES(?1,?2,?3)", params![profile, origin, user]));
     }
 
     pub fn remove_login(&self, profile: &str, origin: &str, user: &str) {
+        self.bump();
         let _ = crate::applog::check("db remove_login", self.0.lock().unwrap().execute("DELETE FROM logins WHERE profile=?1 AND origin=?2 AND username=?3", params![profile, origin, user]));
     }
 
     /// Logins saved before profiles existed belong to the first one.
     pub fn claim_legacy_logins(&self, profile: &str) {
+        self.bump();
         let _ = self.0.lock().unwrap().execute("UPDATE OR IGNORE logins SET profile=?1 WHERE profile=''", params![profile]);
     }
 
