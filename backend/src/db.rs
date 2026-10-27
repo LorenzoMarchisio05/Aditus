@@ -37,7 +37,20 @@ impl Db {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        Self::init(Connection::open(path)?)
+        Self::init(Connection::open(path)?).or_else(|_| {
+            // Corrupt or unopenable: move it aside (history is lost, the browser still launches).
+            let _ = std::fs::rename(path, path.with_extension("db.bak"));
+            let _ = std::fs::remove_file(path.with_extension("db-wal"));
+            let _ = std::fs::remove_file(path.with_extension("db-shm"));
+            Self::init(Connection::open(path)?)
+        })
+    }
+
+    fn rows<T>(&self, sql: &str, p: impl rusqlite::Params, f: impl FnMut(&rusqlite::Row) -> rusqlite::Result<T>) -> Vec<T> {
+        let c = self.0.lock().unwrap();
+        let Ok(mut st) = c.prepare(sql) else { return vec![] };
+        let Ok(it) = st.query_map(p, f) else { return vec![] };
+        it.flatten().collect()
     }
 
     fn init(c: Connection) -> rusqlite::Result<Self> {
@@ -73,17 +86,10 @@ impl Db {
     }
 
     pub fn search_history(&self, q: &str, limit: i64) -> Vec<HistoryRow> {
-        let c = self.0.lock().unwrap();
         let like = format!("%{}%", q.replace('%', ""));
-        let mut st = c
-            .prepare("SELECT url,title,profile,visited_at FROM history WHERE url LIKE ?1 OR title LIKE ?1 ORDER BY id DESC LIMIT ?2")
-            .unwrap();
-        st.query_map(params![like, limit], |r| {
+        self.rows("SELECT url,title,profile,visited_at FROM history WHERE url LIKE ?1 OR title LIKE ?1 ORDER BY id DESC LIMIT ?2", params![like, limit], |r| {
             Ok(HistoryRow { url: r.get(0)?, title: r.get(1)?, profile: r.get(2)?, visited_at: r.get(3)? })
         })
-        .unwrap()
-        .flatten()
-        .collect()
     }
 
     /// Bulk insert for imports: `(url, title, unix seconds)`.
@@ -112,17 +118,10 @@ impl Db {
     }
 
     pub fn search_bookmarks(&self, q: &str, limit: i64) -> Vec<BookmarkRow> {
-        let c = self.0.lock().unwrap();
         let like = format!("%{}%", q.replace('%', ""));
-        let mut st = c
-            .prepare("SELECT url,title,profile,added_at FROM bookmarks WHERE url LIKE ?1 OR title LIKE ?1 ORDER BY added_at DESC LIMIT ?2")
-            .unwrap();
-        st.query_map(params![like, limit], |r| {
+        self.rows("SELECT url,title,profile,added_at FROM bookmarks WHERE url LIKE ?1 OR title LIKE ?1 ORDER BY added_at DESC LIMIT ?2", params![like, limit], |r| {
             Ok(BookmarkRow { url: r.get(0)?, title: r.get(1)?, profile: r.get(2)?, added_at: r.get(3)? })
         })
-        .unwrap()
-        .flatten()
-        .collect()
     }
 
     /// Saved-login index. Passwords live in the OS keychain, never here.
@@ -136,9 +135,7 @@ impl Db {
 
     /// `(origin, username)`, optionally for one origin.
     pub fn logins(&self, origin: Option<&str>) -> Vec<(String, String)> {
-        let c = self.0.lock().unwrap();
-        let mut st = c.prepare("SELECT origin,username FROM logins WHERE ?1 IS NULL OR origin=?1 ORDER BY origin,username").unwrap();
-        st.query_map(params![origin], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().flatten().collect()
+        self.rows("SELECT origin,username FROM logins WHERE ?1 IS NULL OR origin=?1 ORDER BY origin,username", params![origin], |r| Ok((r.get(0)?, r.get(1)?)))
     }
 
     pub fn prune_history(&self, days: u32) {
@@ -178,16 +175,9 @@ impl Db {
     }
 
     pub fn downloads(&self) -> Vec<DownloadRow> {
-        let c = self.0.lock().unwrap();
-        let mut st = c
-            .prepare("SELECT id,url,path,status,started_at FROM downloads ORDER BY id DESC LIMIT 200")
-            .unwrap();
-        st.query_map([], |r| {
+        self.rows("SELECT id,url,path,status,started_at FROM downloads ORDER BY id DESC LIMIT 200", [], |r| {
             Ok(DownloadRow { id: r.get(0)?, url: r.get(1)?, path: r.get(2)?, status: r.get(3)?, started_at: r.get(4)? })
         })
-        .unwrap()
-        .flatten()
-        .collect()
     }
 }
 

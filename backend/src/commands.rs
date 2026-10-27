@@ -202,8 +202,12 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
         "delete_profile" => {
             let name = str_arg(&a, "name");
             if !shared(&APP).app.lock().unwrap().tabs.iter().any(|t| t.profile == name) {
+                let dir = shared(&APP).app.lock().unwrap().cfg.profile(&name).map(|p| config::Config::data_dir(&shared(&APP).data_dir.join("cef"), p));
                 mutate_cfg(|c| {
                     if c.profiles.len() > 1 {
+                        if let Some(d) = &dir {
+                            let _ = std::fs::remove_dir_all(d);
+                        }
                         c.profiles.retain(|p| p.name != name);
                         c.mappings.retain(|m| m.profile != name);
                     }

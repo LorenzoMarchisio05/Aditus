@@ -1559,7 +1559,7 @@ pub fn save_session(app: &AppHandle) {
         }
     };
     if let Ok(s) = serde_json::to_string(&session) {
-        let _ = std::fs::write(session_path(app), s);
+        let _ = config::write_atomic(&session_path(app), s);
     }
 }
 
@@ -1591,7 +1591,11 @@ pub fn restore_session(app: &AppHandle) {
             }
             made.insert(s.win.clone());
         }
-        let id = open_tab_in(app, &s.win, Url::parse(&s.url).ok(), Some(s.profile), false);
+        let profile = {
+            let g = shared(app).app.lock().unwrap();
+            if g.cfg.profile(&s.profile).is_some() { s.profile } else { g.cfg.profiles[0].name.clone() }
+        };
+        let id = open_tab_in(app, &s.win, Url::parse(&s.url).ok(), Some(profile), false);
         with_tab(app, id, |t| {
             t.pinned = s.pinned;
             t.group = s.group;

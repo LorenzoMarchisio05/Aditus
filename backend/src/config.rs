@@ -15,6 +15,7 @@ pub struct Profile {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)] // a hand-edited file missing a field keeps the default instead of failing the parse
 pub struct Settings {
     pub search_template: String,
     pub idle_minutes: u64,
@@ -168,17 +169,21 @@ impl Default for Config {
 
 impl Config {
     pub fn load(path: &Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| toml::from_str(&s).ok())
-            .filter(|c: &Config| !c.profiles.is_empty())
-            .unwrap_or_default()
+        let Ok(s) = std::fs::read_to_string(path) else { return Self::default() };
+        match toml::from_str(&s).ok().filter(|c: &Config| !c.profiles.is_empty()) {
+            Some(c) => c,
+            None => {
+                // Keep the broken file so a typo doesn't cost the user their profiles.
+                let _ = std::fs::rename(path, path.with_extension("toml.bak"));
+                Self::default()
+            }
+        }
     }
 
     pub fn save(&self, path: &Path) {
         if let Ok(s) = toml::to_string_pretty(self) {
             let _ = std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")));
-            let _ = std::fs::write(path, s);
+            let _ = write_atomic(path, s);
         }
     }
 
@@ -191,6 +196,13 @@ impl Config {
     }
 }
 
+/// Write to a sibling temp file, then rename over `path`, so a crash never leaves a half-written file.
+pub fn write_atomic(path: &Path, data: impl AsRef<[u8]>) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, data)?;
+    std::fs::rename(&tmp, path)
+}
+
 pub fn store_identifier(p: &Profile) -> [u8; 16] {
     uuid::Uuid::parse_str(&p.id).map(|u| *u.as_bytes()).unwrap_or([0; 16])
 }
@@ -198,6 +210,22 @@ pub fn store_identifier(p: &Profile) -> [u8; 16] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bad_config_is_backed_up_and_atomic_write() {
+        let d = std::env::temp_dir().join(format!("aditus-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("config.toml");
+        std::fs::write(&p, "settings = [oops").unwrap();
+        assert_eq!(Config::load(&p).profiles.len(), 1);
+        assert_eq!(std::fs::read_to_string(d.join("config.toml.bak")).unwrap(), "settings = [oops");
+        write_atomic(&p, "a").unwrap();
+        write_atomic(&p, "b").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "b");
+        let c: Config = toml::from_str("profiles = [{ name = \"W\", id = \"x\" }]\n[settings]\nadblock = false").unwrap();
+        assert!(!c.settings.adblock && c.settings.idle_minutes == 10);
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn roundtrip_keeps_profile_id() {
