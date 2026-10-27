@@ -277,10 +277,19 @@ pub fn emit_state(app: &AppHandle) {
     emit(app, true);
 }
 
+/// Last snapshot sent per window, to drop identical repeats.
+static LAST_EMITTED: std::sync::LazyLock<Mutex<HashMap<String, String>>> = std::sync::LazyLock::new(Default::default);
+
+/// A frontend asked for the state (it just loaded): send it even if unchanged.
+pub fn resend_state(app: &AppHandle) {
+    LAST_EMITTED.lock().unwrap().clear();
+    emit_state(app);
+}
+
 /// One snapshot per window, tagged with its label; each frontend keeps only its own.
 fn emit(app: &AppHandle, save: bool) {
     let s = shared(app);
-    let jsons: Vec<String> = {
+    let jsons: Vec<(String, String)> = {
         let g = s.app.lock().unwrap();
         crate::adblock::sync_cfg(g.cfg.settings.adblock, &g.cfg.allowlist);
         g.wins
@@ -331,13 +340,20 @@ fn emit(app: &AppHandle, save: bool) {
                     has_login: !w.incognito && crate::passwords::origin_of(&active_url).is_some_and(|o| !s.db.logins(Some(&o)).is_empty()),
                     incognito: w.incognito,
                 };
-                serde_json::to_string(&snap).ok()
+                serde_json::to_string(&snap).ok().map(|j| (win.clone(), j))
             })
             .collect()
     };
-    for j in jsons {
-        engine::emit("state", &j);
+    // Many callers fire per event (title, loading, pings); skip a window whose snapshot did not change.
+    let mut last = LAST_EMITTED.lock().unwrap();
+    last.retain(|w, _| jsons.iter().any(|(k, _)| k == w));
+    for (win, j) in jsons {
+        if last.get(&win) != Some(&j) {
+            engine::emit("state", &j);
+            last.insert(win, j);
+        }
     }
+    drop(last);
     if save {
         save_session(app);
     }
@@ -1317,21 +1333,28 @@ pub fn discard_idle(app: &AppHandle) {
     sleep_for_memory(app);
 }
 
-/// One `ps` pass: gives each tab its share of its renderer's resident memory and returns the MB used by this
-/// process and its descendants (shared pages count once per process, so it overstates the real footprint a little).
-fn sample_memory(app: &AppHandle) -> u64 {
-    let Ok(out) = std::process::Command::new("ps").args(["-axo", "pid=,ppid=,rss="]).output() else { return 0 };
-    let rows: Vec<(u32, u32, u64)> = String::from_utf8_lossy(&out.stdout)
+/// Process table as (pid, ppid, rss KB). Forks `ps`, so call it off the UI thread; empty where there is no `ps`.
+fn process_rows() -> Vec<(u32, u32, u64)> {
+    if !cfg!(unix) {
+        return Vec::new();
+    }
+    let Ok(out) = std::process::Command::new("ps").args(["-axo", "pid=,ppid=,rss="]).output() else { return Vec::new() };
+    String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|l| {
             let mut f = l.split_whitespace().map(|x| x.parse::<u64>().ok());
             Some((f.next()?? as u32, f.next()?? as u32, f.next()??))
         })
-        .collect();
+        .collect()
+}
+
+/// Gives each tab its share of its renderer's resident memory and returns the MB used by this
+/// process and its descendants (shared pages count once per process, so it overstates the real footprint a little).
+fn apply_memory(app: &AppHandle, rows: &[(u32, u32, u64)]) -> u64 {
     let mut tree = vec![std::process::id()];
     let mut kb = 0;
     while let Some(p) = tree.pop() {
-        for &(pid, ppid, rss) in &rows {
+        for &(pid, ppid, rss) in rows {
             if pid == p {
                 kb += rss;
             } else if ppid == p {
@@ -1372,8 +1395,16 @@ pub fn set_pid(app: &AppHandle, view_label: &str, pid: u32) {
 }
 
 /// Over the memory limit: sleep the least recently used background tab (one per tick).
-fn sleep_for_memory(app: &AppHandle) {
-    let total = sample_memory(app);
+fn sleep_for_memory(_app: &AppHandle) {
+    // `ps` runs on a worker so the UI thread never blocks on a fork; the result is applied back on the UI thread.
+    std::thread::spawn(|| {
+        let rows = process_rows();
+        engine::defer_from_thread(move || sleep_for_memory_with(&AppHandle, &rows));
+    });
+}
+
+fn sleep_for_memory_with(app: &AppHandle, rows: &[(u32, u32, u64)]) {
+    let total = apply_memory(app, rows);
     let limit = shared(app).app.lock().unwrap().cfg.settings.memory_limit_mb;
     if limit == 0 || total <= limit {
         return;
