@@ -87,24 +87,34 @@ pub fn is_blocked(engine: &Engine, url: &str, source: &str, kind: &str) -> bool 
 
 fn css_for(engine: &Engine, url: &str) -> String {
     let res = engine.url_cosmetic_resources(url);
-    let mut sels: Vec<&String> = res.hide_selectors.iter().collect();
+    hide_css(res.hide_selectors.into_iter().collect())
+}
+
+fn hide_css(mut sels: Vec<String>) -> String {
     sels.sort();
-    if sels.is_empty() {
-        return String::new();
-    }
     let mut css = String::new();
     // Chunked so a single invalid selector only drops its own chunk.
     for chunk in sels.chunks(200) {
-        let list: Vec<&str> = chunk.iter().map(|s| s.as_str()).collect();
-        css.push_str(&list.join(","));
+        css.push_str(&chunk.join(","));
         css.push_str("{display:none!important}\n");
     }
     css
 }
 
+/// `url_cosmetic_resources` leaves out generic `##.class` / `###id` rules: the page reports the classes and ids it
+/// uses and gets the matching ones back here.
+fn generic_css_for(engine: &Engine, url: &str, classes: &[String], ids: &[String]) -> String {
+    let res = engine.url_cosmetic_resources(url);
+    if res.generichide {
+        return String::new();
+    }
+    hide_css(engine.hidden_class_id_selectors(classes, ids, &res.exceptions))
+}
+
 pub fn enabled_for(host: &str) -> bool {
     let g = CFG.read().unwrap();
-    g.0 && !g.1.iter().any(|h| h == host)
+    // An entry also covers its subdomains (example.com -> www.example.com).
+    g.0 && !g.1.iter().any(|h| host == h || host.strip_suffix(h.as_str()).is_some_and(|p| p.ends_with('.')))
 }
 
 fn engine() -> Option<Arc<Engine>> {
@@ -116,6 +126,13 @@ pub fn cosmetic_css(url: &url::Url) -> String {
         return String::new();
     }
     engine().map(|e| css_for(&e, url.as_str())).unwrap_or_default()
+}
+
+pub fn generic_css(url: &url::Url, classes: &[String], ids: &[String]) -> String {
+    if !enabled_for(url.host_str().unwrap_or_default()) {
+        return String::new();
+    }
+    engine().map(|e| generic_css_for(&e, url.as_str(), classes, ids)).unwrap_or_default()
 }
 
 /// Should this sub-resource request (made by the page at `source`) be cancelled?
@@ -136,7 +153,14 @@ pub fn hijack(url: &str, source: &str, link: &str) -> bool {
     enabled_for(&host) && is_hijack(url, source, link)
 }
 
+/// Sign-in and payment popups open from script buttons (no link), so they look like hijacks; popunders never use these.
+const AUTH_HOSTS: &[&str] = &["accounts.google.com", "appleid.apple.com", "login.microsoftonline.com", "login.live.com", "www.facebook.com", "github.com", "paypal.com", "stripe.com", "checkout.stripe.com"];
+
 fn is_hijack(url: &str, source: &str, link: &str) -> bool {
+    let host = url::Url::parse(url).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
+    if AUTH_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}"))) {
+        return false;
+    }
     let third = |from: &str| Request::new(url, from, "document", "GET").map_or(true, |r| r.is_third_party);
     third(source) && (link.is_empty() || third(link))
 }
@@ -280,6 +304,23 @@ mod tests {
         assert!(!is_hijack("https://t.me/AnimeWorldITA2", page, "https://t.me/AnimeWorldITA2"));
         assert!(!is_hijack("https://static.animeworld.ac/sfondi", page, ""));
         assert!(is_hijack("about:blank", page, ""));
+        assert!(!is_hijack("https://accounts.google.com/o/oauth2/auth", "https://shop.com/", ""));
+        assert!(!is_hijack("https://www.paypal.com/checkout", "https://shop.com/", ""));
+        assert!(is_hijack("https://notpaypal.com/x", "https://shop.com/", ""));
+    }
+
+    #[test]
+    fn generic_rules_and_allowlist() {
+        let (engine, _) = build(&["##.banner-ad\n#@#.keep\n##.keep\nexample.org#@#.banner-ad\n".to_string()]);
+        let c = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(css_for(&engine, "https://a.com/").is_empty());
+        assert!(generic_css_for(&engine, "https://a.com/", &c(&["x", "banner-ad"]), &[]).contains(".banner-ad"));
+        assert!(generic_css_for(&engine, "https://a.com/", &c(&["x"]), &[]).is_empty());
+        assert!(generic_css_for(&engine, "https://example.org/", &c(&["banner-ad"]), &[]).is_empty());
+        sync_cfg(true, &["example.com".to_string()]);
+        assert!(!enabled_for("example.com") && !enabled_for("www.example.com"));
+        assert!(enabled_for("badexample.com") && enabled_for("example.org"));
+        sync_cfg(true, &[]);
     }
 
     /// Network + slow: `cargo test real_lists -- --ignored --nocapture`

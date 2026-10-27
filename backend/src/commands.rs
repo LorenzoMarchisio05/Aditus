@@ -408,6 +408,12 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             let css = Url::parse(&ctx.frame_url).map(|u| adblock::cosmetic_css(&u)).unwrap_or_default();
             ok(Value::String(css))
         }
+        "cosmetic_generic" => {
+            // Untrusted input: cap the batch and keep only strings.
+            let list = |k: &str| a[k].as_array().map(|v| v.iter().filter_map(|x| x.as_str().map(String::from)).take(2000).collect::<Vec<_>>()).unwrap_or_default();
+            let css = Url::parse(&ctx.frame_url).map(|u| adblock::generic_css(&u, &list("c"), &list("i"))).unwrap_or_default();
+            ok(Value::String(css))
+        }
         "page_login" => {
             // Origin is the browser's view of the calling frame; the payload only carries what was typed.
             let (user, pw) = (str_arg(&a, "u"), str_arg(&a, "p"));
@@ -523,11 +529,14 @@ fn save_settings(settings: Settings) {
             }
         }
     }
-    if lists_changed {
-        adblock::rebuild(&APP);
-    }
     // Only blocking changes need a page reload; theme, width etc. must not reload the tab.
-    if blocking_changed {
+    // Building the engine takes seconds: off the UI thread, and the reload waits for it.
+    if lists_changed {
+        std::thread::spawn(|| {
+            adblock::rebuild(&APP);
+            engine::defer_from_thread(|| adblock::refresh(&APP));
+        });
+    } else if blocking_changed {
         adblock::refresh(&APP);
     }
 }

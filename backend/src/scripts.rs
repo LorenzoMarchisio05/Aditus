@@ -29,7 +29,16 @@ addEventListener('scroll',lazy,{passive:true,capture:true});for(const ev of ['in
 addEventListener('visibilitychange',()=>{if(document.hidden)snap()});setInterval(()=>{if(!document.hidden)snap()},5000)}
 if(window===top){let ll='';const el=n=>n&&(n.nodeType===1?n:n.parentElement);
 document.addEventListener('selectionchange',()=>{let u='';try{const s=getSelection();if(s&&!s.isCollapsed){const a=[s.anchorNode,s.focusNode].map(n=>el(n)&&el(n).closest('a[href]')).find(Boolean),all=a?[]:s.getRangeAt(0).cloneContents().querySelectorAll('a[href]'),t=s.toString().trim();u=a?a.href:all.length===1?all[0].href:/^https?:\/\/\S+$/i.test(t)?t:/^www\.\S+\.\S+$/i.test(t)?'https://'+t:''}}catch(e){}if(u!==ll){ll=u;send('page_link',{u}).catch(()=>{})}})}
-if(window.top===window){send('cosmetic_css',{}).then(r=>{const css=r&&JSON.parse(r);if(!css)return;const s=document.createElement('style');s.textContent=css;(document.head||document.documentElement).appendChild(s)}).catch(()=>{})}
+if(window.top===window){const css=r=>{r=r&&JSON.parse(r);if(!r)return;const s=document.createElement('style');s.textContent=r;(document.head||document.documentElement).appendChild(s)};
+send('cosmetic_css',{}).then(css).catch(()=>{});
+// Generic ##.class / ###id rules: report each class and id once, batched, and get the matching selectors back.
+const C=new Set,I=new Set;let nc=[],ni=[],gt=0;
+const seen=n=>{if(n.nodeType!==1)return;if(n.id&&!I.has(n.id)){I.add(n.id);ni.push(n.id)}if(n.classList)for(const c of n.classList)if(!C.has(c)){C.add(c);nc.push(c)}};
+const scan=n=>{seen(n);if(n.querySelectorAll)n.querySelectorAll('[class],[id]').forEach(seen)};
+const flush=()=>{gt=0;if(!nc.length&&!ni.length)return;const c=nc.slice(0,2000),i=ni.slice(0,2000);nc=nc.slice(2000);ni=ni.slice(2000);send('cosmetic_generic',{c,i}).then(css).catch(()=>{});if(nc.length||ni.length)gt=setTimeout(flush,500)};
+const sched=()=>{if(!gt)gt=setTimeout(flush,300)};
+const go=()=>{try{scan(document.documentElement);sched();new MutationObserver(m=>{for(const r of m){if(r.type==='attributes')seen(r.target);else r.addedNodes.forEach(scan)}if(nc.length||ni.length)sched()}).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['class','id']})}catch(e){}};
+document.readyState==='loading'?addEventListener('DOMContentLoaded',go):go()}
 })();"#;
 
 /// YouTube serves ads from its own origin, so network and cosmetic filters can't touch them:
@@ -40,7 +49,8 @@ pub const YOUTUBE: &str = r#"(()=>{
 if(!/(^|\.)youtube\.com$/.test(location.hostname))return;
 try{if(sessionStorage.getItem('__aditus_off'))return}catch(e){}
 const K=['adPlacements','playerAds','adSlots','adBreakParams','adBreakHeartbeatParams','adSafetyReason'];
-const strip=(o,d=0)=>{if(o&&typeof o==='object'&&d<5){for(const k of K)if(k in o){try{delete o[k]}catch(e){}console.debug('[aditus] stripped',k)}for(const k in o)if(o[k]&&typeof o[k]==='object')strip(o[k],d+1)}return o};
+const strip=(o,d=0)=>{try{if(o&&typeof o==='object'&&d<5){for(const k of K)if(k in o){try{delete o[k]}catch(e){}console.debug('[aditus] stripped',k)}for(const k in o)if(o[k]&&typeof o[k]==='object')strip(o[k],d+1)}}catch(e){}return o};
+const G=f=>()=>{try{f()}catch(e){}};// one failing patch must never break the page
 let v;try{Object.defineProperty(window,'ytInitialPlayerResponse',{configurable:true,get:()=>v,set:x=>{v=strip(x)}})}catch(e){}
 JSON.parse=new Proxy(JSON.parse,{apply:(t,th,a)=>strip(Reflect.apply(t,th,a))});
 Response.prototype.json=new Proxy(Response.prototype.json,{apply:(t,th,a)=>Reflect.apply(t,th,a).then(strip)});
@@ -54,12 +64,12 @@ setInterval(()=>{try{if(document.hidden||!location.pathname.startsWith('/watch')
 if(s.buffer_health_seconds==='0.00 s'&&s.resolution==='0x0'&&(st===3||st===-1)&&!p.classList.contains('ad-showing')&&!String(s.debug_info||'').startsWith('SSAP, AD'))stall++;else stall=0;
 if(stall>=2&&V<3){const r=p.getPlayerResponse&&p.getPlayerResponse();if(r&&r.videoDetails){V++;stall=0;console.debug('[aditus] stalled, retrying variant',V);p.loadVideoById(r.videoDetails.videoId,(r.playerConfig&&r.playerConfig.playbackStartConfig&&r.playerConfig.playbackStartConfig.startSeconds)||0)}}}catch(e){}},1000);
 const st=document.createElement('style');st.textContent='#movie_player.ad-showing video{opacity:0!important}.video-ads,.ytp-ad-module,.ytp-ad-overlay-container,#player-ads,ytd-ad-slot-renderer,ytd-in-feed-ad-layout-renderer,ytd-display-ad-renderer,ytd-promoted-sparkles-web-renderer{display:none!important}';
-const add=()=>(document.head||document.documentElement).appendChild(st);document.documentElement?add():addEventListener('DOMContentLoaded',add);
+const add=G(()=>(document.head||document.documentElement).appendChild(st));document.documentElement?add():addEventListener('DOMContentLoaded',add);
 let was=0;const skip=()=>{const m=document.querySelector('#movie_player.ad-showing');if(m&&!was)console.debug('[aditus] ad playing, skipping');if(!m){if(was){was=0;const v0=document.querySelector('#movie_player video');if(v0){v0.muted=false;v0.playbackRate=1}const pl=document.querySelector('#movie_player');if(pl&&pl.playVideo)pl.playVideo()}return}was=1;const vd=m.querySelector('video');if(vd&&isFinite(vd.duration)){vd.muted=true;vd.playbackRate=16;vd.currentTime=vd.duration}const b=document.querySelector('.ytp-skip-ad-button,.ytp-ad-skip-button-modern,.ytp-ad-skip-button');if(b)b.click()};
 // "Ad blockers violate YouTube's Terms" wall: drop the dialog and its backdrop, let the video play.
 const wall=()=>{const w=document.querySelector('ytd-enforcement-message-view-model');if(!w)return;console.debug('[aditus] removing enforcement dialog');(w.closest('tp-yt-paper-dialog')||w).remove();document.querySelectorAll('tp-yt-iron-overlay-backdrop').forEach(e=>e.remove());document.body.style.overflow='';document.documentElement.style.overflow='';const p=document.getElementById('movie_player');if(p&&p.getPlayerState&&p.getPlayerState()===2&&p.playVideo)p.playVideo()};
-new MutationObserver(wall).observe(document,{subtree:true,childList:true});setInterval(wall,1000);
-new MutationObserver(skip).observe(document,{subtree:true,attributes:true,attributeFilter:['class']});for(const ev of ['loadstart','loadedmetadata','durationchange','playing'])document.addEventListener(ev,skip,true);setInterval(skip,100);
+new MutationObserver(G(wall)).observe(document,{subtree:true,childList:true});setInterval(G(wall),1000);
+new MutationObserver(G(skip)).observe(document,{subtree:true,attributes:true,attributeFilter:['class']});for(const ev of ['loadstart','loadedmetadata','durationchange','playing'])document.addEventListener(ev,G(skip),true);setInterval(G(skip),100);
 })();"#;
 
 /// Reader view: Mozilla's Readability (Apache-2.0, see resources/reader) plus our renderer; run in the page by the browser process.
