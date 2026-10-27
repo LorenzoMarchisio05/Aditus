@@ -67,8 +67,23 @@ jobs:
           ASSET="Aditus-macos-$(uname -m).zip"
           echo "ASSET=$ASSET" >> "$GITHUB_ENV"
           ditto -c -k --keepParent backend/target/bundle/Aditus.app "$ASSET"
+      # Detached ed25519 signature over the zip's sha256 hex, checked by the updater against the public key
+      # embedded in backend/src/update.rs. Needs secret UPDATE_SIGNING_KEY (PEM); fails the release if absent.
+      - name: Sign release zip
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          [ -n "$UPDATE_SIGNING_KEY" ] || { echo "::error::secret UPDATE_SIGNING_KEY is not set; refusing to publish an unsigned release"; exit 1; }
+          brew install openssl@3
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$RUNNER_TEMP/update.pem"
+          shasum -a 256 "$ASSET" | cut -d' ' -f1 | tr -d '\n' > "$RUNNER_TEMP/sha.txt"
+          "$(brew --prefix openssl@3)/bin/openssl" pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/update.pem" -in "$RUNNER_TEMP/sha.txt" -out "$ASSET.sig"
+          rm -f "$RUNNER_TEMP/update.pem"
+          [ "$(wc -c < "$ASSET.sig")" -eq 64 ]
       - uses: softprops/action-gh-release@v2
         with:
           # Published, not a draft: the in-app updater only sees published releases.
           draft: false
-          files: ${{ env.ASSET }}
+          files: |
+            ${{ env.ASSET }}
+            ${{ env.ASSET }}.sig

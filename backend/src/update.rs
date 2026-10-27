@@ -1,17 +1,35 @@
 //! Update check against GitHub releases, and (macOS) install of the release zip.
 //!
 //! Nothing is installed without a click. The install path re-queries GitHub itself, only accepts an
-//! asset hosted under this repo, requires GitHub's own sha256 digest to match the download, and
-//! requires a valid code signature and the same bundle id before swapping the app bundle.
+//! asset hosted under this repo, requires GitHub's own sha256 digest to match the download, a detached
+//! ed25519 signature (`<zip>.sig`, over the lowercase sha256 hex) that verifies against `UPDATE_PUBKEY`
+//! (so GitHub alone cannot forge a release), and a valid code signature, same bundle id and Team ID
+//! before swapping the app bundle.
 
 use serde_json::{json, Value};
 use std::{
+    io::Read,
     path::{Path, PathBuf},
     process::Command,
     time::Duration,
 };
 
 const REPO: &str = "LorenzoMarchisio05/Aditus";
+
+/// Base64 of the raw 32-byte ed25519 public key whose private half signs releases (secret
+/// `UPDATE_SIGNING_KEY`, see README "Release signing"). PLACEHOLDER: until it is replaced with a real key,
+/// the updater refuses to install anything (it still reports that a new version exists).
+const UPDATE_PUBKEY: &str = "PLACEHOLDER-replace-with-release-public-key";
+
+fn key_is_set(key_b64: &str) -> bool {
+    !key_b64.starts_with("PLACEHOLDER")
+}
+
+/// Does `sig` (raw 64 bytes) sign `sha_hex` under `key_b64`? Missing/bad key or signature: no.
+fn verify_sig(key_b64: &str, sha_hex: &str, sig: &[u8]) -> bool {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    key_is_set(key_b64) && STANDARD.decode(key_b64).is_ok_and(|k| ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, k).verify(sha_hex.as_bytes(), sig).is_ok())
+}
 
 /// Release zip name for an arch; release.yml builds the same name from `uname -m`.
 fn asset_name(arch: &str) -> String {
@@ -30,7 +48,7 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
 struct Release {
     tag: String,
     page: String,
-    asset: Option<(String, String)>, // (download url, sha256 hex)
+    asset: Option<(String, String, String)>, // (download url, sha256 hex, signature url)
 }
 
 /// Debug builds only: ADITUS_UPDATE_API points the check at a local fake release (see scripts/update-e2e.sh).
@@ -41,11 +59,12 @@ fn api_url() -> String {
 fn latest() -> Option<Release> {
     let body = ureq::get(&api_url()).set("User-Agent", "aditus").timeout(Duration::from_secs(10)).call().ok()?.into_string().ok()?;
     let v: Value = serde_json::from_str(&body).ok()?;
-    let asset = v["assets"].as_array()?.iter().find(|a| a["name"] == asset().as_str()).and_then(|a| {
-        let url = a["browser_download_url"].as_str()?;
+    let ok = |url: &str| url.starts_with(&format!("https://github.com/{REPO}/releases/download/")) || (cfg!(debug_assertions) && std::env::var_os("ADITUS_UPDATE_API").is_some());
+    let assets = v["assets"].as_array()?;
+    let url_of = |name: &str| assets.iter().find(|a| a["name"] == name).and_then(|a| a["browser_download_url"].as_str()).filter(|u| ok(u));
+    let asset = assets.iter().find(|a| a["name"] == asset().as_str()).and_then(|a| {
         let sha = a["digest"].as_str()?.strip_prefix("sha256:")?;
-        (url.starts_with(&format!("https://github.com/{REPO}/releases/download/")) || (cfg!(debug_assertions) && std::env::var_os("ADITUS_UPDATE_API").is_some()))
-            .then(|| (url.to_string(), sha.to_lowercase()))
+        Some((url_of(&asset())?.to_string(), sha.to_lowercase(), url_of(&format!("{}.sig", asset()))?.to_string()))
     });
     Some(Release { tag: v["tag_name"].as_str()?.trim_start_matches('v').into(), page: v["html_url"].as_str()?.into(), asset })
 }
@@ -63,7 +82,7 @@ pub fn check() -> Value {
     let current = env!("CARGO_PKG_VERSION");
     let Some(r) = latest() else { return json!({ "current": current, "latest": null, "url": null, "newer": false, "can_install": false }) };
     let newer = is_newer(&r.tag, current);
-    let can_install = cfg!(target_os = "macos") && newer && r.asset.is_some() && bundle().is_some();
+    let can_install = cfg!(target_os = "macos") && newer && r.asset.is_some() && key_is_set(UPDATE_PUBKEY) && bundle().is_some();
     json!({ "current": current, "latest": r.tag, "url": r.page, "newer": newer, "can_install": can_install })
 }
 
@@ -102,7 +121,10 @@ pub fn install() -> Result<(), String> {
 
 fn install_inner() -> Result<(), String> {
     let r = latest().filter(|r| is_newer(&r.tag, env!("CARGO_PKG_VERSION"))).ok_or("No newer release")?;
-    let (url, sha) = r.asset.ok_or("Release has no verifiable download")?;
+    if !key_is_set(UPDATE_PUBKEY) {
+        return Err("This build has no release signing key; download the update from the release page".into());
+    }
+    let (url, sha, sig_url) = r.asset.ok_or("Release has no signed download")?;
     let cur = bundle().ok_or("Aditus isn't in a writable location; download it from the release page")?;
 
     let dir = std::env::temp_dir().join(format!("aditus-update-{}", std::process::id()));
@@ -115,6 +137,11 @@ fn install_inner() -> Result<(), String> {
     let got = run(Command::new("shasum").args(["-a", "256"]).arg(&zip))?;
     if got.split_whitespace().next() != Some(sha.as_str()) {
         return Err("Download doesn't match the published checksum".into());
+    }
+    let mut sig = Vec::new();
+    ureq::get(&sig_url).set("User-Agent", "aditus").timeout(Duration::from_secs(30)).call().map_err(|e| e.to_string())?.into_reader().take(1024).read_to_end(&mut sig).map_err(|e| e.to_string())?;
+    if !verify_sig(UPDATE_PUBKEY, &sha, &sig) {
+        return Err("Release signature is missing or invalid".into());
     }
     let stage = dir.join("new");
     run(Command::new("ditto").args(["-x", "-k"]).arg(&zip).arg(&stage))?;
@@ -149,6 +176,22 @@ rm -rf "$2.old"; mv "$2" "$2.old" && mv "$3" "$2" && { rm -rf "$2.old" "$4"; ope
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn signatures() {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        use ring::signature::{Ed25519KeyPair, KeyPair};
+        let rng = ring::rand::SystemRandom::new();
+        let kp = Ed25519KeyPair::from_pkcs8(Ed25519KeyPair::generate_pkcs8(&rng).unwrap().as_ref()).unwrap();
+        let key = STANDARD.encode(kp.public_key().as_ref());
+        let sig = kp.sign(b"abc123");
+        assert!(super::verify_sig(&key, "abc123", sig.as_ref()));
+        assert!(!super::verify_sig(&key, "abc124", sig.as_ref()));
+        assert!(!super::verify_sig(&key, "abc123", b""));
+        let other = Ed25519KeyPair::from_pkcs8(Ed25519KeyPair::generate_pkcs8(&rng).unwrap().as_ref()).unwrap();
+        assert!(!super::verify_sig(&STANDARD.encode(other.public_key().as_ref()), "abc123", sig.as_ref()));
+        assert!(!super::verify_sig(super::UPDATE_PUBKEY, "abc123", sig.as_ref()));
+    }
+
     #[test]
     fn team_ids() {
         assert_eq!(super::team_id("Identifier=x\nTeamIdentifier=AB12CD34EF\n").as_deref(), Some("AB12CD34EF"));

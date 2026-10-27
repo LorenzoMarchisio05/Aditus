@@ -619,7 +619,7 @@
                 <button onclick={() => extDo('ext_remove', { id: x.id })}>Remove</button></div>
             {/each}
           </div>
-          <p class="meta">Extensions can read the pages you visit, so add only ones you trust. They are shared by all profiles, don't run in private windows. They update themselves every few hours (new code runs after a restart), unless the new version asks for more permissions; then remove and add it again. Popups that need the current tab, like password autofill, won't work yet.</p>
+          <p class="meta">Extensions can read the pages you visit, so add only ones you trust. They are shared by all profiles (an extension can see pages from every profile, so profile isolation doesn't apply to them) and don't run in private windows. They update themselves every few hours (new code runs after a restart), unless the new version asks for more permissions; then remove and add it again. Popups that need the current tab, like password autofill, won't work yet.</p>
         </section>
         <section id="sec-shortcuts" class="sec">
           <h1>Shortcuts</h1>
