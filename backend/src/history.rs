@@ -34,6 +34,16 @@ pub struct Hist {
     top: usize,
 }
 
+/// Chromium keeps at most this many session-history entries; at the cap a push drops the oldest one.
+const NATIVE_MAX: i32 = 50;
+
+/// Did a navigation replace the current entry instead of adding one? `pre`/`post` are the engine's
+/// `(index, total)` before the navigation started and once it committed. Unknown (`None`) or a full
+/// list (a push looks the same there) is never a replacement.
+pub fn native_replaced(pre: Option<(i32, i32)>, post: Option<(i32, i32)>) -> bool {
+    matches!((pre, post), (Some(a), Some(b)) if a == b && b.1 < NATIVE_MAX)
+}
+
 /// Saved with the session: enough to bring back/forward back after a restart.
 const SAVE_MAX: usize = 30;
 const SAVE_URL_MAX: usize = 2048;
@@ -113,10 +123,16 @@ impl Hist {
     /// - `fresh`: first load of a new view, which started at the current entry; a different address is a redirect.
     /// - `fwd_back`: the engine says this was a history traversal (a page called `history.back()`).
     pub fn commit(&mut self, url: &str, profile: &str, traverse: bool, fresh: bool, fwd_back: bool) {
+        self.commit_with(url, profile, traverse, fresh, fwd_back, false)
+    }
+
+    /// Like `commit`; `replaced`: the engine's own history did not grow for this load (`native_replaced`),
+    /// so the page took the current entry's place (`location.replace`, a client-side redirect).
+    pub fn commit_with(&mut self, url: &str, profile: &str, traverse: bool, fresh: bool, fwd_back: bool, replaced: bool) {
         if self.entries.is_empty() {
             return self.push(url, profile);
         }
-        if traverse || (fresh && self.entries[self.idx].url != url) {
+        if traverse || replaced || (fresh && self.entries[self.idx].url != url) {
             return self.replace(url);
         }
         if self.entries[self.idx].url == url {
@@ -261,6 +277,26 @@ mod tests {
         let mut h = hist(&["a", "b"]);
         h.fence();
         assert!(matches!(h.step(-1, "A"), Step::Load(_)));
+    }
+
+    #[test]
+    fn location_replace_takes_the_entrys_place() {
+        let mut h = hist(&["a", "b"]);
+        h.commit_with("b2", "A", false, false, false, true); // the engine's list did not grow
+        assert_eq!((h.entries.len(), h.url().as_str()), (2, "b2"));
+        h.commit_with("c", "A", false, false, false, false); // an ordinary link
+        assert_eq!((h.entries.len(), h.url().as_str()), (3, "c"));
+        assert_eq!(h.step(-1, "A"), Step::Native);
+    }
+
+    #[test]
+    fn native_growth_decides_replace() {
+        assert!(native_replaced(Some((3, 4)), Some((3, 4))));
+        assert!(!native_replaced(Some((3, 4)), Some((4, 5)))); // pushed
+        assert!(!native_replaced(Some((1, 3)), Some((2, 3)))); // push after a back step
+        assert!(!native_replaced(None, Some((0, 1)))); // first load of a view
+        assert!(!native_replaced(Some((0, 1)), None));
+        assert!(!native_replaced(Some((49, 50)), Some((49, 50)))); // full list: a push looks the same
     }
 
     #[test]

@@ -170,7 +170,7 @@ const AUTH_HOSTS: &[&str] =
 
 fn is_hijack(url: &str, source: &str, link: &str) -> bool {
     let host = url::Url::parse(url).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
-    if AUTH_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}"))) {
+    if crate::nav::is_auth_host(&host) || AUTH_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}"))) {
         return false;
     }
     let third = |from: &str| Request::new(url, from, "document", "GET").map_or(true, |r| r.is_third_party);

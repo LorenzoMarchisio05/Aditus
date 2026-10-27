@@ -8,7 +8,7 @@
 //! Views are addressed by label (`ui`, `tab-3-0`, `palette-w2`, ...). Never hold the registry
 //! borrow across a CEF call: CEF calls back into our handlers synchronously, and those use it too.
 
-use crate::{app::SCHEME, ipc, scheme, tabs};
+use crate::{app::SCHEME, ipc, nav, scheme, tabs};
 use cef::{wrapper::message_router::MessageRouterBrowserSideHandlerCallbacks, *};
 use std::{
     cell::RefCell,
@@ -332,10 +332,18 @@ wrap_browser_view_delegate! {
         }
 
         fn delegate_for_popup_browser_view(&self, _view: Option<&mut BrowserView>, _settings: Option<&BrowserSettings>, _client: Option<&mut Client>, is_devtools: i32) -> Option<BrowserViewDelegate> {
-            (is_devtools != 0).then(|| PageViewDelegate::new(self.label.clone(), true))
+            if is_devtools != 0 {
+                return Some(PageViewDelegate::new(self.label.clone(), true));
+            }
+            // A related popup we allowed in `on_before_popup`: its delegate is told its label (page size lookups).
+            let label = PENDING.with(|q| q.borrow().iter().find(|e| e.opener == self.label).map(|e| e.label.clone()))?;
+            Some(PageViewDelegate::new(label, false))
         }
 
         fn on_popup_browser_view_created(&self, _view: Option<&mut BrowserView>, popup: Option<&mut BrowserView>, is_devtools: i32) -> i32 {
+            if is_devtools == 0 {
+                return popup.map_or(0, |p| adopt_popup(&self.label, p));
+            }
             let (Some(popup), true) = (popup, is_devtools != 0) else { return 0 };
             // A second docked DevTools in one window crashes CEF: later ones open in their own window.
             if dock_mode() == "window" || win_of(&self.label).is_some_and(|w| DEV.with(|d| d.borrow().values().any(|e| e.0 == w))) {
@@ -385,11 +393,16 @@ fn build(spec: Spec, ctx: Option<RequestContext>) {
         eprintln!("browser_view_create failed for {}", spec.label);
         return;
     };
+    mount(&spec, &win, &bv, bounds, visible);
+}
+
+/// Registers a new browser view and puts it in its window: pages go into the window's host panel.
+fn mount(spec: &Spec, win: &Window, bv: &BrowserView, bounds: Bounds, visible: bool) {
     reg(|r| {
         set_page(&spec.label, spec.kind == Kind::Page && !spec.app_page);
         r.views.insert(spec.label.clone(), Rec { bv: bv.clone(), win: spec.win.clone(), kind: spec.kind, app_page: spec.app_page, bounds });
     });
-    let mut v = View::from(&bv);
+    let mut v = View::from(bv);
     match HOST.with(|h| h.borrow().get(&spec.win).cloned()).filter(|_| spec.kind == Kind::Page) {
         Some(host) => {
             let (_, _, w, h) = bounds;
@@ -408,6 +421,66 @@ fn build(spec: Spec, ctx: Option<RequestContext>) {
     if spec.kind != Kind::Overlay {
         raise_overlays(&spec.win);
     }
+}
+
+/// A related popup (kept `window.opener`, see `on_before_popup`) was created by CEF: mount it like any page
+/// view and give its placeholder tab to it. Returns 1 when the view is ours (docked as a tab).
+fn adopt_popup(opener: &str, popup: &BrowserView) -> i32 {
+    // The popup's client labelled its browser when it was created, which is the authority; the queue is the fallback.
+    let by_id = popup.browser().and_then(|b| reg(|r| r.by_browser.get(&b.identifier()).cloned()));
+    let found = PENDING.with(|q| {
+        let mut q = q.borrow_mut();
+        let i = q.iter().position(|e| Some(&e.label) == by_id.as_ref()).or_else(|| q.iter().position(|e| e.opener == opener))?;
+        Some(q.remove(i))
+    });
+    let Some(p) = found else { return 0 };
+    let Some((win_name, win)) = win_of(opener).and_then(|w| window(&w).map(|win| (w, win))) else {
+        defer(move || tabs::popup_abort(&tabs::AppHandle, p.tab));
+        return 0;
+    };
+    let bounds = tabs::content_rect(&tabs::AppHandle, &win_name);
+    let spec = Spec { label: p.label.clone(), win: win_name, url: String::new(), kind: Kind::Page, app_page: false, store: None, bounds, visible: false, zoom: 100, yt: false };
+    mount(&spec, &win, popup, bounds, false);
+    RELATED.with(|r| {
+        let mut r = r.borrow_mut();
+        r.insert(opener.to_string());
+        r.insert(p.label.clone());
+    });
+    if tabs::popup_attach(&tabs::AppHandle, p.tab) {
+        // Selecting it lays out the window; not from inside CEF's creation callback.
+        defer(move || tabs::popup_show(&tabs::AppHandle, p.tab));
+    } else {
+        defer(move || close(&p.label));
+    }
+    1
+}
+
+/// Allows a popup request as a related popup: the tab is reserved, and CEF is told to build the popup with a
+/// client of its own (it would otherwise share the opener's, and every callback would be filed under the
+/// opener's label), the renderer flags a page view gets, and the same ad filtering. `false`: not possible,
+/// the caller treats the request as a plain tab.
+fn open_related(opener: &str, popup_id: i32, url: &str, client_slot: Option<&mut Option<Client>>, extra: Option<&mut Option<DictionaryValue>>) -> bool {
+    let (Some(slot), Some(extra)) = (client_slot, extra) else { return false };
+    let Some((tab, adblock)) = tabs::popup_reserve(&tabs::AppHandle, opener, url) else { return false };
+    let label = tabs::label(tab, 0);
+    let mut dict = dictionary_value_create();
+    if let Some(e) = dict.as_mut() {
+        e.set_bool(Some(&s("page")), 1);
+        e.set_bool(Some(&s("yt")), adblock as i32);
+    }
+    *extra = dict;
+    *slot = Some(client(&label));
+    set_page(&label, true);
+    PENDING.with(|q| q.borrow_mut().push(PendingPopup { opener: opener.to_string(), popup_id, label: label.clone(), tab }));
+    // Safety net: if CEF neither builds the popup nor reports it aborted, the placeholder tab and queue entry go.
+    defer_after(10_000, move || {
+        if PENDING.with(|q| q.borrow().iter().any(|e| e.label == label)) {
+            PENDING.with(|q| q.borrow_mut().retain(|e| e.label != label));
+            set_page(&label, false);
+            tabs::popup_abort(&tabs::AppHandle, tab);
+        }
+    });
+    true
 }
 
 /// macOS: keeps the traffic lights in the sidebar's top corner (see `mac::place_window_buttons`).
@@ -520,7 +593,14 @@ pub fn close(label: &str) {
         bv.set_visible(0);
         PARK.with(|p| p.borrow_mut().push(bv.clone()));
     }
-    let parked = docked.is_some();
+    // A view in an opener relation (a related popup, or the page that opened one) gets the same treatment: tearing
+    // one down while its counterpart lives is the kind of teardown that crashes CEF, so it is parked, blank and
+    // hidden, too. Its browser id leaves the registry so a parked view can't keep the app from quitting.
+    let related = RELATED.with(|r| r.borrow_mut().remove(label));
+    if related && docked.is_none() {
+        navigate(label, "about:blank");
+    }
+    let parked = docked.is_some() || related;
     let rec = reg(|r| {
         r.pending.remove(label);
         r.find_text.remove(label);
@@ -529,6 +609,12 @@ pub fn close(label: &str) {
     let Some(rec) = rec else { return };
     if parked {
         PARK.with(|p| p.borrow_mut().push(rec.bv.clone()));
+    }
+    if related {
+        rec.bv.set_visible(0);
+        if let Some(id) = rec.bv.browser().map(|b| b.identifier()) {
+            reg(|r| r.by_browser.remove(&id));
+        }
     }
     // CloseBrowser on a view's browser would close the whole window. Removing the view and
     // dropping our last reference destroys the browser instead.
@@ -564,6 +650,31 @@ pub fn go(label: &str, delta: i32) -> bool {
         return false;
     }
     true
+}
+
+wrap_navigation_entry_visitor! {
+    struct NavPos {
+        out: std::rc::Rc<std::cell::Cell<Option<(i32, i32)>>>,
+    }
+
+    impl NavigationEntryVisitor {
+        fn visit(&self, _entry: Option<&mut NavigationEntry>, current: i32, index: i32, total: i32) -> i32 {
+            if current != 0 {
+                self.out.set(Some((index, total)));
+            }
+            1
+        }
+    }
+}
+
+/// The engine's own history of the view as `(index of the current entry, entry count)`, to tell whether a
+/// navigation added an entry or took the current one's place. `None` without a live view or if the engine
+/// does not answer at once (then callers treat every navigation as a new entry, as before).
+pub fn native_pos(label: &str) -> Option<(i32, i32)> {
+    let h = host(label)?;
+    let out = std::rc::Rc::new(std::cell::Cell::new(None));
+    h.navigation_entries(Some(&mut NavPos::new(out.clone())), 1);
+    out.get()
 }
 
 pub fn eval(label: &str, js: &str) {
@@ -623,6 +734,19 @@ thread_local! {
     /// Docked DevTools by inspected page: (window, its view, shown). A DevTools view is never taken out
     /// of its window or closed (both crash CEF); it is only hidden.
     static DEV: RefCell<HashMap<String, (String, BrowserView, bool)>> = RefCell::new(HashMap::new());
+    /// Related popups allowed by `on_before_popup` whose view CEF has not handed over yet (oldest first).
+    static PENDING: RefCell<Vec<PendingPopup>> = RefCell::new(Vec::new());
+    /// Labels of views in an opener relation (popups and their openers); `close` parks them instead of destroying them.
+    static RELATED: RefCell<std::collections::HashSet<String>> = RefCell::new(Default::default());
+    /// A window close is asking its page browsers to close: a `do_close` now is the window's, not a page's `window.close()`.
+    static WIN_CLOSING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+struct PendingPopup {
+    opener: String,
+    popup_id: i32,
+    label: String,
+    tab: u32,
 }
 
 fn dock_devtools(label: &str, popup: BrowserView) {
@@ -891,11 +1015,13 @@ wrap_window_delegate! {
             }
             let bvs: Vec<BrowserView> = reg(|r| r.views.values().filter(|v| v.win == self.label && v.kind == Kind::Page && !v.app_page).map(|v| v.bv.clone()).collect());
             let mut all = true;
+            WIN_CLOSING.with(|c| c.set(true));
             for bv in bvs {
                 if let Some(h) = bv.browser().and_then(|b| b.host()) {
                     all &= h.try_close_browser() != 0;
                 }
             }
+            WIN_CLOSING.with(|c| c.set(false));
             if !all {
                 CLOSE_ASKED.with(|c| c.borrow_mut().insert(self.label.clone(), now));
             }
@@ -1029,31 +1155,40 @@ wrap_life_span_handler! {
             &self,
             _browser: Option<&mut Browser>,
             frame: Option<&mut Frame>,
-            _popup_id: i32,
+            popup_id: i32,
             target_url: Option<&CefString>,
             _target_frame_name: Option<&CefString>,
-            _target_disposition: WindowOpenDisposition,
+            target_disposition: WindowOpenDisposition,
             user_gesture: i32,
-            _popup_features: Option<&PopupFeatures>,
+            popup_features: Option<&PopupFeatures>,
             _window_info: Option<&mut WindowInfo>,
-            _client: Option<&mut Option<Client>>,
+            client: Option<&mut Option<Client>>,
             _settings: Option<&mut BrowserSettings>,
-            _extra_info: Option<&mut Option<DictionaryValue>>,
+            extra_info: Option<&mut Option<DictionaryValue>>,
             _no_javascript_access: Option<&mut i32>,
         ) -> i32 {
-            // Never a native popup window: it becomes a tab beside the opener.
-            // Known limit: this is a brand-new browser, so `window.opener`, `postMessage` to the opener and
-            // `window.close()` do not work (popup sign-ins and 3-D Secure rely on them; `nav::AUTH_HOSTS` papers
-            // over the profile side of that). Returning 0 here instead would give a real related popup, and the
-            // views API can hand it over (`delegate_for_popup_browser_view` + `on_popup_browser_view_created`, the
-            // way DevTools is docked above) with a client of our own. Not done: it needs a tab that owns an
-            // existing view, `window.close()` -> tab close, and no sleep/profile swap of the opener, none of which
-            // can be checked without running CEF (popup teardown already crashes in this codebase, see `close`).
+            // Never a native popup window; a popup is a tab beside the opener. Two kinds:
+            // - A popup that asks for a window (sized `window.open`) or goes to a sign-in host, and passes the ad
+            //   checks right now, is a related popup: returning 0 makes CEF build it with `window.opener`,
+            //   `postMessage` and `window.close()` intact, and `on_popup_browser_view_created` docks it as a tab
+            //   (as DevTools is docked). Sign-in and 3-D Secure windows depend on that.
+            // - Anything else is cancelled and re-opened shortly after as an independent tab (no opener): a plain
+            //   `target=_blank` link is `noopener` anyway. The click's page ping may not have landed when this runs,
+            //   so a cross-site popup that looks like click-hijacking is only judged after a short delay and
+            //   cannot be related (CEF needs the answer now). Empty and `about:blank` popups are never related.
             let url = target_url.map(|u| u.to_string()).unwrap_or_default();
-            // Ad popups: scripted `window.open` without a click, or a target the filter lists block.
             let source = frame.map(|f| CefString::from(&f.url()).to_string()).unwrap_or_default();
-            if user_gesture == 0 || crate::adblock::check(&url, &source, "document") {
+            let gesture = user_gesture != 0;
+            // Ad popups: scripted `window.open` without a click, or a target the filter lists block.
+            let listed = crate::adblock::check(&url, &source, "document");
+            let hijack = gesture && !listed && crate::adblock::hijack(&url, &source, &tabs::clicked_link(&tabs::AppHandle, &self.label));
+            let window = target_disposition == WindowOpenDisposition::NEW_POPUP || popup_features.is_some_and(|f| f.is_popup != 0);
+            let plan = nav::popup_plan(gesture, listed, hijack, window, &url);
+            if plan == nav::PopupPlan::Block {
                 return 1;
+            }
+            if plan == nav::PopupPlan::Related && open_related(&self.label, popup_id, &url, client, extra_info) {
+                return 0;
             }
             // Click-hijacking ads too (animeworld's even ask for a sized popup window, so that is no sign of a
             // sign-in). Delayed so the click's page ping, sent just before but itself deferred, has landed.
@@ -1066,14 +1201,39 @@ wrap_life_span_handler! {
             1
         }
 
+        fn on_before_popup_aborted(&self, _browser: Option<&mut Browser>, popup_id: i32) {
+            // CEF gave up on a related popup: forget it and its placeholder tab.
+            let gone = PENDING.with(|q| {
+                let mut q = q.borrow_mut();
+                q.iter().position(|e| e.opener == self.label && e.popup_id == popup_id).map(|i| q.remove(i))
+            });
+            if let Some(p) = gone {
+                set_page(&p.label, false);
+                defer(move || tabs::popup_abort(&tabs::AppHandle, p.tab));
+            }
+        }
+
+        // A related popup calling `window.close()`: its tab closes (the view is parked by `close`). We say we
+        // handle it, so CEF does not send the close on to the window; the browser is not destroyed inside this
+        // callback. A window being closed (`can_close`) asks the same question and gets the default answer.
         fn do_close(&self, _browser: Option<&mut Browser>) -> i32 {
-            0
+            if WIN_CLOSING.with(|c| c.get()) || !tabs::is_popup_view(&tabs::AppHandle, &self.label) {
+                return 0;
+            }
+            let label = self.label.clone();
+            defer(move || tabs::popup_closed(&tabs::AppHandle, &label));
+            1
         }
 
         fn on_before_close(&self, browser: Option<&mut Browser>) {
             let Some(b) = browser else { return };
             ipc::router().on_before_close(Some(b.clone()));
             reg(|r| r.by_browser.remove(&b.identifier()));
+            // A popup browser that went away on its own takes its tab with it.
+            if tabs::is_popup_view(&tabs::AppHandle, &self.label) {
+                let label = self.label.clone();
+                defer(move || tabs::popup_closed(&tabs::AppHandle, &label));
+            }
             maybe_quit();
         }
     }
@@ -1101,6 +1261,7 @@ wrap_request_handler! {
             user_gesture: i32,
             is_redirect: i32,
         ) -> i32 {
+            let post = request.as_ref().is_some_and(|r| nav::is_form_post(&CefString::from(&r.method()).to_string()));
             let url = url_of_request(request);
             let main = frame.as_ref().map_or(true, |f| f.is_main() != 0);
             let (kind, app_page) = reg(|r| r.views.get(&self.label).map(|v| (v.kind, v.app_page)).unwrap_or((Kind::Page, false)));
@@ -1119,7 +1280,9 @@ wrap_request_handler! {
             if kind == Kind::Page && main && !is_app_url(&url) {
                 if let Ok(u) = url::Url::parse(&url) {
                     NAV_HOST.with(|n| n.borrow_mut().insert(self.label.clone(), u.host_str().unwrap_or_default().to_string()));
-                    if !tabs::on_navigation(&tabs::AppHandle, &self.label, &u, user_gesture != 0, is_redirect != 0) {
+                    // Before the load changes it: lets the tab tell `location.replace` from a new entry.
+                    tabs::note_pre_nav(&tabs::AppHandle, &self.label, native_pos(&self.label), is_redirect != 0);
+                    if !tabs::on_navigation(&tabs::AppHandle, &self.label, &u, user_gesture != 0, is_redirect != 0, post) {
                         return 1;
                     }
                 }
