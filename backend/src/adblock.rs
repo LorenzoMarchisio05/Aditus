@@ -51,7 +51,9 @@ pub fn build(texts: &[String]) -> (Engine, usize) {
         set.add_filter_list(popup_as_document(t), ParseOptions::default());
         rules += t.lines().filter(|l| !l.is_empty() && !l.starts_with('!') && !l.starts_with('[')).count();
     }
-    (Engine::new_with_filter_set(set), rules)
+    let mut engine = Engine::new_with_filter_set(set);
+    engine.use_resources(crate::scriptlets::resources());
+    (engine, rules)
 }
 
 /// adblock-rust ignores `$popup`, and only popups are ever checked as "document" (main-frame loads skip the filter),
@@ -132,6 +134,16 @@ pub fn generic_css(url: &url::Url, classes: &[String], ids: &[String]) -> String
         return String::new();
     }
     engine().map(|e| generic_css_for(&e, url.as_str(), classes, ids)).unwrap_or_default()
+}
+
+/// Scriptlet code for the page at `url` (`##+js(...)` rules), to run in its main world before page scripts.
+/// Built by the engine from our bundled scriptlets only; empty when blocking is off for the host.
+pub fn scriptlets(url: &str) -> String {
+    let host = url::Url::parse(url).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
+    match engine() {
+        Some(e) if enabled_for(&host) => e.url_cosmetic_resources(url).injected_script,
+        _ => String::new(),
+    }
 }
 
 /// Should this sub-resource request (made by the page at `source`) be cancelled?
@@ -307,6 +319,22 @@ pub fn init(dir: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scriptlets_are_injected_from_bundled_resources() {
+        let list = "example.org##+js(aopr, adsbygoogle)\nexample.org##+js(ubo-set-constant, a.b, true)\nexample.org##+js(json-prune, ads.*)\n\
+                    example.org##+js(rc, ad, .box)\nexample.org##+js(nope-unknown, x)\nexample.net##+js(nostif, \"x\\\"y\")\n";
+        let (e, _) = build(&[list.into()]);
+        let js = e.url_cosmetic_resources("https://example.org/p").injected_script;
+        assert!(js.contains("aditusAopr(\"adsbygoogle\")"), "{js}");
+        assert!(js.contains("aditusSet(\"a.b\", \"true\")"), "{js}");
+        assert!(js.contains("aditusJsonPrune(\"ads.*\")") && js.contains("function aditusPrune"), "{js}");
+        assert!(js.contains("aditusRc(\"ad\", \".box\")") && js.contains("function aditusDom"), "{js}");
+        assert!(!js.contains("nope-unknown") && !js.contains("aditusNostif"));
+        let net = e.url_cosmetic_resources("https://example.net/").injected_script;
+        assert!(net.contains("aditusNostif("), "{net}");
+        assert!(e.url_cosmetic_resources("https://other.org/").injected_script.is_empty());
+    }
 
     #[test]
     fn blocks_ads_and_hides_elements() {

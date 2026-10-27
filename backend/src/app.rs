@@ -22,7 +22,26 @@ struct Flags {
     yt: bool,
 }
 
+/// `scheme://host/path?query` without the fragment: the key scriptlets are stashed under.
+fn doc_key(url: &str) -> &str {
+    url.split('#').next().unwrap_or_default()
+}
+
+/// Scriptlets the browser sent ahead of a document, by URL, until its context is created.
+const STASH_MAX: usize = 32;
+
+fn run_in(c: &V8Context, code: &str) {
+    c.enter();
+    // `retval` must be given or eval fails without an exception.
+    let (mut ex, mut rv) = (None, None);
+    let _ok = c.eval(Some(&CefString::from(code)), Some(&CefString::from("aditus://inject")), 1, Some(&mut rv), Some(&mut ex));
+    c.exit();
+}
+
 thread_local! {
+    static STASH: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+    /// Frames (by id) whose current document already got its scriptlets.
+    static APPLIED: RefCell<std::collections::HashSet<String>> = RefCell::new(Default::default());
     static ROUTER: Arc<RendererSideRouter> = RendererSideRouter::new(MessageRouterConfig::default());
     static FLAGS: RefCell<HashMap<i32, Flags>> = RefCell::new(HashMap::new());
 }
@@ -47,6 +66,9 @@ wrap_render_process_handler! {
         fn on_context_created(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, context: Option<&mut V8Context>) {
             let (b, f, c) = (browser.cloned(), frame.cloned(), context.cloned());
             let main = f.clone();
+            if let Some(f) = main.as_ref() {
+                APPLIED.with(|a| a.borrow_mut().remove(&CefString::from(&f.identifier()).to_string()));
+            }
             ROUTER.with(|r| r.on_context_created(b.clone(), f, c.clone()));
             // Scripts go in through the context itself: no CSP applies, and they run before page code.
             let (Some(b), Some(c)) = (b, c) else { return };
@@ -55,7 +77,7 @@ wrap_render_process_handler! {
                 return;
             }
             // Tell the browser which OS process renders this tab, for the per-tab memory readout.
-            if let Some(f) = main.filter(|f| f.is_main() != 0) {
+            if let Some(f) = main.clone().filter(|f| f.is_main() != 0) {
                 if let Some(mut m) = process_message_create(Some(&CefString::from("aditus-pid"))) {
                     if let Some(args) = m.argument_list() {
                         args.set_int(0, std::process::id() as i32);
@@ -63,13 +85,15 @@ wrap_render_process_handler! {
                     }
                 }
             }
-            let run = |code: &str| {
-                c.enter();
-                // `retval` must be given or eval fails without an exception.
-                let (mut ex, mut rv) = (None, None);
-                let _ok = c.eval(Some(&CefString::from(code)), Some(&CefString::from("aditus://inject")), 1, Some(&mut rv), Some(&mut ex));
-                c.exit();
-            };
+            let run = |code: &str| run_in(&c, code);
+            // Scriptlets first, so they are in place before the page's own scripts.
+            if let Some(f) = main.as_ref() {
+                let key = CefString::from(&f.url()).to_string();
+                if let Some(code) = STASH.with(|s| s.borrow_mut().remove(doc_key(&key))).filter(|c| !c.is_empty()) {
+                    APPLIED.with(|a| a.borrow_mut().insert(CefString::from(&f.identifier()).to_string()));
+                    run(&code);
+                }
+            }
             run(crate::scripts::PAGE);
             if flags.yt {
                 run(crate::scripts::YOUTUBE);
@@ -88,6 +112,34 @@ wrap_render_process_handler! {
             source_process: ProcessId,
             message: Option<&mut ProcessMessage>,
         ) -> i32 {
+            // Scriptlets come from the browser process only (a page cannot send process messages) and are only
+            // ever run in the main world of the frame they were computed for.
+            if let (Some(m), Some(f)) = (message.as_ref(), frame.as_ref()) {
+                if CefString::from(&m.name()).to_string() == "aditus-scriptlets" {
+                    if let Some(a) = m.argument_list() {
+                        let url = CefString::from(&a.string(0)).to_string();
+                        let code = CefString::from(&a.string(1)).to_string();
+                        if a.bool(2) == 0 {
+                            STASH.with(|s| {
+                                let mut s = s.borrow_mut();
+                                if s.len() >= STASH_MAX {
+                                    s.clear();
+                                }
+                                s.insert(doc_key(&url).to_string(), code);
+                            });
+                        } else if doc_key(&CefString::from(&f.url()).to_string()) == doc_key(&url) {
+                            let id = CefString::from(&f.identifier()).to_string();
+                            if !APPLIED.with(|a| a.borrow().contains(&id)) {
+                                if let Some(c) = f.v8_context() {
+                                    APPLIED.with(|a| a.borrow_mut().insert(id));
+                                    run_in(&c, &code);
+                                }
+                            }
+                        }
+                    }
+                    return 1;
+                }
+            }
             let (b, f, m) = (browser.cloned(), frame.cloned(), message.cloned());
             ROUTER.with(|r| r.on_process_message_received(b, f, Some(source_process), m)) as i32
         }

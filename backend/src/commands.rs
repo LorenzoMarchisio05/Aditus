@@ -465,6 +465,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
         "suggest_get" => ok(SUGGEST.lock().unwrap().iter().find(|(w, _)| w == win).map(|(_, v)| v.clone()).unwrap_or(Value::Null)),
         "cosmetic_css" => {
             let css = Url::parse(&ctx.frame_url).map(|u| adblock::cosmetic_css(&u)).unwrap_or_default();
+            engine::send_scriptlets_late(&ctx.label, &ctx.frame_url);
             ok(Value::String(css))
         }
         "cosmetic_generic" => {
