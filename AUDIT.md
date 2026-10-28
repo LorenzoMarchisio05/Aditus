@@ -7,14 +7,13 @@ Scope: all Rust in `backend/src`, build/CI scripts, `Cargo.toml`, README. UI ski
 ## Summary
 
 - Fixed: 37
+- Accepted, documented: 2
 - Fixed once a key is set: 1
 - Open (decision): 1
-- Accepted, documented: 1
 - Documented: 1
 - Assessed, not migrated: 1
-- Mostly fixed: 1
 
-Open decisions: #8 (who builds CEF with H.264). Needs action: #7 (set `UPDATE_PUBKEY` and the `UPDATE_SIGNING_KEY` secret). Accepted: #10 (shared extensions). Not migrated on purpose: #22. #18/#20 rely on close-ordering assumptions documented in `engine.rs`; if a popup or DevTools close misbehaves in real use, open a new item.
+Open decision: #8 (who builds CEF with H.264). Needs action: #7 (set `UPDATE_PUBKEY` and the `UPDATE_SIGNING_KEY` secret). Accepted: #10 (shared extensions), #42 (CEF-bound code untested by nature). Documented only: #21. Not migrated on purpose: #22. #18/#20 rely on close-ordering assumptions documented in `engine.rs`; if a popup or DevTools close misbehaves in real use, open a new item.
 
 ## A. Can lose data or break the app (fix first)
 
@@ -147,7 +146,7 @@ Open decisions: #8 (who builds CEF with H.264). Needs action: #7 (set `UPDATE_PU
 41. **Release workflow runs no tests.** No `cargo test` or smoke test before publishing a tag; no clippy or fmt anywhere. Signing path documented as untested.
    - **Status: Fixed.** `cargo fmt` applied (`backend/rustfmt.toml`, 200 cols); `cargo fmt --check` is a blocking step in `ci.yml` and `release.yml`; release runs tests and smoke test; non-blocking clippy in `ci.yml`.
 42. **Test coverage.** ~25 unit tests, all on pure modules. `tabs.rs` (1.6k lines, the state machine), `engine.rs` and `commands.rs` have zero. Smoke test only checks the UI loads and the page script is injected. One `scheme.rs` assertion is a tautology (`is_none() || starts_with`).
-   - **Status: Mostly fixed.** ~74 unit tests, now covering `tabs.rs`, `history.rs`, `nav.rs`, `scheme.rs`, `config.rs`, `db.rs`, and pure helpers of `commands.rs`/`engine.rs`. CEF-bound code paths remain untested; smoke test extended.
+   - **Status: Accepted, documented.** 82 unit tests (2 ignored), now covering `tabs.rs`, `history.rs`, `nav.rs`, `scheme.rs`, `config.rs`, `db.rs`, `snapshot.rs`, and pure helpers of `commands.rs`/`engine.rs`. CEF-bound code paths (engine/CEF callbacks) have no automated tests by nature; smoke test extended. Accepted: runtime verification is deferred to real use.
 43. **arm64-only release asset**; updater hardcodes the asset name.
 
    - **Status: Fixed.** `asset_name(arch)` in `update.rs`; `release.yml` derives the name from `uname -m`. Still arm64-only in practice.
