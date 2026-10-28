@@ -4,7 +4,7 @@ use crate::nav::Mapping;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Profile {
     pub name: String,
     /// Stable id for the engine-side data store (macOS) / directory name (Windows, Linux).
@@ -14,7 +14,7 @@ pub struct Profile {
     pub color: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)] // a hand-edited file missing a field keeps the default instead of failing the parse
 pub struct Settings {
     pub search_template: String,
@@ -143,7 +143,7 @@ pub struct PermRule {
     pub allow: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     pub settings: Settings,
     pub profiles: Vec<Profile>,

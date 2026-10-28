@@ -373,9 +373,10 @@ pub fn cert_error_text(code: i32) -> &'static str {
 #[derive(Serialize)]
 struct Snapshot<'a> {
     win: &'a str,
+    /// Per-window counter: a `state-delta` applies only on top of `seq - 1`, else the UI re-requests.
+    seq: u64,
     tabs: Vec<TabView>,
     active: u32,
-    cfg: serde_json::Value,
     prompt: Option<String>,
     perm: Option<(&'a str, &'a str)>,
     net: Option<&'a NetPrompt>,
@@ -386,21 +387,146 @@ struct Snapshot<'a> {
     incognito: bool,
 }
 
-pub fn emit_state(app: &AppHandle) {
-    emit(app, true);
+/// The per-tab fields that change many times a second; everything else is "structural".
+#[derive(Clone, PartialEq, Debug)]
+struct Hot {
+    id: u32,
+    title: String,
+    loading: bool,
+    mem_mb: u32,
 }
 
-/// Last snapshot sent per window, to drop identical repeats.
-static LAST_EMITTED: std::sync::LazyLock<Mutex<HashMap<String, String>>> = std::sync::LazyLock::new(Default::default);
+/// What was last sent for a window: the structural key (JSON with hot fields blanked, plus the cfg
+/// version), the hot fields, and the sequence number.
+#[derive(Default)]
+struct Sent {
+    key: String,
+    hot: Vec<Hot>,
+    seq: u64,
+}
 
-/// A frontend asked for the state (it just loaded): send it even if unchanged.
+enum Out {
+    Skip,
+    Full,
+    /// Changed tabs only, as `{id, <changed fields>}`.
+    Delta(Vec<serde_json::Value>),
+}
+
+/// Full snapshot when the structure changed (or nothing was sent yet), a delta when only hot
+/// fields moved, nothing when identical.
+fn plan(prev: Option<&Sent>, key: &str, hot: &[Hot]) -> Out {
+    let Some(p) = prev.filter(|p| p.key == key && p.hot.len() == hot.len() && p.hot.iter().zip(hot).all(|(a, b)| a.id == b.id)) else {
+        return Out::Full;
+    };
+    let changed: Vec<_> = p
+        .hot
+        .iter()
+        .zip(hot)
+        .filter(|(a, b)| a != b)
+        .map(|(a, b)| {
+            let mut m = serde_json::Map::new();
+            m.insert("id".into(), b.id.into());
+            if a.title != b.title {
+                m.insert("title".into(), b.title.clone().into());
+            }
+            if a.loading != b.loading {
+                m.insert("loading".into(), b.loading.into());
+            }
+            if a.mem_mb != b.mem_mb {
+                m.insert("mem_mb".into(), b.mem_mb.into());
+            }
+            m.into()
+        })
+        .collect();
+    if changed.is_empty() {
+        Out::Skip
+    } else {
+        Out::Delta(changed)
+    }
+}
+
+/// Splices pre-serialized config into a serialized snapshot object.
+fn with_cfg(snap: &str, cfg: &str) -> String {
+    format!("{},\"cfg\":{cfg}}}", &snap[..snap.len() - 1])
+}
+
+/// Serialized config, re-serialized only when it changed. Lock order: App, then this.
+fn cfg_json(cfg: &Config) -> (u64, std::sync::Arc<String>) {
+    static CACHE: Mutex<Option<(u64, Config, std::sync::Arc<String>)>> = Mutex::new(None);
+    let mut c = CACHE.lock().unwrap();
+    match c.as_ref().filter(|(_, old, _)| old == cfg) {
+        Some((v, _, j)) => (*v, j.clone()),
+        None => {
+            let v = c.as_ref().map_or(1, |x| x.0 + 1);
+            // The UI shows and sends profile names; mappings are stored by id.
+            let mut view = serde_json::to_value(cfg).unwrap_or_default();
+            for m in view["mappings"].as_array_mut().into_iter().flatten() {
+                m["profile"] = cfg.name_of(m["profile"].as_str().unwrap_or_default()).into();
+            }
+            let j = std::sync::Arc::new(view.to_string());
+            *c = Some((v, cfg.clone(), j.clone()));
+            (v, j)
+        }
+    }
+}
+
+/// `(bookmarked, has_login)` for the active page, cached until a bookmark or login is written.
+fn db_flags(db: &Db, url: &str, profile: Option<&str>, incognito: bool) -> (bool, bool) {
+    static CACHE: Mutex<(u64, Option<HashMap<(String, Option<String>, bool), (bool, bool)>>)> = Mutex::new((0, None));
+    let ver = db.flags_ver();
+    let key = (url.to_string(), profile.map(String::from), incognito);
+    {
+        let mut c = CACHE.lock().unwrap();
+        if c.0 != ver || c.1.as_ref().is_some_and(|m| m.len() > 256) {
+            *c = (ver, None);
+        }
+        if let Some(v) = c.1.as_ref().and_then(|m| m.get(&key)) {
+            return *v;
+        }
+    }
+    let v = (db.is_bookmarked(url), !incognito && crate::passwords::origin_of(url).is_some_and(|o| !db.logins(profile, Some(&o)).is_empty()));
+    let mut c = CACHE.lock().unwrap();
+    if c.0 == ver {
+        c.1.get_or_insert_with(Default::default).insert(key, v);
+    }
+    v
+}
+
+/// Request a state broadcast. Calls within one 16ms window coalesce into a single `flush`.
+pub fn emit_state(app: &AppHandle) {
+    schedule(app, true);
+}
+
+static PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static WANT_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SENT: std::sync::LazyLock<Mutex<HashMap<String, Sent>>> = std::sync::LazyLock::new(Default::default);
+
+fn schedule(_app: &AppHandle, save: bool) {
+    use std::sync::atomic::Ordering::SeqCst;
+    if save {
+        WANT_SAVE.store(true, SeqCst);
+    }
+    if !PENDING.swap(true, SeqCst) {
+        engine::defer_after(16, || {
+            PENDING.store(false, SeqCst);
+            flush(&AppHandle, WANT_SAVE.swap(false, SeqCst));
+        });
+    }
+}
+
+/// A frontend asked for the state (it just loaded or lost sync): send full snapshots even if unchanged.
 pub fn resend_state(app: &AppHandle) {
-    LAST_EMITTED.lock().unwrap().clear();
+    SENT.lock().unwrap().values_mut().for_each(|s| s.key.clear());
     emit_state(app);
 }
 
-/// One snapshot per window, tagged with its label; each frontend keeps only its own.
 fn emit(app: &AppHandle, save: bool) {
+    schedule(app, save);
+}
+
+/// Sends each window's state to that window's own views only: a full snapshot when its structure
+/// changed, a small `state-delta` when only title/loading/memory moved.
+fn flush(app: &AppHandle, save: bool) {
     let s = shared(app);
     // Prompts of tabs that have since closed would never be answered.
     let gone: Vec<u64> = {
@@ -413,21 +539,29 @@ fn emit(app: &AppHandle, save: bool) {
     for id in gone {
         engine::net_answer(id, false, "", "");
     }
-    let jsons: Vec<(String, String)> = {
+    // DB lookups happen outside the App lock (and mostly hit the cache).
+    let flags: HashMap<String, (bool, bool)> = {
+        let want: Vec<(String, String, Option<String>, bool)> = {
+            let g = s.lock_app();
+            g.wins.iter().map(|(win, w)| (win.clone(), g.tabs.iter().find(|t| t.id == w.active).map(|t| t.url()).unwrap_or_default(), g.profile_id(w.active).map(|p| p.0), w.incognito)).collect()
+        };
+        want.into_iter().map(|(win, url, pid, inc)| (win, db_flags(&s.db, &url, pid.as_deref(), inc))).collect()
+    };
+    let out: Vec<(String, String, bool)> = {
         let g = s.lock_app();
         crate::adblock::sync_cfg(g.cfg.settings.adblock, &g.cfg.allowlist);
-        // The UI shows and sends profile names; mappings are stored by id.
-        let mut cfg_view = serde_json::to_value(&g.cfg).unwrap_or_default();
-        for m in cfg_view["mappings"].as_array_mut().into_iter().flatten() {
-            m["profile"] = g.cfg.name_of(m["profile"].as_str().unwrap_or_default()).into();
-        }
+        let (cfg_ver, cfg) = cfg_json(&g.cfg);
+        let mut sent = SENT.lock().unwrap();
+        sent.retain(|w, _| g.wins.contains_key(w));
         g.wins
             .iter()
             .filter_map(|(win, w)| {
                 let active_host = g.tabs.iter().find(|t| t.id == w.active).and_then(|t| Url::parse(&t.url()).ok()).and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
-                let active_url = g.tabs.iter().find(|t| t.id == w.active).map(|t| t.url()).unwrap_or_default();
-                let snap = Snapshot {
+                let (bookmarked, has_login) = flags.get(win).copied().unwrap_or_default();
+                let mut hot = vec![];
+                let mut snap = Snapshot {
                     win,
+                    seq: 0,
                     tabs: g
                         .tabs
                         .iter()
@@ -435,57 +569,67 @@ fn emit(app: &AppHandle, save: bool) {
                         .map(|t| {
                             let url = t.url();
                             let parsed = Url::parse(&url).ok();
+                            let title = if t.title.is_empty() {
+                                if is_blank(&url) {
+                                    "New Tab".into()
+                                } else {
+                                    url.clone()
+                                }
+                            } else {
+                                t.title.clone()
+                            };
+                            hot.push(Hot { id: t.id, title, loading: t.loading, mem_mb: t.mem_mb });
                             TabView {
                                 id: t.id,
-                                title: if t.title.is_empty() {
-                                    if is_blank(&url) {
-                                        "New Tab".into()
-                                    } else {
-                                        url.clone()
-                                    }
-                                } else {
-                                    t.title.clone()
-                                },
+                                // hot fields are filled in below, only if a full snapshot is sent
+                                title: String::new(),
                                 host: if is_blank(&url) || internal_view(&url).is_some() { String::new() } else { parsed.as_ref().and_then(|u| u.host_str().map(String::from)).unwrap_or_default() },
                                 url: if is_blank(&url) { String::new() } else { url },
                                 profile: g.cfg.name_of(&t.profile),
                                 pinned: t.pinned,
                                 group: t.group.clone(),
                                 discarded: t.discarded,
-                                loading: t.loading,
+                                loading: false,
                                 audible: t.audible,
                                 muted: t.muted,
-                                mem_mb: t.mem_mb,
+                                mem_mb: 0,
                                 can_back: t.hist.can_back(),
                                 can_forward: t.hist.can_forward(),
                             }
                         })
                         .collect(),
                     active: w.active,
-                    cfg: cfg_view.clone(),
                     prompt: g.prompt.clone(),
                     perm: g.perm_prompt.iter().find(|p| g.win_of(p.2) == *win).map(|p| (p.0.as_str(), p.1.as_str())),
                     net: g.net_q.iter().find(|p| g.win_of(p.tab) == *win),
                     toast: g.toast.clone(),
                     adblock_site: !g.cfg.allowlist.contains(&active_host),
-                    bookmarked: s.db.is_bookmarked(&active_url),
-                    has_login: !w.incognito && crate::passwords::origin_of(&active_url).is_some_and(|o| !s.db.logins(g.profile_id(w.active).map(|p| p.0).as_deref(), Some(&o)).is_empty()),
+                    bookmarked,
+                    has_login,
                     incognito: w.incognito,
                 };
-                serde_json::to_string(&snap).ok().map(|j| (win.clone(), j))
+                let key = format!("{cfg_ver}|{}", serde_json::to_string(&snap).unwrap_or_default());
+                let prev = sent.get(win);
+                let seq = prev.map_or(0, |p| p.seq) + 1;
+                let (json, event) = match plan(prev, &key, &hot) {
+                    Out::Skip => return None,
+                    Out::Delta(tabs) => (serde_json::json!({ "win": win, "seq": seq, "tabs": tabs }).to_string(), false),
+                    Out::Full => {
+                        snap.seq = seq;
+                        for (v, h) in snap.tabs.iter_mut().zip(&hot) {
+                            (v.title, v.loading, v.mem_mb) = (h.title.clone(), h.loading, h.mem_mb);
+                        }
+                        (with_cfg(&serde_json::to_string(&snap).unwrap_or_default(), &cfg), true)
+                    }
+                };
+                sent.insert(win.clone(), Sent { key, hot, seq });
+                Some((win.clone(), json, event))
             })
             .collect()
     };
-    // Many callers fire per event (title, loading, pings); skip a window whose snapshot did not change.
-    let mut last = LAST_EMITTED.lock().unwrap();
-    last.retain(|w, _| jsons.iter().any(|(k, _)| k == w));
-    for (win, j) in jsons {
-        if last.get(&win) != Some(&j) {
-            engine::emit("state", &j);
-            last.insert(win, j);
-        }
+    for (win, json, full) in out {
+        engine::emit_win(&win, if full { "state" } else { "state-delta" }, &json);
     }
-    drop(last);
     if save {
         save_session(app);
     }
@@ -2056,6 +2200,29 @@ fn idle_tick() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hot(id: u32, title: &str, loading: bool, mem: u32) -> Hot {
+        Hot { id, title: title.into(), loading, mem_mb: mem }
+    }
+
+    #[test]
+    fn plan_full_skip_delta() {
+        let a = vec![hot(1, "a", false, 10), hot(2, "b", false, 20)];
+        let sent = Sent { key: "k".into(), hot: a.clone(), seq: 3 };
+        assert!(matches!(plan(None, "k", &a), Out::Full));
+        assert!(matches!(plan(Some(&sent), "other", &a), Out::Full), "structure changed");
+        assert!(matches!(plan(Some(&sent), "k", &a[..1]), Out::Full), "tab closed");
+        assert!(matches!(plan(Some(&sent), "k", &[hot(1, "a", false, 10), hot(3, "b", false, 20)]), Out::Full), "tab replaced");
+        assert!(matches!(plan(Some(&sent), "k", &a), Out::Skip));
+        let b = vec![hot(1, "a", true, 10), hot(2, "b2", false, 25)];
+        let Out::Delta(d) = plan(Some(&sent), "k", &b) else { panic!("expected delta") };
+        assert_eq!(d, vec![serde_json::json!({"id": 1, "loading": true}), serde_json::json!({"id": 2, "title": "b2", "mem_mb": 25})]);
+    }
+
+    #[test]
+    fn cfg_splice() {
+        assert_eq!(with_cfg("{\"a\":1}", "{\"b\":2}"), "{\"a\":1,\"cfg\":{\"b\":2}}");
+    }
 
     #[test]
     fn labels() {
