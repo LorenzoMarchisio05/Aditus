@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 pub struct Entry {
     pub url: String,
     pub profile: String,
+    /// The page was the answer to a form POST. The body is gone, so it is never loaded natively
+    /// (the engine could replay it) and a load of it says so.
+    #[serde(default)]
+    pub post: bool,
 }
 
 /// How a back/forward step must be carried out.
@@ -85,10 +89,17 @@ impl Hist {
         if !self.entries.is_empty() {
             self.entries.truncate(self.idx + 1);
         }
-        self.entries.push(Entry { url: url.into(), profile: profile.into() });
+        self.entries.push(Entry { url: url.into(), profile: profile.into(), post: false });
         self.idx = self.entries.len() - 1;
         self.top = self.idx;
         self.base = self.base.min(self.idx);
+    }
+
+    /// Whether the current entry is the answer to a form POST (see `Entry::post`).
+    pub fn set_post(&mut self, post: bool) {
+        if let Some(e) = self.entries.get_mut(self.idx) {
+            e.post = post;
+        }
     }
 
     /// The current entry turned out to live at another address (redirect, `replaceState`).
@@ -106,7 +117,7 @@ impl Hist {
         }
         let new = new as usize;
         let target = self.entries[new].clone();
-        let native = target.profile == profile && if new < self.idx { new >= self.base && self.idx <= self.top } else { new <= self.top && self.idx >= self.base };
+        let native = !target.post && target.profile == profile && if new < self.idx { new >= self.base && self.idx <= self.top } else { new <= self.top && self.idx >= self.base };
         self.idx = new;
         if native {
             Step::Native
@@ -216,10 +227,25 @@ mod tests {
     fn fresh_view_cannot_go_back_natively() {
         let mut h = hist(&["a", "b", "c"]);
         h.fresh_view(); // e.g. restored after a restart or woken from sleep
-        assert_eq!(h.step(-1, "A"), Step::Load(Entry { url: "b".into(), profile: "A".into() }));
+        assert_eq!(h.step(-1, "A"), Step::Load(Entry { url: "b".into(), profile: "A".into(), post: false }));
         // the load rewrote the native list: "b" is now alone in it
-        assert_eq!(h.step(-1, "A"), Step::Load(Entry { url: "a".into(), profile: "A".into() }));
-        assert_eq!(h.step(1, "A"), Step::Load(Entry { url: "b".into(), profile: "A".into() }));
+        assert_eq!(h.step(-1, "A"), Step::Load(Entry { url: "a".into(), profile: "A".into(), post: false }));
+        assert_eq!(h.step(1, "A"), Step::Load(Entry { url: "b".into(), profile: "A".into(), post: false }));
+    }
+
+    #[test]
+    fn post_entry_is_never_a_native_step() {
+        let mut h = hist(&["a", "b", "c"]);
+        h.idx = 1;
+        h.set_post(true);
+        h.idx = 2;
+        assert!(matches!(h.step(-1, "A"), Step::Load(e) if e.post && e.url == "b"));
+        // the flag survives a save
+        let (saved, i) = h.for_save();
+        assert!(saved[i].post);
+        // a normal entry still steps natively
+        let mut h = hist(&["a", "b"]);
+        assert_eq!(h.step(-1, "A"), Step::Native);
     }
 
     #[test]
@@ -323,7 +349,7 @@ mod tests {
     #[test]
     fn unknown_profile_falls_back_to_the_tabs() {
         let mut r = Hist::default();
-        r.restore(vec![Entry { url: "a".into(), profile: "gone".into() }, Entry { url: "b".into(), profile: "A".into() }], 1, "b", "A", |p| p == "A");
+        r.restore(vec![Entry { url: "a".into(), profile: "gone".into(), post: false }, Entry { url: "b".into(), profile: "A".into(), post: false }], 1, "b", "A", |p| p == "A");
         assert_eq!(r.entries[0].profile, "A");
     }
 
