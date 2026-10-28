@@ -2,18 +2,19 @@
 
 Scope: all Rust in `backend/src`, build/CI scripts, `Cargo.toml`, README. UI skimmed only for `@html`/`innerHTML` (none found). Not read: `App.svelte`, `Panel.svelte`, `Palette`, `Suggest`, `Mascot`, second half of `menu.rs`. The original audit ran nothing. Items marked **(verify)** are inferences from code, not confirmed behavior.
 
-**Status update:** fixes below were done on branch `audit-fixes` in three rounds and covered by unit tests (54 pass, 2 ignored). The app has **not** been launched, bundled or smoke-tested since the fixes; items marked untested need a runtime check.
+**Status update:** fixes below were done on branch `audit-fixes` in four rounds and covered by unit tests (74 pass, 2 ignored). The app has **not** been launched, bundled or smoke-tested since the fixes; items marked untested need a runtime check.
 
 ## Summary
 
+- Fixed: 31
+- Mostly fixed: 7
+- Fixed once a key is set: 1
+- Partly fixed: 1
+- Documented: 1
 - Assessed, not migrated: 1
-- Fixed: 26
-- Mostly fixed: 3
-- Open: 1
-- Partly fixed: 11
-- Skipped: 1
+- Open (decision): 1
 
-Open decisions: #8 (who builds CEF with H.264). Skipped on purpose: #22. Next step: build the bundle, run `scripts/smoke.mjs`, then check the untested items in a real session.
+Open decisions: #8 (who builds CEF with H.264). Needs action: #7 (set `UPDATE_PUBKEY` and the `UPDATE_SIGNING_KEY` secret). Not migrated on purpose: #22. Next step: build the bundle, run `scripts/smoke.mjs`, then check the untested items in a real session.
 
 ## A. Can lose data or break the app (fix first)
 
@@ -29,12 +30,12 @@ Open decisions: #8 (who builds CEF with H.264). Skipped on purpose: #22. Next st
    - Temp dir also leaks on every failed install.
    - **Status: Fixed.** Script only restores `$2.old` if it exists; temp dir removed on failure.
 4. **`panic = "abort"` plus `unwrap()` means one panic kills every tab.** Many `lock().unwrap()`, and `prepare(...).unwrap()` / `query_map(...).unwrap()` in `db.rs`. A locked, full or corrupt DB aborts the whole browser. Corrupt DB at startup means the app won't launch (`Db::open` error), no recovery path.
-   - **Status: Mostly fixed.** Panicking unwraps/indexing in `tabs.rs` and `db.rs` replaced; a corrupt DB is moved to `aditus.db.bak` and recreated. `lock().unwrap()` remains by design (`panic = "abort"`, so mutexes never poison). Second pass: fixed a char-boundary slice in `cosmetic_generic` (page-derived text could abort); remaining non-test unwraps are infallible (`serde_json::to_string` of str/Value, `split().next()`, the DDG fallback URL, `Option::take` invariants in `engine.rs`) or fatal-at-startup (`current_exe`, main-thread checks in `mac.rs`).
+   - **Status: Fixed.** Panicking unwraps/indexing on I/O, DB and user-data paths replaced (including a char-boundary slice abort in `cosmetic_generic`); corrupt DB moved to `aditus.db.bak` and recreated. What remains is infallible, invariant-protected, or fatal-at-startup, and mutex `lock().unwrap()` stays by design (`panic = "abort"`, no poisoning).
 5. **Deleting a profile leaves its cookies and storage on disk** (`commands.rs:202-213` edits config only). Privacy leak, orphaned data.
    - **Status: Fixed.** `delete_profile` removes the data dir.
 6. **Profiles keyed by name, not id**, in mappings, tabs, history and session. A hand-edit rename silently breaks mappings and restore.
 
-   - **Status: Partly fixed.** `Config::sanitize()` drops blank/duplicate names and orphan mappings; session restore maps a missing profile to the first. Still keyed by name, not id.
+   - **Status: Fixed.** Profiles are keyed by stable id in mappings, tabs, history, session, bookmarks and logins; names are resolved for the UI. `Config::sanitize()` and migrations (`user_version=3`) convert old name-keyed data. Risks: rows for profiles renamed/deleted before first launch stay as stale names; no rename command in the UI yet; `config.toml` mappings hold UUIDs. Migration of `session.json` and UI name resolution are not unit-tested.
 ## B. Security and privacy
 
 7. **Update integrity rests on GitHub alone.**
@@ -42,7 +43,7 @@ Open decisions: #8 (who builds CEF with H.264). Skipped on purpose: #22. Next st
    - For ad-hoc/unsigned builds, `codesign --verify` only checks the bundle is self-consistent; the bundle-id comparison is trivially forgeable. Whoever controls the release gets code execution on every install.
    - Updater strips quarantine to get around Gatekeeper.
    - Once there is a Developer ID, pin the Team ID in the updater.
-   - **Status: Fixed once a key is set.** Updater pins the Team ID and verifies a detached ed25519 signature (`.sig` over the zip sha256) against `UPDATE_PUBKEY`; release.yml signs with secret `UPDATE_SIGNING_KEY` and fails without it. `UPDATE_PUBKEY` is a placeholder (updater refuses to install) until you generate a key (README, Release signing).
+   - **Status: Fixed once a key is set.** Updater verifies a detached ed25519 signature (`<zip>.sig` over the zip's sha256) with `ring` against an embedded key, plus sha256, code-signature check and Team ID pin. **Action needed:** replace the placeholder `UPDATE_PUBKEY` in `update.rs` and set the `UPDATE_SIGNING_KEY` secret (keygen in README); until then in-app install is disabled. CI signing step untested.
 8. **Engine is a prebuilt binary from a third party.** `fetch-cef.sh` pulls `obs-rust/cef`, built "on a contributor's Mac", pinned by hash. Chromium security patches arrive only when that person rebuilds. The `cef-bump` PR does not run CI, and bumps the crate while the binary stays old. Biggest long-term risk for a browser.
    - **Status: Open (decision).** Kept `obs-rust` pin for now. Official CEF + separate ffmpeg is **not feasible** (ffmpeg is statically linked; see `docs/cef-ffmpeg.md`). Remaining options: scheduled release check on `obs-rust`, or build CEF ourselves with `proprietary_codecs=true ffmpeg_branding=Chrome`.
 9. **Hostile pages can forge "user gestures".** `cefQuery` exists in every page context and `page_ping` is allowed for untrusted pages. The `isTrusted` check lives only in the injected JS. A page can call `cefQuery` with `{"cmd":"page_ping","args":{"kind":"g"}}` directly. That:
@@ -55,7 +56,7 @@ Open decisions: #8 (who builds CEF with H.264). Skipped on purpose: #22. Next st
     - `unzip` limits total size by declared `f.size()`, which a hostile zip can understate.
     - Extensions are shared across all profiles, breaking profile isolation. MV3 only (uBlock Origin is MV2, excluded).
     - Silent auto-update when permissions are a subset.
-   - **Status: Mostly fixed.** CRX3 proof signature verified (`ring`; ECDSA and RSA paths tested), unzip counts real bytes (400MB / 20,000 entries). Extensions are still shared across profiles; MV3 only.
+   - **Status: Mostly fixed.** CRX3 proof signature verified (`ring`; ECDSA and RSA both tested), unzip counts real bytes (400MB / 20,000 entries). Extensions remain shared across profiles (Chromium loads `--load-extension` once per process): documented in README and the extensions panel. MV3 only.
 11. **Saved passwords break profile isolation.** Keychain entries keyed by `origin + user`, not profile.
     - `login_fill` takes `.next()`, so no choice between multiple accounts on one origin.
     - Fill works in the top frame only.
@@ -83,23 +84,23 @@ Open decisions: #8 (who builds CEF with H.264). Skipped on purpose: #22. Next st
     - Stack drifts on redirects, `location.replace`, iframes.
     - Not persisted, so back-history is lost on quit.
     - Reason: per-tab profile swapping. Core design tension.
-   - **Status: Partly fixed.** Native `go_back`/`go_forward` when the profile doesn't change, redirects and `replaceState` no longer add entries, up to 30 entries per tab persisted in `session.json`; rules live in `history.rs`. `location.replace()` and client-side redirects now replace the entry: the engine's `(index, count)` is read in `on_before_browse` and at load start via `visit_navigation_entries`; an unchanged pair means replaced (`history::native_replaced`, unknown or a full 50-entry list counts as a push). Needs CEF to call the visitor synchronously (if not, behaviour is as before). Runtime behaviour untested.
+   - **Status: Mostly fixed (untested).** Native `go_back`/`go_forward` when the profile doesn't change; redirects, `replaceState` and `location.replace` (detected via the engine's history position before/after) replace instead of push; up to 30 entries per tab persisted. Rules in `history.rs`. Runtime behavior untested; relies on CEF answering the history visitor synchronously.
 18. **Popups become separate tabs, `window.opener` lost.** Reason: "never a native popup window". OAuth and payment popups using `postMessage` back to the opener (Sign in with Google, 3DS, Stripe) will likely break. `AUTH_HOSTS` is a hard-coded patch for this class.
-   - **Status: Partly fixed (untested).** A user-gesture popup that asks for a window (sized `window.open`) or goes to an auth host, and passes the ad checks at that instant, is built by CEF as a related popup (`window.opener`, `postMessage`, `window.close()` work), with its own client, the opener's profile/context and window, and docked as a tab in `on_popup_browser_view_created`. `window.close()` closes the tab (`do_close`). Opener and popup are never slept or profile-swapped while related (page-driven swaps become Allow; a user swap closes the popups first); closing the opener closes its popups. Both views are parked on close like docked DevTools. Rules in `nav::popup_plan` / `nav::linked`. Not covered: plain `target=_blank`/tab-style `window.open` stay independent tabs (no opener; links are `noopener` anyway); empty and `about:blank` popups are never related (popunder vector); a cross-site popup the hijack heuristic flags before the click ping lands falls back to the old delayed independent tab; parked popups leak a blank browser each and `popup.closed` stays false in the opener, so a page that reuses its popup reference (`if (!popup.closed) popup.location = ...`) drives the hidden view and a second sign-in shows nothing; closing a window with a popup that is slow to answer `try_close_browser` may need the second close.
+   - **Status: Partly fixed (untested).** User-gesture popups that ask for a window (sized `window.open`) or go to an auth host become related popups (`on_before_popup` returns 0), docked as tabs, keep `window.opener`, inherit the opener's profile; `window.close()` closes the tab; opener and popup are never slept or swapped. Plain `target=_blank` and `about:blank` popups stay independent tabs. Gaps: parked popups leak one blank browser each, `popup.closed` stays false, a cross-site popup flagged by the hijack heuristic before the click ping falls back to an independent tab. Needs live CEF testing.
 19. **Profile swap is destroy-and-recreate.** Cancels the navigation and rebuilds the view; POST body, opener and in-page state are lost.
-   - **Status: Partly fixed.** Old view stays on screen until the new view starts loading (8s timeout). A POST that triggers a swap is detected in `on_before_browse` (request method): the new view loads the address with GET, a toast says "This page was submitted with a form; reloading in the new profile" (undo kept), and if the new page is the form's own address the page's last reported fields are refilled from the snapshot. Back/forward steps onto a POST entry are not flagged (entries don't record the method). `window.opener` is kept only by never swapping related tabs (see #18). JS state is still lost.
+   - **Status: Mostly fixed (untested).** Old view stays up until the new view starts loading (8s timeout). A POST that triggers a swap shows a toast and refills the page's last-reported form fields when the new page is the form's own address; the POST body is never replayed. In-page JS state and back/forward onto POST entries are not preserved.
 20. **Many views per window.** Palette, suggestion list and panels are each a full BrowserView. The suggestion browser is created and destroyed per typing session; heavy.
-   - **Status: Partly fixed.** Suggest view created once per window and reused; palette already lazy. Docked-DevTools `PARK` leak remains (deliberate crash workaround).
+   - **Status: Mostly fixed.** Suggest view created once per window and reused; palette already lazy. Docked-DevTools `PARK` leak remains: a DevTools popup is bound to its page and the cef crate can't retarget it, so it is documented rather than fixed.
 21. **Timing hacks instead of readiness signals.**
     - `defer_after` 250ms (palette-open), 60/400ms (suggest focus), 120ms (traffic lights), 50ms (hijack ping race).
     - Bounds "nudge" `(1.0,0.0)->(0.0,0.0)`.
     - DevTools "parked" forever (`PARK` leaks a browser per docked DevTools).
     - CEF-version-dependent workarounds that will fail on slow machines.
-   - **Status: Partly fixed.** Suggest focus timers replaced by `suggest_ready`; palette opens on readiness. Kept: 120ms traffic-light race (commented), 50ms hijack race, bounds nudge, DevTools park.
+   - **Status: Documented.** No replacement signal exists in the cef crate for the 120ms traffic-light, 50ms hijack ping and bounds-nudge hacks; each now has a comment explaining the race. Suggest focus timers were replaced by `suggest_ready`.
 22. **Alloy runtime for pages.** Why the extension API is partial; CEF is believed to plan deprecating it **(verify)**.
    - **Status: Assessed, not migrated.** `docs/alloy-runtime-assessment.md`: headers don't mark Alloy deprecated; a Chrome-style window hosts one Chrome-style BrowserView, so migration is a rewrite. Recommendation: don't migrate now.
 23. **State broadcast.** Every `emit_state` serializes the whole config and all tabs per window and `eval`s it into every app view. Fires on each title, load and memory change, and runs SQLite queries under the global lock. Won't scale to hundreds of tabs.
-   - **Status: Partly fixed.** `emit` dedupes identical state; `get_state` resends. Still serializes full state per emit; not addressed for hundreds of tabs.
+   - **Status: Mostly fixed (untested).** `emit_state` coalesces within 16ms, sends per-window, and sends small `state-delta` events for title/loading/memory changes (full snapshot for structural changes, sequence numbers and `get_state` resync); config JSON, bookmark and login lookups cached. Each flush still builds the per-tab snapshot (O(tabs)).
 24. **Registry duplication.** Same fact in `PAGES` (global Mutex) and `REG` (thread-local). "Never hold the lock across an engine call" enforced only by discipline.
    - **Status: Fixed.** Ownership documented (`App` = serializable state, `engine::REG` = live handles). Debug-only guard: `lock_app()` + assertion in `engine::reg()` panics on an engine call under the App lock. `PAGES` kept (IO threads can't read `REG`). Guard never run against live CEF.
 25. **`ps -axo` forked every 10s on the UI thread**, forever, even idle (battery wakeups). Doesn't exist on Windows (silently returns 0). Memory limit sleeps one tab per tick, so converges slowly.
@@ -112,14 +113,14 @@ Open decisions: #8 (who builds CEF with H.264). Skipped on purpose: #22. Next st
 27. **Likely missing generic cosmetic filtering (verify).** Page script only uses `url_cosmetic_resources().hide_selectors`. Generic `##.ad` rules likely need `hidden_class_id_selectors(classes, ids)` called from the page. Scriptlets (`injected_script`) ignored too, which is why YouTube needed a hand-written script.
    - **Status: Fixed (untested).** `cosmetic_generic` (rate-limited) for generic hide rules; bundled scriptlets (9, uBO short names accepted) delivered early from the browser process with a late fallback. Redirects and renderer swaps use the fallback.
 28. **YouTube script is fragile.** Patches `JSON.parse`, `JSON.stringify` and `Response.json` globally and relies on YouTube's internal field names. The `ponytail:` comment says so.
-   - **Status: Partly fixed.** Wrapped in try/catch, diagnostic `console.debug` after 20s if no ad data was seen. Still depends on YouTube field names.
+   - **Status: Mostly fixed (untested).** Ad field names live in one list (`YT_AD_FIELDS`); built-in `json-prune`/`set-constant` scriptlet rules strip them (also via `Response.prototype.json`); the hand-written script keeps only stall/skip/CSS handling and a 20s diagnostic. If scriptlet delivery fails on YouTube frames, nothing strips the fields.
 29. **`save_settings` runs `adblock::rebuild` synchronously on the UI thread** (`commands.rs:527`). Rebuilds ~200k rules; multi-second freeze when toggling a list.
    - **Status: Fixed.** Rebuild on a worker thread.
 30. **Allowlist is exact-host.** `example.com` does not cover `www.example.com`. Toggling reloads only the focused tab.
    - **Status: Fixed.** Allowlist covers subdomains (`covers`); toggling reloads every matching tab.
 31. **Hijack heuristic.** `is_hijack` (third-party vs link-site) can misfire on legitimate cross-site flows.
 
-   - **Status: Partly fixed.** `AUTH_HOSTS` list in `is_hijack`; heuristic itself unchanged.
+   - **Status: Fixed.** `is_hijack_host` allows same site (public-suffix aware via `psl`), the clicked link's site, `AUTH_HOSTS` and a new `PAYMENT_HOSTS`; everything else blocked. Table-driven tests.
 ## E. UX and correctness gaps
 
 32. **Permission flow.** Request answered "deny" immediately, sidebar card asks later. Site sees `NotAllowedError`; "allow" reloads the page, killing an in-progress call. `perm_prompt` is a single global slot, so a second request overwrites the first.
@@ -129,7 +130,7 @@ Open decisions: #8 (who builds CEF with H.264). Skipped on purpose: #22. Next st
 34. **No auth or certificate handlers (verify).** No `get_auth_credentials` or `on_certificate_error` seen. HTTP basic auth (routers, NAS) and self-signed local services probably unreachable.
    - **Status: Fixed (untested).** Basic-auth card and certificate-error card (Go back / Proceed for this host, session only, private separated); `answer_net` not exposed to untrusted pages. Sub-resource auth prompts still show a card.
 35. **No download hardening.** `can_download` always 1 (drive-by downloads), no warning, `open_download` opens anything. Same-URL downloads matched by `MAX(id)`; stale `active` rows survive a crash. Whether files are quarantined: **(verify)**.
-   - **Status: Mostly fixed.** Downloads tracked by row id, stale `active` rows marked failed at startup, downloads with no click/Enter in the last 10s are blocked with a toast. `open_download` now confirms (native dialog) for risky types (.app .dmg .pkg .command .sh .jar .scpt .terminal, exec bit) and sets `com.apple.quarantine` via `xattr` if missing (untested at runtime).
+   - **Status: Fixed (untested).** Downloads tracked by row id, stale rows failed at startup, downloads with no recent click/Enter blocked with a toast, risky file types (`.app .dmg .pkg .command .sh .jar .scpt .terminal`, exec bit) need a confirmation dialog before opening, quarantine xattr set if missing.
 36. **Closing a window doesn't wait for `beforeunload`.** `can_close` fires `try_close_browser` and returns 1 at once. No "N tabs / active downloads" confirmation.
    - **Status: Fixed (untested).** `can_close` asks tab browsers via `try_close_browser`; second close within 3s forces it. Assumes CEF re-closes after the dialog.
 37. **History.** `LIKE '%q%'` full-scans an unbounded table on the UI thread and returns duplicate URLs; `_` not escaped. Default `history_days` is 0, never pruned. Re-importing Chrome history duplicates 5000 rows. No DB schema versioning. Importer described as supporting Brave, Edge etc., but path handling is Chrome-only.
@@ -144,9 +145,9 @@ Open decisions: #8 (who builds CEF with H.264). Skipped on purpose: #22. Next st
 40. **`bundle-mac.sh` hardcodes `-v 0.1.2`** while the crate is 0.1.4; bundle version string is stale. (`ui/package.json` says 0.1.0.)
    - **Status: Fixed.** `bundle-mac.sh` reads the version from `Cargo.toml`; `ui/package.json` aligned.
 41. **Release workflow runs no tests.** No `cargo test` or smoke test before publishing a tag; no clippy or fmt anywhere. Signing path documented as untested.
-   - **Status: Partly fixed.** `release.yml` runs tests and a smoke test; non-blocking clippy; `cargo fmt` applied with `backend/rustfmt.toml` (200 cols). `cargo fmt --check` is blocking in CI and release.
+   - **Status: Fixed.** `cargo fmt` applied (`backend/rustfmt.toml`, 200 cols); `cargo fmt --check` is a blocking step in `ci.yml` and `release.yml`; release runs tests and smoke test; non-blocking clippy in `ci.yml`.
 42. **Test coverage.** ~25 unit tests, all on pure modules. `tabs.rs` (1.6k lines, the state machine), `engine.rs` and `commands.rs` have zero. Smoke test only checks the UI loads and the page script is injected. One `scheme.rs` assertion is a tautology (`is_none() || starts_with`).
-   - **Status: Partly fixed.** Tests added in `tabs.rs`, `scheme.rs`, `history.rs`, `config.rs`, `db.rs` (54 pass, 2 ignored); pure helpers in `engine.rs`/`commands.rs` now tested (60 pass); smoke test extended.
+   - **Status: Mostly fixed.** ~74 unit tests, now covering `tabs.rs`, `history.rs`, `nav.rs`, `scheme.rs`, `config.rs`, `db.rs`, and pure helpers of `commands.rs`/`engine.rs`. CEF-bound code paths remain untested; smoke test extended.
 43. **arm64-only release asset**; updater hardcodes the asset name.
 
    - **Status: Fixed.** `asset_name(arch)` in `update.rs`; `release.yml` derives the name from `uname -m`. Still arm64-only in practice.
