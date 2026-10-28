@@ -56,7 +56,7 @@ Open decisions: #8 (who builds CEF with H.264). Needs action: #7 (set `UPDATE_PU
     - `unzip` limits total size by declared `f.size()`, which a hostile zip can understate.
     - Extensions are shared across all profiles, breaking profile isolation. MV3 only (uBlock Origin is MV2, excluded).
     - Silent auto-update when permissions are a subset.
-   - **Status: Mostly fixed.** CRX3 proof signature verified (`ring`; ECDSA and RSA both tested), unzip counts real bytes (400MB / 20,000 entries). Extensions remain shared across profiles (Chromium loads `--load-extension` once per process): documented in README and the extensions panel. MV3 only.
+   - **Status: Accepted, documented.** CRX3 proof signature verified (`ring`; ECDSA and RSA both tested), unzip counts real bytes (400MB / 20,000 entries). Extensions remain shared across profiles (Chromium loads `--load-extension` once per process): documented in README and the extensions panel. MV3 only.
 11. **Saved passwords break profile isolation.** Keychain entries keyed by `origin + user`, not profile.
     - `login_fill` takes `.next()`, so no choice between multiple accounts on one origin.
     - Fill works in the top frame only.
