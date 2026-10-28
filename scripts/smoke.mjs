@@ -45,7 +45,7 @@ try {
     await evalIn(ui, `new Promise((s) => cefQuery({ request: JSON.stringify({ cmd: 'new_tab', args: { url: 'http://127.0.0.1:${webPort}/' } }), onSuccess: s, onFailure: s }))`);
     const page = await until(async () => (await targets()).find((t) => t.url.startsWith(`http://127.0.0.1:${webPort}`) && t.title === 'smoke'));
     check('http page loads in a tab', !!page);
-    if (page) check('page script injected (cefQuery hidden from the page)', (await evalIn(page, 'typeof window.cefQuery')) === 'undefined');
+    if (page) check('page script injected (history.pushState is wrapped)', String(await evalIn(page, 'history.pushState.toString()')).includes('ping('));
     const q = (cmd, url) => evalIn(ui, `new Promise((s) => cefQuery({ request: JSON.stringify({ cmd: '${cmd}', args: { url: '${url}' } }), onSuccess: s, onFailure: s }))`);
     await q('new_tab', `http://127.0.0.1:${webPort}/two`);
     check('second tab loads', !!(await until(async () => (await targets()).find((t) => t.title === 'smoke2'))));

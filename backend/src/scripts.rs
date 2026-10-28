@@ -4,8 +4,8 @@
 /// Click/keyboard gesture pings, SPA navigation pings, media state, the selected link, cosmetic ad-hiding CSS.
 pub const PAGE: &str = r#"(()=>{
 const q=window.cefQuery;if(!q)return;
-// Keep the only reference in this closure: page code can't call cefQuery to forge gesture/back/forward pings
-// (events are checked with isTrusted below), and the globals stop being a fingerprint.
+// Keep a reference in this closure. The message router defines cefQuery as non-configurable and read-only, so this
+// delete is a no-op there: pages can still call it (see AUDIT #9). Events are checked with isTrusted below.
 try{delete window.cefQuery;delete window.cefQueryCancel}catch(e){}
 // Builtins captured now, before page code runs (we are injected at context creation), so a page that later patches
 // them can't read or forge our pings. Limit: code that ran before us (extensions, earlier inline patches) is out of reach.
@@ -58,6 +58,8 @@ pub const YOUTUBE: &str = r#"(()=>{
 if(!/(^|\.)youtube\.com$/.test(location.hostname))return;
 try{if(sessionStorage.getItem('__aditus_off'))return}catch(e){}
 // Dev diagnostic: the json-prune scriptlet counts what it pruned in window.__aditusPruned.
+const G=f=>()=>{try{f()}catch(e){}};// one failing patch must never break the page
+let dt;
 setTimeout(()=>{try{if(!window.__aditusPruned)console.debug('[aditus] no ad fields pruned after 20s: YouTube may have renamed them (scripts::YT_AD_FIELDS)')}catch(e){}},20000);
 // uBO's trick: YouTube holds the video back for the length of an ad it still schedules server-side. Player requests are
 // rewritten (V=0 channel screen, then other variants) and, if the video stalls with nothing playing, reloaded with the next one.
@@ -65,7 +67,7 @@ let V=0,stall=0;
 JSON.stringify=new Proxy(JSON.stringify,{apply(t,th,a){try{const o=a[0],cp=o&&o.attestationRequest&&o.playbackContext&&o.playbackContext.contentPlaybackContext,c=cp&&o.context&&o.context.client;
 if(c&&c.clientName==='WEB'&&!/[?&]list=/.test(location.href)&&!location.pathname.startsWith('/shorts/')){if(V===0)c.clientScreen='CHANNEL';if(V<2)cp.lactMilliseconds=String(Date.now());if(V===1)o.params='8AUB';if(V===2)o.params='YAHI';if(V===3)cp.referer=String(cp.referer||'').replace(/(#reloadxhr)?$/,'#reloadxhr')}}catch(e){}return Reflect.apply(t,th,a)}});
 // Self-diagnosis: nothing stripped within 20s of a watch page loading hints that YouTube changed the player-response shape.
-addEventListener('yt-navigate-finish',()=>{V=0;stall=0;S=0;clearTimeout(dt);if(location.pathname.startsWith('/watch'))dt=setTimeout(()=>{if(!S)console.debug('[aditus] no ad fields stripped on this watch page; player response format may have changed')},20000)});
+addEventListener('yt-navigate-finish',()=>{V=0;stall=0;clearTimeout(dt);if(location.pathname.startsWith('/watch'))dt=setTimeout(()=>{if(!window.__aditusPruned)console.debug('[aditus] no ad fields pruned on this watch page; player response format may have changed')},20000)});
 setInterval(()=>{try{if(document.hidden||!location.pathname.startsWith('/watch'))return;const p=document.getElementById('movie_player'),s=p&&p.getStatsForNerds&&p.getStatsForNerds();if(!s)return;const st=p.getPlayerState();
 if(s.buffer_health_seconds==='0.00 s'&&s.resolution==='0x0'&&(st===3||st===-1)&&!p.classList.contains('ad-showing')&&!String(s.debug_info||'').startsWith('SSAP, AD'))stall++;else stall=0;
 if(stall>=2&&V<3){const r=p.getPlayerResponse&&p.getPlayerResponse();if(r&&r.videoDetails){V++;stall=0;console.debug('[aditus] stalled, retrying variant',V);p.loadVideoById(r.videoDetails.videoId,(r.playerConfig&&r.playerConfig.playbackStartConfig&&r.playerConfig.playbackStartConfig.startSeconds)||0)}}}catch(e){}},1000);
@@ -80,3 +82,18 @@ new MutationObserver(G(skip)).observe(document,{subtree:true,attributes:true,att
 
 /// Reader view: Mozilla's Readability (Apache-2.0, see resources/reader) plus our renderer; run in the page by the browser process.
 pub const READER: &str = concat!(include_str!("../resources/reader/Readability.js"), "\n", include_str!("../resources/reader/reader.js"));
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The YouTube script once threw `G is not defined` after a refactor dropped its helper, which silently
+    /// disabled ad skipping and the enforcement-wall removal. Every helper it calls must be declared in it.
+    #[test]
+    fn youtube_script_declares_its_helpers() {
+        for decl in ["const G=", "let dt"] {
+            assert!(YOUTUBE.contains(decl), "YOUTUBE is missing `{decl}`");
+        }
+        assert!(!YOUTUBE.contains("S=0"), "S was removed with the stripping code");
+    }
+}

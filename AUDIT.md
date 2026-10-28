@@ -50,7 +50,7 @@ Open decision: #8 (who builds CEF with H.264). Needs action: #7 (set `UPDATE_PUB
    - allows fake back/forward (`b`/`f`) pings;
    - allows spam of fake "save password?" offers (`page_login`, own origin only).
    - Also, `window.cefQuery` and `window.__aditus` make every Aditus user fingerprintable.
-   - **Status: Fixed.** Page script deletes `window.cefQuery`/`cefQueryCancel` and captures builtins up front. Limit: code that runs before our script.
+   - **Status: Partly fixed.** Page script captures builtins up front. **Correction:** the earlier claim that `window.cefQuery` is hidden from pages was wrong. The message router defines it as non-configurable and read-only (probed in the debug build), so `delete window.cefQuery` does nothing and pages can still call `page_ping` and forge gestures/back/forward. Real fix needs a per-frame secret token sent from the browser to the renderer, embedded in the page script's closure and required on page-origin commands. Not done yet.
 10. **Chrome extensions: CRX signature not verified.** `split_crx3` checks the key hashes to the id, but never verifies the signature over the zip. Only TLS to Google protects it.
     - `unzip` limits total size by declared `f.size()`, which a hostile zip can understate.
     - Extensions are shared across all profiles, breaking profile isolation. MV3 only (uBlock Origin is MV2, excluded).
