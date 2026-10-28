@@ -18,6 +18,7 @@ pub mod scheme;
 pub mod scriptlets;
 pub mod scripts;
 pub mod search;
+pub mod snapshot;
 pub mod tabs;
 pub mod update;
 

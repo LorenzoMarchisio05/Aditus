@@ -18,6 +18,7 @@ use crate::{
     history::{self, Entry, Hist, Step},
     nav::{self, Decision},
     search,
+    snapshot::{self, PageSnap},
 };
 use serde::Serialize;
 use std::{
@@ -125,8 +126,10 @@ pub struct Tab {
     pub zoom: Option<u32>,
     pub gen: u32,
     pub last_active: Instant,
-    /// Scroll, form and media state the page last reported, with the URL it belongs to. Memory only.
-    snap: Option<(String, String)>,
+    /// Scroll, form, media and sessionStorage state the page last reported, with the URL and profile it belongs to. Memory only.
+    snap: Option<(String, PageSnap, String)>,
+    /// The main-frame request being started is a form POST (set by `on_navigation`, read when its page commits).
+    nav_post: bool,
     /// Put `snap` back after the next load (the tab was just woken from sleep).
     restore: bool,
     /// OS process id of the tab's renderer (reported by the renderer itself) and its share of that process's memory.
@@ -891,6 +894,9 @@ pub fn on_navigation(app: &AppHandle, label: &str, u: &Url, user_gesture: bool, 
     let s = shared(app);
     let decision = {
         let mut g = s.lock_app();
+        if let Some(t) = g.tab(tab_id) {
+            t.nav_post = post;
+        }
         // A redirect is not a new gesture, but it continues the click that started it.
         let recent = g.gestures.get(&tab_id).filter(|t| t.0.elapsed() < GESTURE_WINDOW).map(|t| t.1.clone());
         let user = user_gesture || recent.is_some();
@@ -934,7 +940,7 @@ pub fn on_navigation(app: &AppHandle, label: &str, u: &Url, user_gesture: bool, 
             engine::defer(move || {
                 swap(&AppHandle, tab_id, &profile, &url, true);
                 if post {
-                    post_notice(&AppHandle, tab_id, &url);
+                    post_notice(&AppHandle, tab_id, &url, POST_NOTICE, true);
                 }
             });
             false
@@ -943,19 +949,20 @@ pub fn on_navigation(app: &AppHandle, label: &str, u: &Url, user_gesture: bool, 
 }
 
 const POST_NOTICE: &str = "This page was submitted with a form; reloading in the new profile";
+const POST_ENTRY_NOTICE: &str = "This page came from a form submission; loaded again without resending it";
 
 /// A form submission was cancelled by a profile swap and the new view loads its address with GET (the body
 /// cannot be replayed safely). Say so, and refill the form fields the old page had when the new page is that
 /// same page (a form that posts to its own address), from the snapshot the page last reported.
-fn post_notice(app: &AppHandle, tab_id: u32, url: &str) {
+fn post_notice(app: &AppHandle, tab_id: u32, url: &str, message: &str, undo: bool) {
     {
         let mut g = shared(app).lock_app();
         let target = normalize(url.to_string());
-        let again = g.tab(tab_id).is_some_and(|t| t.snap.as_ref().is_some_and(|(u, _)| *u == target));
+        let again = g.tab(tab_id).is_some_and(|t| t.snap.as_ref().is_some_and(|(u, _, _)| *u == target));
         if let Some(t) = g.tab(tab_id).filter(|_| again) {
             t.restore = true;
         }
-        g.toast = Some(Toast { message: POST_NOTICE.into(), undo: true });
+        g.toast = Some(Toast { message: message.into(), undo });
     }
     emit_state(app);
 }
@@ -1136,7 +1143,8 @@ pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool, fwd_bac
             }
             zoom = Some(t.zoom.unwrap_or(base));
             if std::mem::take(&mut t.restore) {
-                restore = t.snap.take().filter(|(u, _)| *u == url).map(|(_, j)| j);
+                let profile = t.profile.clone();
+                restore = t.snap.take().filter(|(u, _, _)| *u == url).map(|(_, j, p)| j.for_profile(&p, &profile));
             }
             visit = (!errored && !t.private && !is_blank(&url) && internal_view(&url).is_none()).then(|| (url, t.title.clone(), t.profile.clone()));
         }
@@ -1145,7 +1153,7 @@ pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool, fwd_bac
         engine::defer(move || reveal_swapped(&AppHandle, tab_id, gen, old));
     }
     if let Some(j) = restore {
-        engine::eval(label, &format!("({RESTORE})({})", serde_json::to_string(&j).unwrap()));
+        engine::eval(label, &snapshot::restore_script(&j));
     }
     if let Some((url, title, profile)) = visit {
         s.db.add_visit(&url, &title, &profile);
@@ -1164,6 +1172,11 @@ fn record_entry(t: &mut Tab, url: &str, load: bool) {
     // Only a real load settles "fresh" and "traversal"; an early pushState must not use them up.
     let (fresh, fwd_back, replaced) = if load { (std::mem::take(&mut t.fresh), std::mem::take(&mut t.fwd_back), std::mem::take(&mut t.replaced)) } else { (false, false, false) };
     t.hist.commit_with(url, &t.profile, traverse, fresh, fwd_back, replaced);
+    // Method of the request that produced this page. A native back/forward step keeps what the entry already knows.
+    let post = std::mem::take(&mut t.nav_post);
+    if load && !native && !fwd_back {
+        t.hist.set_post(post);
+    }
 }
 
 /// A main-frame navigation was requested: remember the engine's history position as it is right now,
@@ -1340,21 +1353,16 @@ pub fn on_download_end(app: &AppHandle, id: i64, path: &str, ok: bool) {
     engine::emit("downloads-changed", "null");
 }
 
-/// Called from the `page_ping` command with the calling view's label.
-/// Applies a saved snapshot: scroll (retried while the page lays out), empty form fields, media position.
-const RESTORE: &str = "j=>{const s=JSON.parse(j);let n=0;const go=()=>{n++;try{const els=document.querySelectorAll('input,textarea,select');for(const [i,v] of s.f){const e=els[i];if(!e)continue;if(typeof v==='boolean'){if(e.checked!==v)e.click()}else if(e.value===''){e.value=v;e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}))}}const ms=document.querySelectorAll('video,audio');for(const [i,t] of s.m){const e=ms[i];if(e&&e.currentTime<1)e.currentTime=t}}catch(e){}scrollTo(s.x,s.y);if(n<15&&Math.abs(scrollY-s.y)>3)setTimeout(go,200)};go()}";
-
-/// A page's own report of its scroll / form / media state. Kept as data for `RESTORE`, never interpreted here.
+/// A page's own report of its scroll / form / media / sessionStorage state. Validated and capped by
+/// `PageSnap::parse`, then kept as data for `snapshot::restore_script`, never interpreted here.
 pub fn page_state(app: &AppHandle, view_label: &str, json: &str) {
     let Some((id, gen)) = parse_label(view_label) else { return };
-    if json.len() > 60_000 {
-        return;
-    }
+    let Some(snap) = PageSnap::parse(json) else { return };
     // The URL comes from the engine, not the page.
     let Some(url) = engine::url_of(view_label).map(normalize) else { return };
     if let Some(t) = shared(app).lock_app().tab(id) {
         if t.gen == gen && !t.discarded {
-            t.snap = Some((url, json.to_string()));
+            t.snap = Some((url, snap, t.profile.clone()));
         }
     }
 }
@@ -1541,6 +1549,7 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
             gen: 0,
             last_active: Instant::now(),
             snap: None,
+            nav_post: false,
             restore: false,
             pid: None,
             mem_mb: 0,
@@ -1650,9 +1659,20 @@ pub fn reopen_closed(app: &AppHandle) {
 ///
 /// A view is bound to one request context, so another profile needs a new view (CEF cannot move a
 /// browser between contexts). The old view stays on screen until the new one commits a page, so the
-/// tab never flashes blank. What cannot survive: the page's JS state, a POST body (the cancelled
-/// request is replayed as a GET; `post_notice` tells the user and refills the form) and `window.opener`
-/// (popups are closed first, `release_links`; a page-driven navigation of a linked tab never swaps).
+/// tab never flashes blank.
+///
+/// What is carried over is only data the page itself reported (`snapshot::PageSnap`): window and container
+/// scroll, empty form fields, media position, and, within the same profile only, sessionStorage; it is
+/// reapplied after the new page commits. What cannot be carried over, by construction:
+/// - the JS heap (variables, closures, timers, open sockets, WebRTC, workers, IndexedDB handles in flight,
+///   an editor's undo stack): it lives in the old renderer, whose RequestContext (cookies, cache, storage)
+///   is fixed at browser creation, and CEF cannot move a browser to another context nor serialize a V8 heap;
+/// - `window.opener` and the popups opened by the page: the relation is a link between two live browsers
+///   and a new browser cannot join it (popups are closed first, `release_links`; a page-driven navigation
+///   of a linked tab never swaps);
+/// - a POST body: the cancelled request is loaded as a GET, never replayed (`post_notice` tells the user
+///   and refills the form; history marks the entry, `Entry::post`).
+/// A page that keeps its state only in the heap restarts from its URL in the new profile.
 pub fn swap(app: &AppHandle, tab_id: u32, profile: &str, url: &str, announce: bool) {
     // A swap builds a new view, which has no opener relation: end it first. (Page-driven navigations never get
     // here for a linked tab, see `on_navigation`; this is the user's own profile change or address-bar load.)
@@ -1679,6 +1699,7 @@ pub fn swap(app: &AppHandle, tab_id: u32, profile: &str, url: &str, announce: bo
         t.title.clear();
         t.loading = true;
         t.discarded = false;
+        t.nav_post = false;
         if t.mode == Mode::Traverse {
             // History entry already exists; keep idx and mode.
         } else {
@@ -1825,7 +1846,7 @@ pub fn go_history(app: &AppHandle, tab_id: u32, delta: i32) {
             t.hist.fresh_view();
             t.native_at = None;
             t.mode = Mode::Traverse;
-            Entry { url: cur_url, profile: profile.clone() }
+            Entry { url: cur_url, profile: profile.clone(), post: false }
         }
         Step::Load(e) => e,
         Step::None => return,
@@ -1839,6 +1860,10 @@ pub fn go_history(app: &AppHandle, tab_id: u32, delta: i32) {
         swap(app, tab_id, &entry.profile, &entry.url, false);
     } else {
         navigate(app, tab_id, url, false);
+    }
+    // A form answer is loaded with GET: never replay the POST, say so (and refill the form if it is the same page).
+    if entry.post {
+        post_notice(app, tab_id, &entry.url, POST_ENTRY_NOTICE, false);
     }
 }
 
