@@ -27,6 +27,42 @@ pub fn is_auth_host(host: &str) -> bool {
     })
 }
 
+/// What a `window.open` request becomes.
+#[derive(Debug, PartialEq)]
+pub enum PopupPlan {
+    /// Cancelled: an ad popup (no user gesture, or a listed target).
+    Block,
+    /// A real popup that keeps `window.opener`, docked as a tab: sign-in and payment windows.
+    Related,
+    /// Cancelled now and re-checked shortly after (the click's ping may not have landed yet), then a plain tab.
+    Deferred,
+}
+
+/// `hijack`: the click-hijack heuristic flagged it. `popup_window`: it asked for a window, not a tab
+/// (sized `window.open`). Only web addresses are related: an empty or `about:blank` popup is how
+/// popunders start, and main-frame requests are not filtered. Auth hosts count as windows.
+pub fn popup_plan(user_gesture: bool, listed: bool, hijack: bool, popup_window: bool, url: &str) -> PopupPlan {
+    if !user_gesture || listed {
+        return PopupPlan::Block;
+    }
+    let host = url::Url::parse(url).ok().filter(|u| matches!(u.scheme(), "http" | "https")).and_then(|u| u.host_str().map(String::from));
+    match host {
+        Some(h) if !hijack && (popup_window || is_auth_host(&h)) => PopupPlan::Related,
+        _ => PopupPlan::Deferred,
+    }
+}
+
+/// `(tab, opener)` pairs: is the tab part of an opener relation, on either side? Such tabs must keep
+/// their view (no sleep, no profile swap), since the relation lives in the views.
+pub fn linked(tabs: &[(u32, Option<u32>)], id: u32) -> bool {
+    tabs.iter().any(|&(t, o)| (t == id && o.is_some()) || o == Some(id))
+}
+
+/// A navigation made with this request method carries a body that cannot be replayed in a new view.
+pub fn is_form_post(method: &str) -> bool {
+    method.eq_ignore_ascii_case("POST")
+}
+
 /// Reduces whatever was typed or saved (`https://Site.com:8080/a?b#c`) to the bare host pattern.
 pub fn clean_pattern(p: &str) -> String {
     let p = p.trim().to_lowercase();
@@ -102,6 +138,33 @@ mod tests {
         assert_eq!(decide(&maps, "A", "youtube.com", false), Decision::Allow);
         assert_eq!(decide(&maps, "A", "accounts.google.com", true), Decision::Allow);
         assert_eq!(decide(&maps, "A", "sub.okta.com", true), Decision::Allow);
+    }
+
+    #[test]
+    fn popup_plans() {
+        assert_eq!(popup_plan(false, false, false, true, "https://a.com/"), PopupPlan::Block);
+        assert_eq!(popup_plan(true, true, false, true, "https://ads.com/"), PopupPlan::Block);
+        assert_eq!(popup_plan(true, false, false, true, "https://shop.com/pay"), PopupPlan::Related);
+        assert_eq!(popup_plan(true, false, false, false, "https://shop.com/"), PopupPlan::Deferred); // plain tab
+        assert_eq!(popup_plan(true, false, false, false, "https://accounts.google.com/o/oauth2"), PopupPlan::Related);
+        assert_eq!(popup_plan(true, false, true, true, "https://popunder.biz/"), PopupPlan::Deferred);
+        assert_eq!(popup_plan(true, false, false, true, "about:blank"), PopupPlan::Deferred);
+        assert_eq!(popup_plan(true, false, false, true, ""), PopupPlan::Deferred);
+        assert_eq!(popup_plan(true, false, false, true, "javascript:alert(1)"), PopupPlan::Deferred);
+    }
+
+    #[test]
+    fn opener_relation_pins_both_sides() {
+        let tabs = [(1, None), (2, Some(1)), (3, None)];
+        assert!(linked(&tabs, 1) && linked(&tabs, 2));
+        assert!(!linked(&tabs, 3));
+        assert!(!linked(&[], 1));
+    }
+
+    #[test]
+    fn post_is_detected() {
+        assert!(is_form_post("POST") && is_form_post("post"));
+        assert!(!is_form_post("GET") && !is_form_post(""));
     }
 
     #[test]

@@ -211,6 +211,9 @@ fn is_hijack_host(opener: &str, target: &str, link: &str) -> bool {
 }
 
 fn is_hijack(url: &str, source: &str, link: &str) -> bool {
+    if crate::nav::is_auth_host(&host_of(url)) {
+        return false;
+    }
     is_hijack_host(&host_of(source), &host_of(url), link)
 }
 

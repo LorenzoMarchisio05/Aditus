@@ -15,7 +15,7 @@ use crate::{
     config::{self, Config},
     db::Db,
     engine::{self, Bounds, Kind, Spec},
-    history::{Entry, Hist, Step},
+    history::{self, Entry, Hist, Step},
     nav::{self, Decision},
     search,
 };
@@ -144,6 +144,13 @@ pub struct Tab {
     retiring: Option<String>,
     /// Link inside the page's text selection, reported by the page script: Cmd+T / Cmd+Shift+N open it.
     link: Option<Url>,
+    /// Tab this one was opened from as a related popup (`window.open` with a window): it keeps `window.opener`,
+    /// so neither side may be put to sleep or moved to another profile while the relation exists.
+    opener: Option<u32>,
+    /// Engine history `(index, total)` as it was when the load in flight was requested.
+    nav_pre: Option<(i32, i32)>,
+    /// The load in flight did not grow the engine's history: it took the current entry's place.
+    replaced: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -255,6 +262,11 @@ impl App {
 
     pub fn focused_active(&self) -> u32 {
         self.active(&self.focused)
+    }
+
+    /// Part of an opener relation, as the popup or as its opener (see `Tab::opener`).
+    fn linked(&self, id: u32) -> bool {
+        nav::linked(&self.tabs.iter().map(|t| (t.id, t.opener)).collect::<Vec<_>>(), id)
     }
 
     fn win_of(&self, id: u32) -> String {
@@ -720,6 +732,8 @@ fn build_webview(app: &AppHandle, tab_id: u32, show: bool) {
             t.fresh = true;
             t.fwd_back = false;
             t.native_at = None;
+            t.nav_pre = None;
+            t.replaced = false;
         }
         let Some(t) = g.tabs.iter().find(|t| t.id == tab_id) else { return };
         let Some(p) = g.cfg.profile(&t.profile).or(g.cfg.profiles.first()).cloned() else { return };
@@ -769,7 +783,8 @@ pub fn on_view_ready(app: &AppHandle, label: &str) {
 }
 
 /// Main-frame navigation about to start. `false` cancels it (a profile swap takes over).
-pub fn on_navigation(app: &AppHandle, label: &str, u: &Url, user_gesture: bool, is_redirect: bool) -> bool {
+/// `post`: the request carries a form body, which a swap cannot replay (see `post_notice`).
+pub fn on_navigation(app: &AppHandle, label: &str, u: &Url, user_gesture: bool, is_redirect: bool, post: bool) -> bool {
     let Some((tab_id, gen)) = parse_label(label) else { return true };
     if matches!(u.scheme(), "mailto" | "tel" | "sms") {
         // Hand to the OS, but only for a click: a page must not open the mail app by itself.
@@ -810,6 +825,10 @@ pub fn on_navigation(app: &AppHandle, label: &str, u: &Url, user_gesture: bool, 
                 d = Decision::Allow;
             }
         }
+        // A popup and its opener live in one profile: a sign-in that lands on a mapped site must not rebuild either view.
+        if matches!(d, Decision::Swap(_) | Decision::Prompt(_)) && g.linked(tab_id) {
+            d = Decision::Allow;
+        }
         d
     };
     match decision {
@@ -821,10 +840,33 @@ pub fn on_navigation(app: &AppHandle, label: &str, u: &Url, user_gesture: bool, 
         }
         Decision::Swap(profile) => {
             let url = u.to_string();
-            engine::defer(move || swap(&AppHandle, tab_id, &profile, &url, true));
+            engine::defer(move || {
+                swap(&AppHandle, tab_id, &profile, &url, true);
+                if post {
+                    post_notice(&AppHandle, tab_id, &url);
+                }
+            });
             false
         }
     }
+}
+
+const POST_NOTICE: &str = "This page was submitted with a form; reloading in the new profile";
+
+/// A form submission was cancelled by a profile swap and the new view loads its address with GET (the body
+/// cannot be replayed safely). Say so, and refill the form fields the old page had when the new page is that
+/// same page (a form that posts to its own address), from the snapshot the page last reported.
+fn post_notice(app: &AppHandle, tab_id: u32, url: &str) {
+    {
+        let mut g = shared(app).lock_app();
+        let target = normalize(url.to_string());
+        let again = g.tab(tab_id).is_some_and(|t| t.snap.as_ref().is_some_and(|(u, _)| *u == target));
+        if let Some(t) = g.tab(tab_id).filter(|_| again) {
+            t.restore = true;
+        }
+        g.toast = Some(Toast { message: POST_NOTICE.into(), undo: true });
+    }
+    emit_state(app);
 }
 
 /// Camera, microphone, location and notification requests. The handler must answer at once, so an
@@ -969,6 +1011,8 @@ pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool, fwd_bac
     };
     let s = shared(app);
     let (mut visit, mut zoom, mut restore, mut reveal) = (None, None, None, None);
+    // The page just committed: has the engine's own history grown? (`location.replace` and client redirects: no.)
+    let pos = if started { engine::native_pos(label) } else { None };
     {
         let mut g = s.lock_app();
         let base = g.cfg.settings.page_zoom;
@@ -979,6 +1023,7 @@ pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool, fwd_bac
         t.loading = started;
         if started {
             t.fwd_back = fwd_back;
+            t.replaced = !errored && history::native_replaced(t.nav_pre.take(), pos);
             // The new view of a profile swap has committed a page: it can replace the old one on screen.
             reveal = t.retiring.take();
             t.link = None;
@@ -991,6 +1036,9 @@ pub fn on_load(app: &AppHandle, label: &str, url: String, started: bool, fwd_bac
                 t.title.clear();
             }
         } else {
+            if errored {
+                t.replaced = false;
+            }
             record_entry(t, &url, true);
             if errored {
                 t.hist.fence();
@@ -1023,8 +1071,19 @@ fn record_entry(t: &mut Tab, url: &str, load: bool) {
     let native = t.native_at.take().is_some_and(|at| at.elapsed() < Duration::from_secs(5));
     let traverse = std::mem::replace(&mut t.mode, Mode::Push) == Mode::Traverse || native;
     // Only a real load settles "fresh" and "traversal"; an early pushState must not use them up.
-    let (fresh, fwd_back) = if load { (std::mem::take(&mut t.fresh), std::mem::take(&mut t.fwd_back)) } else { (false, false) };
-    t.hist.commit(url, &t.profile, traverse, fresh, fwd_back);
+    let (fresh, fwd_back, replaced) = if load { (std::mem::take(&mut t.fresh), std::mem::take(&mut t.fwd_back), std::mem::take(&mut t.replaced)) } else { (false, false, false) };
+    t.hist.commit_with(url, &t.profile, traverse, fresh, fwd_back, replaced);
+}
+
+/// A main-frame navigation was requested: remember the engine's history position as it is right now,
+/// before the load changes it. A redirect hop keeps the position of the request that started the chain.
+pub fn note_pre_nav(app: &AppHandle, label: &str, pos: Option<(i32, i32)>, is_redirect: bool) {
+    let Some((id, gen)) = parse_label(label) else { return };
+    if let Some(t) = shared(app).lock_app().tab(id).filter(|t| t.gen == gen) {
+        if !is_redirect || t.nav_pre.is_none() {
+            t.nav_pre = pos;
+        }
+    }
 }
 
 /// The new view of a swap committed (or gave up waiting): drop the old one and show the new.
@@ -1050,12 +1109,72 @@ fn finish_swap(app: &AppHandle, id: u32, gen: u32) {
     }
 }
 
-/// `window.open` / target=_blank: a tab beside the opener, in its profile.
 /// The link the tab's last recent click landed on ("" when none), for `adblock::hijack`.
 pub fn clicked_link(app: &AppHandle, label: &str) -> String {
     let Some((id, _)) = parse_label(label) else { return String::new() };
     let g = shared(app).lock_app();
     g.gestures.get(&id).filter(|t| t.0.elapsed() < GESTURE_WINDOW).map(|t| t.1.clone()).unwrap_or_default()
+}
+
+/// A `window.open` that must keep `window.opener` (see `engine::open_related`): the popup gets a tab in the
+/// opener's window and profile. The tab starts as a sleeping placeholder; `popup_attach` wakes it once its
+/// view exists, `popup_abort` drops it if the view never comes. Returns the tab id and whether ad blocking
+/// is on (the renderer is told at creation). `None`: the opener is no live web tab, so the caller falls back
+/// to an ordinary tab.
+pub fn popup_reserve(app: &AppHandle, opener_label: &str, url: &str) -> Option<(u32, bool)> {
+    let (oid, ogen) = parse_label(opener_label)?;
+    let u = Url::parse(url).ok()?;
+    let (profile, win, adblock) = {
+        let g = shared(app).lock_app();
+        let t = g.tabs.iter().find(|t| t.id == oid && t.gen == ogen && !t.discarded && !is_blank(&t.url()) && internal_view(&t.url()).is_none())?;
+        (t.profile.clone(), t.win.clone(), g.cfg.settings.adblock)
+    };
+    let id = open_tab_in(app, &win, Some(u), Some(profile), false);
+    shared(app).lock_app().tab(id)?.opener = Some(oid);
+    Some((id, adblock))
+}
+
+/// The popup's view exists and is mounted: the placeholder tab becomes a live one, like a freshly built view.
+pub fn popup_attach(app: &AppHandle, id: u32) -> bool {
+    let mut g = shared(app).lock_app();
+    let Some(t) = g.tab(id).filter(|t| t.opener.is_some() && t.discarded) else { return false };
+    t.discarded = false;
+    t.loading = true;
+    t.fresh = true;
+    t.hist.fresh_view();
+    t.last_active = Instant::now();
+    true
+}
+
+/// Foreground the popup (sign-in windows are what the user is waiting for) and apply zoom and mute to it.
+pub fn popup_show(app: &AppHandle, id: u32) {
+    let gen = shared(app).lock_app().tab(id).map(|t| t.gen);
+    if let Some(gen) = gen {
+        on_view_ready(app, &label(id, gen));
+        activate(app, id);
+    }
+}
+
+/// The popup view never came (creation failed or was cancelled): forget its placeholder tab.
+pub fn popup_abort(app: &AppHandle, id: u32) {
+    // Only a tab still waiting for its view: one that got it is the popup's, and closes by its own means.
+    if shared(app).lock_app().tab(id).is_some_and(|t| t.opener.is_some() && t.discarded) {
+        close_tab(app, id);
+    }
+}
+
+/// Is `view_label` the view of a tab that was opened as a related popup?
+pub fn is_popup_view(app: &AppHandle, view_label: &str) -> bool {
+    let Some((id, gen)) = parse_label(view_label) else { return false };
+    shared(app).lock_app().tabs.iter().any(|t| t.id == id && t.gen == gen && t.opener.is_some())
+}
+
+/// The popup closed itself (`window.close()`) or its browser went away: close its tab. A tab whose view was
+/// replaced or that is already gone is left alone.
+pub fn popup_closed(app: &AppHandle, view_label: &str) {
+    if let Some((id, _)) = parse_label(view_label).filter(|_| is_popup_view(app, view_label)) {
+        close_tab(app, id);
+    }
 }
 
 pub fn on_popup(app: &AppHandle, label: &str, url: &str) {
@@ -1154,7 +1273,7 @@ pub fn prewake(app: &AppHandle, id: u32) {
     let go = {
         let mut g = shared(app).lock_app();
         g.tab(id).map_or(false, |t| {
-            let wake = t.discarded;
+            let wake = t.discarded && t.opener.is_none();
             if wake {
                 t.discarded = false;
                 t.loading = true;
@@ -1340,6 +1459,9 @@ pub fn open_tab_in(app: &AppHandle, win: &str, url: Option<Url>, profile: Option
             native_at: None,
             retiring: None,
             link: None,
+            opener: None,
+            nav_pre: None,
+            replaced: false,
         });
         id
     };
@@ -1358,8 +1480,9 @@ pub fn activate(app: &AppHandle, id: u32) {
         g.win(&win).active = id;
         let Some(t) = g.tab(id) else { return };
         t.last_active = Instant::now();
-        let nb = t.discarded;
-        t.discarded = false;
+        // A sleeping tab that has an opener is a popup placeholder: CEF builds its view, never us.
+        let nb = t.discarded && t.opener.is_none();
+        t.discarded = t.discarded && !nb;
         if nb {
             t.loading = true;
             t.restore = true;
@@ -1377,6 +1500,11 @@ pub fn activate(app: &AppHandle, id: u32) {
 }
 
 pub fn close_tab(app: &AppHandle, id: u32) {
+    // Popups die with their opener: the relation cannot outlive the opener's view.
+    let popups: Vec<u32> = shared(app).lock_app().tabs.iter().filter(|t| t.opener == Some(id)).map(|t| t.id).collect();
+    for p in popups {
+        close_tab(app, p);
+    }
     let (lbl, next, win, left, retiring) = {
         let mut g = shared(app).lock_app();
         let Some(pos) = g.tabs.iter().position(|t| t.id == id) else { return };
@@ -1384,7 +1512,7 @@ pub fn close_tab(app: &AppHandle, id: u32) {
         g.gestures.remove(&id);
         g.dl_ok.remove(&id);
         let url = t.url();
-        if !t.private && !is_blank(&url) && internal_view(&url).is_none() {
+        if !t.private && t.opener.is_none() && !is_blank(&url) && internal_view(&url).is_none() {
             g.closed.push((url, t.profile.clone()));
             if g.closed.len() > 20 {
                 g.closed.remove(0);
@@ -1392,9 +1520,9 @@ pub fn close_tab(app: &AppHandle, id: u32) {
         }
         let same: Vec<u32> = g.tabs.iter().filter(|x| x.win == t.win).map(|x| x.id).collect();
         let next = if g.active(&t.win) == id {
-            // the neighbour that slid into the closed tab's place, within this window
+            // a closed popup hands the screen back to its opener; else the neighbour that slid into its place
             let before = g.tabs.iter().take(pos).filter(|x| x.win == t.win).count();
-            same.get(before.min(same.len().saturating_sub(1))).copied()
+            t.opener.filter(|o| same.contains(o)).or_else(|| same.get(before.min(same.len().saturating_sub(1))).copied())
         } else {
             None
         };
@@ -1432,8 +1560,12 @@ pub fn reopen_closed(app: &AppHandle) {
 /// A view is bound to one request context, so another profile needs a new view (CEF cannot move a
 /// browser between contexts). The old view stays on screen until the new one commits a page, so the
 /// tab never flashes blank. What cannot survive: the page's JS state, a POST body (the cancelled
-/// request is replayed as a GET) and `window.opener`.
+/// request is replayed as a GET; `post_notice` tells the user and refills the form) and `window.opener`
+/// (popups are closed first, `release_links`; a page-driven navigation of a linked tab never swaps).
 pub fn swap(app: &AppHandle, tab_id: u32, profile: &str, url: &str, announce: bool) {
+    // A swap builds a new view, which has no opener relation: end it first. (Page-driven navigations never get
+    // here for a linked tab, see `on_navigation`; this is the user's own profile change or address-bar load.)
+    release_links(app, tab_id);
     let (old_label, is_active, drop_now, gen) = {
         let mut g = shared(app).lock_app();
         let active = g.active(&g.win_of(tab_id));
@@ -1478,6 +1610,24 @@ pub fn swap(app: &AppHandle, tab_id: u32, profile: &str, url: &str, announce: bo
         engine::defer_after(8000, move || finish_swap(&AppHandle, tab_id, gen));
     }
     emit_state(app);
+}
+
+/// Ends the opener relation of a tab about to lose its view: its popups are closed, and if it is a popup
+/// itself it becomes an ordinary tab. Private tabs never swap, so they keep theirs.
+fn release_links(app: &AppHandle, tab_id: u32) {
+    let popups: Vec<u32> = {
+        let mut g = shared(app).lock_app();
+        if g.tab(tab_id).map_or(true, |t| t.private) {
+            return;
+        }
+        if let Some(t) = g.tab(tab_id) {
+            t.opener = None;
+        }
+        g.tabs.iter().filter(|t| t.opener == Some(tab_id)).map(|t| t.id).collect()
+    };
+    for p in popups {
+        close_tab(app, p);
+    }
 }
 
 pub fn undo_swap(app: &AppHandle) {
@@ -1807,13 +1957,19 @@ pub fn discard_idle(app: &AppHandle) {
         let mut g = shared(app).lock_app();
         let limit = Duration::from_secs(g.cfg.settings.idle_minutes * 60);
         let actives: Vec<u32> = g.wins.values().map(|w| w.active).collect();
+        // A popup and its opener keep their views for as long as the relation lasts.
+        let links: Vec<(u32, Option<u32>)> = g.tabs.iter().map(|t| (t.id, t.opener)).collect();
         g.tabs
             .iter_mut()
-            .filter(|t| !actives.contains(&t.id) && !t.pinned && !t.audible && !t.discarded && t.last_active.elapsed() > limit)
+            .filter(|t| !actives.contains(&t.id) && !t.pinned && !t.audible && !t.discarded && !nav::linked(&links, t.id) && t.last_active.elapsed() > limit)
             .flat_map(|t| {
                 t.discarded = true;
                 t.loading = false;
-                [Some(label(t.id, t.gen)), t.retiring.take()]
+                // New generation: a view that is parked instead of destroyed (`engine::close`) must not
+                // report its blank page, title or visits on the sleeping tab.
+                let old = label(t.id, t.gen);
+                t.gen += 1;
+                [Some(old), t.retiring.take()]
             })
             .flatten()
             .collect()
@@ -1906,10 +2062,13 @@ fn sleep_for_memory_with(app: &AppHandle, rows: &[(u32, u32, u64)]) {
     let victim = {
         let mut g = shared(app).lock_app();
         let actives: Vec<u32> = g.wins.values().map(|w| w.active).collect();
-        g.tabs.iter_mut().filter(|t| !actives.contains(&t.id) && !t.pinned && !t.audible && !t.discarded).min_by_key(|t| t.last_active).map(|t| {
+        let links: Vec<(u32, Option<u32>)> = g.tabs.iter().map(|t| (t.id, t.opener)).collect();
+        g.tabs.iter_mut().filter(|t| !actives.contains(&t.id) && !t.pinned && !t.audible && !t.discarded && !nav::linked(&links, t.id)).min_by_key(|t| t.last_active).map(|t| {
             t.discarded = true;
             t.loading = false;
-            [Some(label(t.id, t.gen)), t.retiring.take()]
+            let old = label(t.id, t.gen); // new generation, as in `discard_idle`
+            t.gen += 1;
+            [Some(old), t.retiring.take()]
         })
     };
     if let Some(ls) = victim {
