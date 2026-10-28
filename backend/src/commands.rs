@@ -174,6 +174,19 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             mutate_cfg(|c| c.permissions.clear());
             ok(Value::Null)
         }
+        "swing_get" => {
+            let g = shared(&APP).app.lock().unwrap();
+            ok(serde_json::json!(g.cfg.swing))
+        }
+        // Saved without `mutate_cfg`: mood changes often and must not re-broadcast the whole state.
+        "swing_set" => {
+            let s = shared(&APP);
+            let mut g = s.app.lock().unwrap();
+            g.cfg.swing.mood = num(&a, "mood").clamp(0.0, 100.0);
+            g.cfg.swing.pets = num(&a, "pets") as u32;
+            g.cfg.save(&s.cfg_path);
+            ok(Value::Null)
+        }
         "skip_prompt" => {
             tabs::skip_prompt(&APP);
             ok(Value::Null)

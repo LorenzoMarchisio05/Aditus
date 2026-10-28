@@ -348,7 +348,7 @@
   {:else if st}
     <div class="settings">
       <aside>
-        <div class="title"><span class="logo"><svg viewBox="0 0 100 100" width="70%" height="70%" fill="currentColor" aria-hidden="true"><path d="M28 74V26" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M28 74H74A46 46 0 0 0 28 28z"/><path d="M28 74H74" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg></span><span><b>Settings</b><small>Aditus 0.1.1</small></span></div>
+        <div class="title"><span class="logo"><svg viewBox="0 0 100 100" width="70%" height="70%" fill="currentColor" aria-hidden="true"><path d="M28 74V26" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M28 74H74A46 46 0 0 0 28 28z"/><path d="M28 74H74" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg></span><span><b>Settings</b><small>Aditus {__APP_VERSION__}</small></span></div>
         {#each NAV as n}
           <button class="nav" class:on={nav === n} onclick={() => jump(n)}>{n}</button>
         {/each}
@@ -634,7 +634,7 @@
           <h1>About</h1>
           <div class="card about">
             <span class="logo big"><svg viewBox="0 0 100 100" width="70%" height="70%" fill="currentColor" aria-hidden="true"><path d="M28 74V26" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M28 74H74A46 46 0 0 0 28 28z"/><path d="M28 74H74" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg></span>
-            <span class="grow"><b>Aditus 0.1.2</b><small>Open source, GPL-3.0</small></span>
+            <span class="grow"><b>Aditus {__APP_VERSION__}</b><small>Open source, GPL-3.0</small></span>
             {#if upd && upd !== 'checking' && upd.newer}
               {#if upd.can_install}
                 <button class="solid" onclick={installUpdate} disabled={updMsg === 'Downloading…'}>Install {upd.latest} and restart</button>

@@ -379,7 +379,7 @@
   </div>
 {/if}
 
-{#if perched && perch}<Mascot {perch} {look} pulse={poke} groove={!!tab?.audible && !tab?.muted} incognito={st.incognito} />{/if}
+{#if perched && perch}<Mascot {perch} {look} pulse={poke} groove={!!tab?.audible && !tab?.muted} watching={tab && !tab.discarded ? { url: tab.url, title: tab.title } : null} incognito={st.incognito} />{/if}
 {#if guest}<Mascot {guest} incognito={st.incognito} onbeat={(p) => (guest.phase = p)} ondone={() => (guest = null)} />{/if}
 
 <aside class="side" class:compact={cfg?.settings.compact_tabs} style="width:{sidebarW}px; padding-top:{mac ? 38 : 0}px">

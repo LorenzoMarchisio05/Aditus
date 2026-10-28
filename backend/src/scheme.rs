@@ -65,6 +65,7 @@ struct Body {
     pos: usize,
     mime: &'static str,
     status: i32,
+    cache: &'static str,
 }
 
 wrap_resource_handler! {
@@ -86,7 +87,7 @@ wrap_resource_handler! {
                 r.set_status(b.status);
                 r.set_mime_type(Some(&CefString::from(b.mime)));
                 r.set_header_by_name(Some(&CefString::from("Content-Security-Policy")), Some(&CefString::from(CSP)), 1);
-                r.set_header_by_name(Some(&CefString::from("Cache-Control")), Some(&CefString::from("no-store")), 1);
+                r.set_header_by_name(Some(&CefString::from("Cache-Control")), Some(&CefString::from(b.cache)), 1);
             }
             if let Some(l) = response_length {
                 *l = b.data.len() as i64;
@@ -120,8 +121,8 @@ wrap_scheme_handler_factory! {
                 None => (String::new(), None),
             };
             let body = match file {
-                Some(data) => Body { data, pos: 0, mime: mime(&path), status: 200 },
-                None => Body { data: b"not found".to_vec(), pos: 0, mime: "text/plain", status: 404 },
+                Some(data) => Body { data, pos: 0, mime: mime(&path), status: 200, cache: if url.contains("/assets/") { "max-age=31536000, immutable" } else { "no-store" } },
+                None => Body { data: b"not found".to_vec(), pos: 0, mime: "text/plain", status: 404, cache: "no-store" },
             };
             Some(AppResource::new(Arc::new(Mutex::new(body))))
         }

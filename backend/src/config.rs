@@ -143,6 +143,19 @@ pub struct PermRule {
     pub allow: bool,
 }
 
+/// Swing the mascot's memory of you: how he feels (0-100) and how many times he was petted.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Swing {
+    pub mood: f64,
+    pub pets: u32,
+}
+
+impl Default for Swing {
+    fn default() -> Self {
+        Self { mood: 55.0, pets: 0 }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     pub settings: Settings,
@@ -153,6 +166,8 @@ pub struct Config {
     pub allowlist: Vec<String>,
     #[serde(default)]
     pub permissions: Vec<PermRule>,
+    #[serde(default)]
+    pub swing: Swing,
 }
 
 impl Default for Config {
@@ -163,6 +178,7 @@ impl Default for Config {
             mappings: vec![],
             allowlist: vec![],
             permissions: vec![],
+            swing: Swing::default(),
         }
     }
 }
@@ -312,5 +328,16 @@ mod tests {
         let back: Config = toml::from_str(&s).unwrap();
         assert_eq!(back.profiles[0].id, c.profiles[0].id);
         assert_eq!(store_identifier(&back.profiles[0]), store_identifier(&c.profiles[0]));
+    }
+
+    #[test]
+    fn old_config_gets_default_swing() {
+        let mut c = Config::default();
+        c.swing.pets = 3;
+        let s = toml::to_string_pretty(&c).unwrap();
+        let old = s.split("[swing]").next().unwrap();
+        let back: Config = toml::from_str(old).unwrap();
+        assert_eq!(back.swing, Swing::default());
+        assert_eq!(toml::from_str::<Config>(&s).unwrap().swing.pets, 3);
     }
 }
