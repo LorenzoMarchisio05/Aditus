@@ -24,7 +24,18 @@ export const on = async (ev, fn) => {
 };
 // State snapshots are broadcast per window; keep only this window's.
 export const WIN = new URLSearchParams(location.search).get('win') || 'main';
-export const onState = (fn) => on('state', (s) => s.win === WIN && fn(s));
+// A `state-delta` carries only changed per-tab fields and applies on top of seq - 1; any gap re-requests the full state.
+let cur = null;
+const subs = new Set();
+const push = (s) => ((cur = s), subs.forEach((fn) => fn(s)));
+on('state', (s) => s.win === WIN && push(s));
+on('state-delta', (d) => {
+  if (d.win !== WIN) return;
+  if (!cur || d.seq !== cur.seq + 1) return send('get_state');
+  const by = new Map(d.tabs.map((t) => [t.id, t]));
+  push({ ...cur, seq: d.seq, tabs: cur.tabs.map((t) => (by.has(t.id) ? { ...t, ...by.get(t.id) } : t)) });
+});
+export const onState = async (fn) => (subs.add(fn), () => subs.delete(fn));
 
 export function hue(name) {
   let h = 0;

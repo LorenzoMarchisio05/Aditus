@@ -405,7 +405,40 @@ struct Hot {
     id: u32,
     title: String,
     loading: bool,
+    audible: bool,
     mem_mb: u32,
+}
+
+fn hot_of(t: &Tab) -> Hot {
+    let url = t.url();
+    let title = match (t.title.is_empty(), is_blank(&url)) {
+        (false, _) => t.title.clone(),
+        (true, true) => "New Tab".into(),
+        (true, false) => url,
+    };
+    Hot { id: t.id, title, loading: t.loading, audible: t.audible, mem_mb: t.mem_mb }
+}
+
+/// `{id, <changed hot fields>}`, or None when identical.
+fn diff(a: &Hot, b: &Hot) -> Option<serde_json::Value> {
+    if a == b {
+        return None;
+    }
+    let mut m = serde_json::Map::new();
+    m.insert("id".into(), b.id.into());
+    if a.title != b.title {
+        m.insert("title".into(), b.title.clone().into());
+    }
+    if a.loading != b.loading {
+        m.insert("loading".into(), b.loading.into());
+    }
+    if a.audible != b.audible {
+        m.insert("audible".into(), b.audible.into());
+    }
+    if a.mem_mb != b.mem_mb {
+        m.insert("mem_mb".into(), b.mem_mb.into());
+    }
+    Some(m.into())
 }
 
 /// What was last sent for a window: the structural key (JSON with hot fields blanked, plus the cfg
@@ -430,31 +463,33 @@ fn plan(prev: Option<&Sent>, key: &str, hot: &[Hot]) -> Out {
     let Some(p) = prev.filter(|p| p.key == key && p.hot.len() == hot.len() && p.hot.iter().zip(hot).all(|(a, b)| a.id == b.id)) else {
         return Out::Full;
     };
-    let changed: Vec<_> = p
-        .hot
-        .iter()
-        .zip(hot)
-        .filter(|(a, b)| a != b)
-        .map(|(a, b)| {
-            let mut m = serde_json::Map::new();
-            m.insert("id".into(), b.id.into());
-            if a.title != b.title {
-                m.insert("title".into(), b.title.clone().into());
-            }
-            if a.loading != b.loading {
-                m.insert("loading".into(), b.loading.into());
-            }
-            if a.mem_mb != b.mem_mb {
-                m.insert("mem_mb".into(), b.mem_mb.into());
-            }
-            m.into()
-        })
-        .collect();
+    let changed: Vec<_> = p.hot.iter().zip(hot).filter_map(|(a, b)| diff(a, b)).collect();
     if changed.is_empty() {
         Out::Skip
     } else {
         Out::Delta(changed)
     }
+}
+
+/// Delta for just the dirty tabs of one window (`now`), compared with what was last sent.
+/// Full when nothing valid was sent yet or a tab is unknown to the last snapshot.
+fn plan_dirty(prev: Option<&Sent>, now: &[Hot]) -> Out {
+    let Some(p) = prev.filter(|p| !p.key.is_empty()) else { return Out::Full };
+    let mut changed = vec![];
+    for b in now {
+        let Some(a) = p.hot.iter().find(|a| a.id == b.id) else { return Out::Full };
+        changed.extend(diff(a, b));
+    }
+    if changed.is_empty() {
+        Out::Skip
+    } else {
+        Out::Delta(changed)
+    }
+}
+
+/// A delta flush is only valid when nothing structural was requested and some tab is dirty.
+fn delta_only(structural: bool, dirty: &HashSet<u32>) -> bool {
+    !structural && !dirty.is_empty()
 }
 
 /// Splices pre-serialized config into a serialized snapshot object.
@@ -506,8 +541,19 @@ fn db_flags(db: &Db, url: &str, profile: Option<&str>, incognito: bool) -> (bool
 
 /// Request a state broadcast. Calls within one 16ms window coalesce into a single `flush`.
 pub fn emit_state(app: &AppHandle) {
+    STRUCTURAL.store(true, std::sync::atomic::Ordering::SeqCst);
     schedule(app, true);
 }
+
+/// Like `emit_state`, for a change that touches only `id`'s title, loading, audible or memory.
+/// The flush then diffs just that tab and sends a delta.
+pub fn emit_tab(app: &AppHandle, id: u32) {
+    DIRTY.lock().unwrap().insert(id);
+    schedule(app, true);
+}
+
+static STRUCTURAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static DIRTY: std::sync::LazyLock<Mutex<HashSet<u32>>> = std::sync::LazyLock::new(Default::default);
 
 static PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static WANT_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -533,6 +579,7 @@ pub fn resend_state(app: &AppHandle) {
 }
 
 fn emit(app: &AppHandle, save: bool) {
+    STRUCTURAL.store(true, std::sync::atomic::Ordering::SeqCst);
     schedule(app, save);
 }
 
@@ -540,6 +587,20 @@ fn emit(app: &AppHandle, save: bool) {
 /// changed, a small `state-delta` when only title/loading/memory moved.
 fn flush(app: &AppHandle, save: bool) {
     let s = shared(app);
+    // Taken before building anything: a mutation racing in after this re-marks and re-schedules.
+    let structural = STRUCTURAL.swap(false, std::sync::atomic::Ordering::SeqCst);
+    let dirty = std::mem::take(&mut *DIRTY.lock().unwrap());
+    if delta_only(structural, &dirty) {
+        if let Some(out) = flush_dirty(&s, &dirty) {
+            for (win, json) in out {
+                engine::emit_win(&win, "state-delta", &json);
+            }
+            if save {
+                save_session(app);
+            }
+            return;
+        }
+    }
     // Prompts of tabs that have since closed would never be answered.
     let gone: Vec<u64> = {
         let mut g = s.lock_app();
@@ -581,16 +642,8 @@ fn flush(app: &AppHandle, save: bool) {
                         .map(|t| {
                             let url = t.url();
                             let parsed = Url::parse(&url).ok();
-                            let title = if t.title.is_empty() {
-                                if is_blank(&url) {
-                                    "New Tab".into()
-                                } else {
-                                    url.clone()
-                                }
-                            } else {
-                                t.title.clone()
-                            };
-                            hot.push(Hot { id: t.id, title, loading: t.loading, mem_mb: t.mem_mb });
+                            let h = hot_of(t);
+                            hot.push(h);
                             TabView {
                                 id: t.id,
                                 // hot fields are filled in below, only if a full snapshot is sent
@@ -602,7 +655,7 @@ fn flush(app: &AppHandle, save: bool) {
                                 group: t.group.clone(),
                                 discarded: t.discarded,
                                 loading: false,
-                                audible: t.audible,
+                                audible: false,
                                 muted: t.muted,
                                 mem_mb: 0,
                                 can_back: t.hist.can_back(),
@@ -629,7 +682,7 @@ fn flush(app: &AppHandle, save: bool) {
                     Out::Full => {
                         snap.seq = seq;
                         for (v, h) in snap.tabs.iter_mut().zip(&hot) {
-                            (v.title, v.loading, v.mem_mb) = (h.title.clone(), h.loading, h.mem_mb);
+                            (v.title, v.loading, v.audible, v.mem_mb) = (h.title.clone(), h.loading, h.audible, h.mem_mb);
                         }
                         (with_cfg(&serde_json::to_string(&snap).unwrap_or_default(), &cfg), true)
                     }
@@ -645,6 +698,44 @@ fn flush(app: &AppHandle, save: bool) {
     if save {
         save_session(app);
     }
+}
+
+/// Delta flush: builds hot fields for the dirty tabs only. None = fall back to a full flush.
+fn flush_dirty(s: &Shared, dirty: &HashSet<u32>) -> Option<Vec<(String, String)>> {
+    let g = s.lock_app();
+    let mut sent = SENT.lock().unwrap();
+    let mut per_win: HashMap<&str, Vec<Hot>> = HashMap::new();
+    for id in dirty {
+        if let Some(t) = g.tabs.iter().find(|t| t.id == *id) {
+            if g.wins.contains_key(&t.win) {
+                per_win.entry(&t.win).or_default().push(hot_of(t));
+            }
+        }
+    }
+    // Plan every window before touching `sent`, so a fallback leaves it unchanged.
+    let mut plans = vec![];
+    for (win, now) in per_win {
+        match plan_dirty(sent.get(win), &now) {
+            Out::Full => return None,
+            Out::Skip => {}
+            Out::Delta(tabs) => plans.push((win, now, tabs)),
+        }
+    }
+    Some(
+        plans
+            .into_iter()
+            .map(|(win, now, tabs)| {
+                let p = sent.get_mut(win).expect("planned from sent");
+                p.seq += 1;
+                for h in now {
+                    if let Some(x) = p.hot.iter_mut().find(|x| x.id == h.id) {
+                        *x = h;
+                    }
+                }
+                (win.to_string(), serde_json::json!({ "win": win, "seq": p.seq, "tabs": tabs }).to_string())
+            })
+            .collect(),
+    )
 }
 
 fn save_cfg(app: &AppHandle) {
@@ -973,7 +1064,7 @@ pub fn on_title(app: &AppHandle, label: &str, title: String) {
         }
     };
     s.db.set_title(&url, &title);
-    emit_state(app);
+    emit_tab(app, id);
 }
 
 /// The failed address inside one of our error-page URLs.
@@ -1317,7 +1408,7 @@ pub fn frame_reset(app: &AppHandle, view_label: &str, frame: &str) {
     let Some((id, _)) = parse_label(view_label) else { return };
     let changed = shared(app).lock_app().tab(id).is_some_and(|t| set_playing(t, frame, false));
     if changed {
-        emit_state(app);
+        emit_tab(app, id);
     }
 }
 
@@ -1340,7 +1431,7 @@ pub fn page_ping(app: &AppHandle, view_label: &str, frame: &str, kind: &str, hre
                 g.tab(id).is_some_and(|t| set_playing(t, frame, kind == "p1"))
             };
             if changed {
-                emit_state(app);
+                emit_tab(app, id);
             }
         }
         "r" => {
@@ -2012,7 +2103,7 @@ fn apply_memory(app: &AppHandle, rows: &[(u32, u32, u64)]) -> u64 {
             }
         }
     }
-    let mut changed = false;
+    let mut changed = vec![];
     {
         let mut g = shared(app).lock_app();
         let mut users: HashMap<u32, u64> = HashMap::new();
@@ -2024,12 +2115,14 @@ fn apply_memory(app: &AppHandle, rows: &[(u32, u32, u64)]) -> u64 {
                 Some(p) => rows.iter().find(|r| r.0 == p).map_or(0, |r| r.2 / 1024 / users.get(&p).copied().unwrap_or(1).max(1)) as u32,
                 None => 0,
             };
-            changed |= mb.abs_diff(t.mem_mb) >= 5;
+            if mb.abs_diff(t.mem_mb) >= 5 {
+                changed.push(t.id);
+            }
             t.mem_mb = mb;
         }
     }
-    if changed {
-        emit_state(app);
+    for id in changed {
+        emit_tab(app, id);
     }
     kb / 1024
 }
@@ -2361,7 +2454,7 @@ mod tests {
     use super::*;
 
     fn hot(id: u32, title: &str, loading: bool, mem: u32) -> Hot {
-        Hot { id, title: title.into(), loading, mem_mb: mem }
+        Hot { id, title: title.into(), loading, audible: false, mem_mb: mem }
     }
 
     #[test]
@@ -2376,6 +2469,28 @@ mod tests {
         let b = vec![hot(1, "a", true, 10), hot(2, "b2", false, 25)];
         let Out::Delta(d) = plan(Some(&sent), "k", &b) else { panic!("expected delta") };
         assert_eq!(d, vec![serde_json::json!({"id": 1, "loading": true}), serde_json::json!({"id": 2, "title": "b2", "mem_mb": 25})]);
+    }
+
+    #[test]
+    fn dirty_decision_and_delta_only_for_dirty_tabs() {
+        let one: HashSet<u32> = [2].into();
+        assert!(delta_only(false, &one));
+        assert!(!delta_only(true, &one), "structural wins");
+        assert!(!delta_only(false, &HashSet::new()), "nothing dirty: unsure, go full");
+        let a = vec![hot(1, "a", false, 10), hot(2, "b", false, 20), hot(3, "c", false, 30)];
+        let sent = Sent { key: "k".into(), hot: a, seq: 1 };
+        // Tab 1 may differ from the last snapshot, but it is not dirty and not looked at.
+        let Out::Delta(d) = plan_dirty(Some(&sent), &[hot(2, "b2", false, 20)]) else { panic!("expected delta") };
+        assert_eq!(d, vec![serde_json::json!({"id": 2, "title": "b2"})]);
+        let mut au = hot(3, "c", false, 30);
+        au.audible = true;
+        let Out::Delta(d) = plan_dirty(Some(&sent), &[au]) else { panic!() };
+        assert_eq!(d, vec![serde_json::json!({"id": 3, "audible": true})]);
+        assert!(matches!(plan_dirty(Some(&sent), &[hot(2, "b", false, 20)]), Out::Skip));
+        assert!(matches!(plan_dirty(Some(&sent), &[hot(9, "x", false, 0)]), Out::Full), "unknown tab");
+        assert!(matches!(plan_dirty(None, &[hot(2, "b", false, 20)]), Out::Full));
+        let reset = Sent { key: String::new(), ..sent };
+        assert!(matches!(plan_dirty(Some(&reset), &[hot(2, "b2", false, 20)]), Out::Full), "resync pending");
     }
 
     #[test]
