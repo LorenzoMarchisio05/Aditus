@@ -446,7 +446,13 @@ fn adopt_popup(opener: &str, popup: &BrowserView) -> i32 {
         r.insert(opener.to_string());
         r.insert(p.label.clone());
     });
-    if tabs::popup_attach(&tabs::AppHandle, p.tab) {
+    if DOOMED.with(|d| d.borrow_mut().remove(&p.label)) {
+        // Judged a hijack while CEF was still building it (`Probation`): mounted only so it can be closed properly.
+        defer(move || {
+            tabs::popup_abort(&tabs::AppHandle, p.tab);
+            close(&p.label);
+        });
+    } else if tabs::popup_attach(&tabs::AppHandle, p.tab) {
         // Selecting it lays out the window; not from inside CEF's creation callback.
         defer(move || tabs::popup_show(&tabs::AppHandle, p.tab));
     } else {
@@ -459,9 +465,9 @@ fn adopt_popup(opener: &str, popup: &BrowserView) -> i32 {
 /// client of its own (it would otherwise share the opener's, and every callback would be filed under the
 /// opener's label), the renderer flags a page view gets, and the same ad filtering. `false`: not possible,
 /// the caller treats the request as a plain tab.
-fn open_related(opener: &str, popup_id: i32, url: &str, client_slot: Option<&mut Option<Client>>, extra: Option<&mut Option<DictionaryValue>>) -> bool {
-    let (Some(slot), Some(extra)) = (client_slot, extra) else { return false };
-    let Some((tab, adblock)) = tabs::popup_reserve(&tabs::AppHandle, opener, url) else { return false };
+fn open_related(opener: &str, popup_id: i32, url: &str, client_slot: Option<&mut Option<Client>>, extra: Option<&mut Option<DictionaryValue>>) -> Option<String> {
+    let (Some(slot), Some(extra)) = (client_slot, extra) else { return None };
+    let (tab, adblock) = tabs::popup_reserve(&tabs::AppHandle, opener, url)?;
     let label = tabs::label(tab, 0);
     let mut dict = dictionary_value_create();
     if let Some(e) = dict.as_mut() {
@@ -472,6 +478,7 @@ fn open_related(opener: &str, popup_id: i32, url: &str, client_slot: Option<&mut
     *slot = Some(client(&label));
     set_page(&label, true);
     PENDING.with(|q| q.borrow_mut().push(PendingPopup { opener: opener.to_string(), popup_id, label: label.clone(), tab }));
+    let ret = label.clone();
     // Safety net: if CEF neither builds the popup nor reports it aborted, the placeholder tab and queue entry go.
     defer_after(10_000, move || {
         if PENDING.with(|q| q.borrow().iter().any(|e| e.label == label)) {
@@ -480,7 +487,7 @@ fn open_related(opener: &str, popup_id: i32, url: &str, client_slot: Option<&mut
             tabs::popup_abort(&tabs::AppHandle, tab);
         }
     });
-    true
+    Some(ret)
 }
 
 /// macOS: keeps the traffic lights in the sidebar's top corner (see `mac::place_window_buttons`).
@@ -588,48 +595,90 @@ pub fn clear_site_data(key: &str, cache: &Path, cookies: bool, http_cache: bool)
 
 pub fn close(label: &str) {
     set_page(label, false);
-    // Destroying a browser that has DevTools docked crashes CEF (as does closing DevTools itself):
-    // keep both alive, hidden and blank, instead.
     let docked = DEV.with(|d| d.borrow_mut().remove(label));
-    if let Some((_, bv, _)) = &docked {
-        navigate(label, "about:blank");
-        bv.set_visible(0);
-        PARK.with(|p| p.borrow_mut().push(bv.clone()));
-    }
-    // A view in an opener relation (a related popup, or the page that opened one) gets the same treatment: tearing
-    // one down while its counterpart lives is the kind of teardown that crashes CEF, so it is parked, blank and
-    // hidden, too. Its browser id leaves the registry so a parked view can't keep the app from quitting.
     let related = RELATED.with(|r| r.borrow_mut().remove(label));
-    if related && docked.is_none() {
-        // A parked popup keeps its window name: a later `window.open(url, name)` would drive the hidden view.
-        eval(label, "window.name=''");
-        navigate(label, "about:blank");
-    }
-    let parked = docked.is_some() || related;
     let rec = reg(|r| {
         r.pending.remove(label);
         r.find_text.remove(label);
         r.views.remove(label)
     });
-    let Some(rec) = rec else { return };
-    if parked {
-        PARK.with(|p| p.borrow_mut().push(rec.bv.clone()));
-    }
-    if related {
-        rec.bv.set_visible(0);
-        if let Some(id) = rec.bv.browser().map(|b| b.identifier()) {
-            reg(|r| r.by_browser.remove(&id));
-        }
-    }
-    // CloseBrowser on a view's browser would close the whole window. Removing the view and
-    // dropping our last reference destroys the browser instead.
     PREF.with(|p| p.borrow_mut().remove(label));
-    let host = HOST.with(|h| h.borrow().get(&rec.win).cloned()).filter(|_| rec.kind == Kind::Page);
-    match (host, window(&rec.win)) {
-        (Some(h), _) => h.remove_child_view(Some(&mut View::from(&rec.bv))),
-        (None, Some(w)) => w.remove_child_view(Some(&mut View::from(&rec.bv))),
+    let Some(rec) = rec else { return };
+    // CloseBrowser on a view still in the window would close the whole window, so a browser is always taken out
+    // of its window first. A plain page then just drops its last reference, which destroys the browser.
+    rec.bv.set_visible(0);
+    let host = rec.bv.browser().and_then(|b| b.host());
+    let (bv, win, kind) = (rec.bv.clone(), rec.win.clone(), rec.kind);
+    detach(&bv, &win, kind);
+    if let Some((dwin, dbv, _)) = docked {
+        // DevTools goes first (Chrome's DevToolsWindow does the same when its page closes): ask CEF to close it,
+        // take its view out of the window, and only close the page once CEF reports the DevTools gone.
+        dbv.set_visible(0);
+        if let Some(w) = window(&dwin) {
+            w.remove_child_view(Some(&mut View::from(&dbv)));
+        }
+        if let Some(h) = &host {
+            h.close_dev_tools();
+        }
+        closing(dbv, false);
+        wait_devtools_gone(bv, host, 20);
+    } else if related {
+        // An opener or popup: same teardown as DevTools gets. Assumes `do_close` fires for the Alloy browser once
+        // `close_browser(true)` runs with its view out of the window, and that dropping our reference then finishes it.
+        closing(bv, true);
+    }
+}
+
+/// Takes a page view out of the window (or its host container).
+fn detach(bv: &BrowserView, win: &str, kind: Kind) {
+    let host = HOST.with(|h| h.borrow().get(win).cloned()).filter(|_| kind == Kind::Page);
+    match (host, window(win)) {
+        (Some(h), _) => h.remove_child_view(Some(&mut View::from(bv))),
+        (None, Some(w)) => w.remove_child_view(Some(&mut View::from(bv))),
         _ => {}
     }
+}
+
+/// Polls until the inspected page has no DevTools any more, then closes the page. On timeout the page is kept
+/// alive, hidden (the old behaviour: a leaked blank browser, but no crash from closing a page under live DevTools).
+fn wait_devtools_gone(bv: BrowserView, host: Option<BrowserHost>, tries: u32) {
+    let gone = host.as_ref().map_or(true, |h| h.has_dev_tools() == 0);
+    if gone {
+        closing(bv, true);
+    } else if tries == 0 {
+        PARK.with(|p| p.borrow_mut().push(bv));
+    } else {
+        defer_after(100, move || wait_devtools_gone(bv, host, tries - 1));
+    }
+}
+
+/// Holds a browser whose view is already out of its window until CEF is done with it (`do_close` /
+/// `on_before_close`, see `release`), so the reference is never dropped mid-teardown. `force`: also ask it to
+/// close (a page); DevTools is closed with `close_dev_tools` instead. If CEF never reports back it is kept
+/// forever (PARK) and stops holding the app open.
+fn closing(bv: BrowserView, force: bool) {
+    let Some(browser) = bv.browser() else { return };
+    let id = browser.identifier();
+    CLOSING.with(|c| c.borrow_mut().insert(id, bv));
+    if force {
+        // Not from inside the callback that got us here.
+        defer(move || {
+            if let Some(h) = browser.host() {
+                h.close_browser(1);
+            }
+        });
+    }
+    defer_after(5000, move || {
+        if let Some(bv) = CLOSING.with(|c| c.borrow_mut().remove(&id)) {
+            reg(|r| r.by_browser.remove(&id));
+            PARK.with(|p| p.borrow_mut().push(bv));
+            maybe_quit();
+        }
+    });
+}
+
+fn release(id: i32) {
+    CLOSING.with(|c| c.borrow_mut().remove(&id));
 }
 
 pub fn focus(label: &str) {
@@ -734,11 +783,12 @@ pub fn print(label: &str) {
 }
 
 thread_local! {
-    /// Browsers that cannot be destroyed without crashing CEF, kept alive and hidden.
-    /// Not reusable: a DevTools popup is bound to the page it was opened for at `show_dev_tools`
-    /// (the cef crate has no retarget/attach call), and the inspected page's browser belongs to a
-    /// closed tab's profile context. So each docked DevTools costs two idle browsers until the app
-    /// quits; fixing it needs CEF to survive destroying a docked DevTools, not a reuse scheme.
+    /// Browsers being closed by `closing`, by browser id, until `do_close`/`on_before_close` releases them.
+    static CLOSING: RefCell<HashMap<i32, BrowserView>> = RefCell::new(HashMap::new());
+    /// Related popups judged a hijack before CEF handed their view over.
+    static DOOMED: RefCell<std::collections::HashSet<String>> = RefCell::new(Default::default());
+    /// Browsers kept alive hidden because CEF never completed their close (`closing` timeout, DevTools that did
+    /// not go away, windows closing with DevTools docked). Only failure cases end up here.
     static PARK: RefCell<Vec<BrowserView>> = RefCell::new(Vec::new());
     /// Docked DevTools by inspected page: (window, its view, shown). A DevTools view is never taken out
     /// of its window or closed (both crash CEF); it is only hidden.
@@ -1205,8 +1255,26 @@ wrap_life_span_handler! {
             if plan == nav::PopupPlan::Block {
                 return 1;
             }
-            if plan == nav::PopupPlan::Related && open_related(&self.label, popup_id, &url, client, extra_info) {
-                return 0;
+            if matches!(plan, nav::PopupPlan::Related | nav::PopupPlan::Probation) {
+                if let Some(popup) = open_related(&self.label, popup_id, &url, client, extra_info) {
+                    if plan == nav::PopupPlan::Probation {
+                        // Same race as below, but CEF needs the answer now: build the popup, then judge it once the
+                        // click's ping has had time to land. Ordering assumed: 50ms is enough for the ping, and the
+                        // popup is either still queued (doomed: closed as soon as it is mounted) or already a tab.
+                        let (opener, url, source) = (self.label.clone(), url.clone(), source.clone());
+                        defer_after(50, move || {
+                            if !crate::adblock::hijack(&url, &source, &tabs::clicked_link(&tabs::AppHandle, &opener)) {
+                                return;
+                            }
+                            if PENDING.with(|q| q.borrow().iter().any(|e| e.label == popup)) {
+                                DOOMED.with(|d| d.borrow_mut().insert(popup));
+                            } else {
+                                tabs::popup_closed(&tabs::AppHandle, &popup);
+                            }
+                        });
+                    }
+                    return 0;
+                }
             }
             // Click-hijacking ads too (animeworld's even ask for a sized popup window, so that is no sign of a
             // sign-in). Delayed so the click's page ping, sent just before but itself deferred, has landed.
@@ -1236,7 +1304,13 @@ wrap_life_span_handler! {
         // A related popup calling `window.close()`: its tab closes (the view is parked by `close`). We say we
         // handle it, so CEF does not send the close on to the window; the browser is not destroyed inside this
         // callback. A window being closed (`can_close`) asks the same question and gets the default answer.
-        fn do_close(&self, _browser: Option<&mut Browser>) -> i32 {
+        fn do_close(&self, browser: Option<&mut Browser>) -> i32 {
+            // A browser we are closing ourselves (see `dispose`): handled; the view is already out of its window, so
+            // dropping our reference now completes the teardown (not inside this callback).
+            if let Some(id) = browser.as_ref().map(|b| b.identifier()).filter(|id| CLOSING.with(|c| c.borrow().contains_key(id))) {
+                defer(move || release(id));
+                return 1;
+            }
             if WIN_CLOSING.with(|c| c.get()) {
                 return 0;
             }
@@ -1257,8 +1331,12 @@ wrap_life_span_handler! {
             let Some(b) = browser else { return };
             ipc::router().on_before_close(Some(b.clone()));
             reg(|r| r.by_browser.remove(&b.identifier()));
+            // One we closed ourselves: its tab is gone already (and a DevTools browser reports under its page's label).
+            let ours = CLOSING.with(|c| c.borrow().contains_key(&b.identifier()));
+            let id = b.identifier();
+            defer(move || release(id));
             // A popup browser that went away on its own takes its tab with it.
-            if tabs::is_popup_view(&tabs::AppHandle, &self.label) {
+            if !ours && tabs::is_popup_view(&tabs::AppHandle, &self.label) {
                 let label = self.label.clone();
                 defer(move || tabs::popup_closed(&tabs::AppHandle, &label));
             }

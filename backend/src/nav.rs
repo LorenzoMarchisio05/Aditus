@@ -34,6 +34,9 @@ pub enum PopupPlan {
     Block,
     /// A real popup that keeps `window.opener`, docked as a tab: sign-in and payment windows.
     Related,
+    /// Related, but the hijack heuristic fired: the click's ping may simply not have landed yet. CEF needs the answer
+    /// now, so the popup is built and judged again shortly after (see `engine::on_before_popup`); closed if it still looks like a hijack.
+    Probation,
     /// Cancelled now and re-checked shortly after (the click's ping may not have landed yet), then a plain tab.
     Deferred,
 }
@@ -47,7 +50,13 @@ pub fn popup_plan(user_gesture: bool, listed: bool, hijack: bool, popup_window: 
     }
     let host = url::Url::parse(url).ok().filter(|u| matches!(u.scheme(), "http" | "https")).and_then(|u| u.host_str().map(String::from));
     match host {
-        Some(h) if !hijack && (popup_window || is_auth_host(&h)) => PopupPlan::Related,
+        Some(h) if popup_window || is_auth_host(&h) => {
+            if hijack {
+                PopupPlan::Probation
+            } else {
+                PopupPlan::Related
+            }
+        }
         _ => PopupPlan::Deferred,
     }
 }
@@ -147,7 +156,8 @@ mod tests {
         assert_eq!(popup_plan(true, false, false, true, "https://shop.com/pay"), PopupPlan::Related);
         assert_eq!(popup_plan(true, false, false, false, "https://shop.com/"), PopupPlan::Deferred); // plain tab
         assert_eq!(popup_plan(true, false, false, false, "https://accounts.google.com/o/oauth2"), PopupPlan::Related);
-        assert_eq!(popup_plan(true, false, true, true, "https://popunder.biz/"), PopupPlan::Deferred);
+        assert_eq!(popup_plan(true, false, true, true, "https://popunder.biz/"), PopupPlan::Probation);
+        assert_eq!(popup_plan(true, false, true, false, "https://popunder.biz/"), PopupPlan::Deferred);
         assert_eq!(popup_plan(true, false, false, true, "about:blank"), PopupPlan::Deferred);
         assert_eq!(popup_plan(true, false, false, true, ""), PopupPlan::Deferred);
         assert_eq!(popup_plan(true, false, false, true, "javascript:alert(1)"), PopupPlan::Deferred);
