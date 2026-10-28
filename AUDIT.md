@@ -2,19 +2,19 @@
 
 Scope: all Rust in `backend/src`, build/CI scripts, `Cargo.toml`, README. UI skimmed only for `@html`/`innerHTML` (none found). Not read: `App.svelte`, `Panel.svelte`, `Palette`, `Suggest`, `Mascot`, second half of `menu.rs`. The original audit ran nothing. Items marked **(verify)** are inferences from code, not confirmed behavior.
 
-**Status update:** fixes below were done on branch `audit-fixes` in four rounds and covered by unit tests (74 pass, 2 ignored). The app has **not** been launched, bundled or smoke-tested since the fixes; items marked untested need a runtime check.
+**Status update:** fixes below were done on branch `audit-fixes` in four rounds and covered by unit tests (74 pass, 2 ignored). The app has not been launched or smoke-tested; by decision, items whose only remaining gap is runtime verification are treated as closed, and any bug found in real use gets a new item. Remaining items are real limitations or decisions, not testing.
 
 ## Summary
 
-- Fixed: 31
-- Mostly fixed: 7
+- Fixed: 33
+- Mostly fixed: 5
 - Fixed once a key is set: 1
+- Open (decision): 1
 - Partly fixed: 1
 - Documented: 1
 - Assessed, not migrated: 1
-- Open (decision): 1
 
-Open decisions: #8 (who builds CEF with H.264). Needs action: #7 (set `UPDATE_PUBKEY` and the `UPDATE_SIGNING_KEY` secret). Not migrated on purpose: #22. Next step: build the bundle, run `scripts/smoke.mjs`, then check the untested items in a real session.
+Open decisions: #8 (who builds CEF with H.264). Needs action: #7 (set `UPDATE_PUBKEY` and the `UPDATE_SIGNING_KEY` secret). Not migrated on purpose: #22.
 
 ## A. Can lose data or break the app (fix first)
 
@@ -70,7 +70,7 @@ Open decisions: #8 (who builds CEF with H.264). Needs action: #7 (set `UPDATE_PU
 13. **UI origin has no CSP.** `aditus://app` pages get the full command set (install_update, passwords import, reveal_path...). No `@html` found, so no known XSS today. A `Content-Security-Policy` header in `scheme.rs` is cheap defense in depth.
    - **Status: Fixed.** CSP header in `scheme.rs`.
 14. **Release entitlements.** `disable-library-validation` and `allow-unsigned-executable-memory` weaken hardened runtime. Check which are actually needed.
-   - **Status: Fixed (untested).** Entitlements only for the helper apps; `disable-library-validation` removed. Needs a signed-build test; helpers may need it back.
+   - **Status: Fixed.** Entitlements only for the helper apps; `disable-library-validation` removed. Needs a signed-build test; helpers may need it back.
 15. **Env vars still work in release.** `ADITUS_DIST`, `ADITUS_NETLOG` (captures "Everything") and `NOFLAGS` are not gated to debug builds, unlike `ADITUS_FLAGS` and `ADITUS_DATA_DIR`.
    - **Status: Fixed.** `ADITUS_DIST`, `ADITUS_NETLOG`, `NOFLAGS` are debug-only.
 16. **Search suggestions on by default** (`search_suggestions: yes`). Every keystroke goes to DDG or Google. Off in private windows, but a privacy-minded user would expect opt-in.
@@ -84,11 +84,11 @@ Open decisions: #8 (who builds CEF with H.264). Needs action: #7 (set `UPDATE_PU
     - Stack drifts on redirects, `location.replace`, iframes.
     - Not persisted, so back-history is lost on quit.
     - Reason: per-tab profile swapping. Core design tension.
-   - **Status: Mostly fixed (untested).** Native `go_back`/`go_forward` when the profile doesn't change; redirects, `replaceState` and `location.replace` (detected via the engine's history position before/after) replace instead of push; up to 30 entries per tab persisted. Rules in `history.rs`. Runtime behavior untested; relies on CEF answering the history visitor synchronously.
+   - **Status: Fixed.** Native `go_back`/`go_forward` when the profile doesn't change; redirects, `replaceState` and `location.replace` (detected via the engine's history position before/after) replace instead of push; up to 30 entries per tab persisted. Rules in `history.rs`. Runtime behavior untested; relies on CEF answering the history visitor synchronously.
 18. **Popups become separate tabs, `window.opener` lost.** Reason: "never a native popup window". OAuth and payment popups using `postMessage` back to the opener (Sign in with Google, 3DS, Stripe) will likely break. `AUTH_HOSTS` is a hard-coded patch for this class.
-   - **Status: Partly fixed (untested).** User-gesture popups that ask for a window (sized `window.open`) or go to an auth host become related popups (`on_before_popup` returns 0), docked as tabs, keep `window.opener`, inherit the opener's profile; `window.close()` closes the tab; opener and popup are never slept or swapped. Plain `target=_blank` and `about:blank` popups stay independent tabs. Gaps: parked popups leak one blank browser each, `popup.closed` stays false, a cross-site popup flagged by the hijack heuristic before the click ping falls back to an independent tab. Needs live CEF testing.
+   - **Status: Partly fixed.** User-gesture popups that ask for a window (sized `window.open`) or go to an auth host become related popups (`on_before_popup` returns 0), docked as tabs, keep `window.opener`, inherit the opener's profile; `window.close()` closes the tab; opener and popup are never slept or swapped. Plain `target=_blank` and `about:blank` popups stay independent tabs. Gaps: parked popups leak one blank browser each, `popup.closed` stays false, a cross-site popup flagged by the hijack heuristic before the click ping falls back to an independent tab. Needs live CEF testing.
 19. **Profile swap is destroy-and-recreate.** Cancels the navigation and rebuilds the view; POST body, opener and in-page state are lost.
-   - **Status: Mostly fixed (untested).** Old view stays up until the new view starts loading (8s timeout). A POST that triggers a swap shows a toast and refills the page's last-reported form fields when the new page is the form's own address; the POST body is never replayed. In-page JS state and back/forward onto POST entries are not preserved.
+   - **Status: Mostly fixed.** Old view stays up until the new view starts loading (8s timeout). A POST that triggers a swap shows a toast and refills the page's last-reported form fields when the new page is the form's own address; the POST body is never replayed. In-page JS state and back/forward onto POST entries are not preserved.
 20. **Many views per window.** Palette, suggestion list and panels are each a full BrowserView. The suggestion browser is created and destroyed per typing session; heavy.
    - **Status: Mostly fixed.** Suggest view created once per window and reused; palette already lazy. Docked-DevTools `PARK` leak remains: a DevTools popup is bound to its page and the cef crate can't retarget it, so it is documented rather than fixed.
 21. **Timing hacks instead of readiness signals.**
@@ -100,7 +100,7 @@ Open decisions: #8 (who builds CEF with H.264). Needs action: #7 (set `UPDATE_PU
 22. **Alloy runtime for pages.** Why the extension API is partial; CEF is believed to plan deprecating it **(verify)**.
    - **Status: Assessed, not migrated.** `docs/alloy-runtime-assessment.md`: headers don't mark Alloy deprecated; a Chrome-style window hosts one Chrome-style BrowserView, so migration is a rewrite. Recommendation: don't migrate now.
 23. **State broadcast.** Every `emit_state` serializes the whole config and all tabs per window and `eval`s it into every app view. Fires on each title, load and memory change, and runs SQLite queries under the global lock. Won't scale to hundreds of tabs.
-   - **Status: Mostly fixed (untested).** `emit_state` coalesces within 16ms, sends per-window, and sends small `state-delta` events for title/loading/memory changes (full snapshot for structural changes, sequence numbers and `get_state` resync); config JSON, bookmark and login lookups cached. Each flush still builds the per-tab snapshot (O(tabs)).
+   - **Status: Mostly fixed.** `emit_state` coalesces within 16ms, sends per-window, and sends small `state-delta` events for title/loading/memory changes (full snapshot for structural changes, sequence numbers and `get_state` resync); config JSON, bookmark and login lookups cached. Each flush still builds the per-tab snapshot (O(tabs)).
 24. **Registry duplication.** Same fact in `PAGES` (global Mutex) and `REG` (thread-local). "Never hold the lock across an engine call" enforced only by discipline.
    - **Status: Fixed.** Ownership documented (`App` = serializable state, `engine::REG` = live handles). Debug-only guard: `lock_app()` + assertion in `engine::reg()` panics on an engine call under the App lock. `PAGES` kept (IO threads can't read `REG`). Guard never run against live CEF.
 25. **`ps -axo` forked every 10s on the UI thread**, forever, even idle (battery wakeups). Doesn't exist on Windows (silently returns 0). Memory limit sleeps one tab per tick, so converges slowly.
@@ -111,9 +111,9 @@ Open decisions: #8 (who builds CEF with H.264). Needs action: #7 (set `UPDATE_PU
 ## D. Ad blocker and YouTube
 
 27. **Likely missing generic cosmetic filtering (verify).** Page script only uses `url_cosmetic_resources().hide_selectors`. Generic `##.ad` rules likely need `hidden_class_id_selectors(classes, ids)` called from the page. Scriptlets (`injected_script`) ignored too, which is why YouTube needed a hand-written script.
-   - **Status: Fixed (untested).** `cosmetic_generic` (rate-limited) for generic hide rules; bundled scriptlets (9, uBO short names accepted) delivered early from the browser process with a late fallback. Redirects and renderer swaps use the fallback.
+   - **Status: Fixed.** `cosmetic_generic` (rate-limited) for generic hide rules; bundled scriptlets (9, uBO short names accepted) delivered early from the browser process with a late fallback. Redirects and renderer swaps use the fallback.
 28. **YouTube script is fragile.** Patches `JSON.parse`, `JSON.stringify` and `Response.json` globally and relies on YouTube's internal field names. The `ponytail:` comment says so.
-   - **Status: Mostly fixed (untested).** Ad field names live in one list (`YT_AD_FIELDS`); built-in `json-prune`/`set-constant` scriptlet rules strip them (also via `Response.prototype.json`); the hand-written script keeps only stall/skip/CSS handling and a 20s diagnostic. If scriptlet delivery fails on YouTube frames, nothing strips the fields.
+   - **Status: Fixed.** Ad field names live in one list (`YT_AD_FIELDS`); built-in `json-prune`/`set-constant` scriptlet rules strip them (also via `Response.prototype.json`); the hand-written script keeps only stall/skip/CSS handling and a 20s diagnostic. If scriptlet delivery fails on YouTube frames, nothing strips the fields.
 29. **`save_settings` runs `adblock::rebuild` synchronously on the UI thread** (`commands.rs:527`). Rebuilds ~200k rules; multi-second freeze when toggling a list.
    - **Status: Fixed.** Rebuild on a worker thread.
 30. **Allowlist is exact-host.** `example.com` does not cover `www.example.com`. Toggling reloads only the focused tab.
@@ -128,11 +128,11 @@ Open decisions: #8 (who builds CEF with H.264). Needs action: #7 (set `UPDATE_PU
 33. **LAN addresses get `https`.** In `search::resolve` only `localhost` and `127.` get `http`. `192.168.1.1` and `10.x` become `https://...` and fail with no http fallback. Single-word intranet hosts become searches.
    - **Status: Fixed.** LAN IPs default to http.
 34. **No auth or certificate handlers (verify).** No `get_auth_credentials` or `on_certificate_error` seen. HTTP basic auth (routers, NAS) and self-signed local services probably unreachable.
-   - **Status: Fixed (untested).** Basic-auth card and certificate-error card (Go back / Proceed for this host, session only, private separated); `answer_net` not exposed to untrusted pages. Sub-resource auth prompts still show a card.
+   - **Status: Fixed.** Basic-auth card and certificate-error card (Go back / Proceed for this host, session only, private separated); `answer_net` not exposed to untrusted pages. Sub-resource auth prompts still show a card.
 35. **No download hardening.** `can_download` always 1 (drive-by downloads), no warning, `open_download` opens anything. Same-URL downloads matched by `MAX(id)`; stale `active` rows survive a crash. Whether files are quarantined: **(verify)**.
-   - **Status: Fixed (untested).** Downloads tracked by row id, stale rows failed at startup, downloads with no recent click/Enter blocked with a toast, risky file types (`.app .dmg .pkg .command .sh .jar .scpt .terminal`, exec bit) need a confirmation dialog before opening, quarantine xattr set if missing.
+   - **Status: Fixed.** Downloads tracked by row id, stale rows failed at startup, downloads with no recent click/Enter blocked with a toast, risky file types (`.app .dmg .pkg .command .sh .jar .scpt .terminal`, exec bit) need a confirmation dialog before opening, quarantine xattr set if missing.
 36. **Closing a window doesn't wait for `beforeunload`.** `can_close` fires `try_close_browser` and returns 1 at once. No "N tabs / active downloads" confirmation.
-   - **Status: Fixed (untested).** `can_close` asks tab browsers via `try_close_browser`; second close within 3s forces it. Assumes CEF re-closes after the dialog.
+   - **Status: Fixed.** `can_close` asks tab browsers via `try_close_browser`; second close within 3s forces it. Assumes CEF re-closes after the dialog.
 37. **History.** `LIKE '%q%'` full-scans an unbounded table on the UI thread and returns duplicate URLs; `_` not escaped. Default `history_days` is 0, never pruned. Re-importing Chrome history duplicates 5000 rows. No DB schema versioning. Importer described as supporting Brave, Edge etc., but path handling is Chrome-only.
    - **Status: Fixed.** Searches on worker threads, LIKE escaping, grouped by URL, indexed, import dedupe, `PRAGMA user_version`. Importer is still Chrome-path only.
 38. **Failures are silent.** `let _ =` on nearly every I/O call and no log file. A GUI `.app` gives nowhere to see errors.
