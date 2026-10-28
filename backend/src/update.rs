@@ -17,9 +17,9 @@ use std::{
 const REPO: &str = "LorenzoMarchisio05/Aditus";
 
 /// Base64 of the raw 32-byte ed25519 public key whose private half signs releases (secret
-/// `UPDATE_SIGNING_KEY`, see README "Release signing"). PLACEHOLDER: until it is replaced with a real key,
-/// the updater refuses to install anything (it still reports that a new version exists).
-const UPDATE_PUBKEY: &str = "PLACEHOLDER-replace-with-release-public-key";
+/// `UPDATE_SIGNING_KEY`, see README "Release signing"). While it is still a `PLACEHOLDER...` string the updater refuses to install anything
+/// (it still reports that a new version exists).
+const UPDATE_PUBKEY: &str = "KDsy+KhCpaueZDr5nFoZOsIQcYAKduk43us9GTbPcH0=";
 
 fn key_is_set(key_b64: &str) -> bool {
     !key_b64.starts_with("PLACEHOLDER")
