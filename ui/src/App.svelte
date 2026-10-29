@@ -475,7 +475,7 @@
     </div>
   {/if}
 
-  <div class="foot">
+  <div class="foot" class:perched>
     {#if !collapsed}
       <button class="newtab" onclick={() => call('new_tab', {})}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New tab<span class="grow"></span><kbd>⌘T</kbd>
@@ -627,6 +627,7 @@
   .row2 .ok { background: var(--accent); color: #111114; font-weight: 600; }
   .card.toast { flex-direction: row; align-items: center; justify-content: space-between; }
   .card.toast button { color: var(--accent); font-weight: 600; }
+  .foot.perched { margin-top: 28px; } /* room for the mascot that sits on this line, so cards above never hide behind it */
   .foot { display: flex; gap: 6px; padding: 10px 10px 6px; margin: 0 0 0; border-top: 1px solid var(--line); }
   .newtab { flex: 1; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--bg2); border-radius: 10px; font-weight: 500; color: var(--dim); }
   .newtab:hover { color: var(--fg); }
