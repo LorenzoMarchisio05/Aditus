@@ -1,18 +1,21 @@
 #!/bin/sh
-# Signs (and optionally notarizes) target/bundle/Aditus.app. Untested: needs a Developer ID certificate.
+# Signs (and optionally notarizes) target/bundle/Aditus.app. Tested locally with a Developer ID certificate.
 #   SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" ./sign-mac.sh
 #   NOTARY_PROFILE=<notarytool keychain profile>, or in CI NOTARY_KEY (base64 .p8) + NOTARY_KEY_ID + NOTARY_ISSUER,
 #   to also notarize and staple.
 set -e
 cd "$(dirname "$0")"
 APP=target/bundle/Aditus.app
-S="codesign --force --options runtime --timestamp --sign $SIGN_IDENTITY"
+S() { codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$@"; }
 # Inside out: framework, helpers, then the app. Follows CEF's cefclient layout: only the helper processes (renderer, GPU:
 # V8 JIT) get entitlements.plist; the framework and the main app get none. disable-library-validation is dropped because
 # everything is signed with one identity; if a signed build fails to launch, add it to the helpers first.
-$S "$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
-for h in "$APP"/Contents/Frameworks/aditus\ Helper*.app; do $S --entitlements entitlements.plist "$h"; done
-$S "$APP"
+F="$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
+# Nested dylibs first: a stale ad-hoc signature on one (libcef_sandbox) is refused at load for having another Team ID.
+find "$F" -name "*.dylib" | while read -r d; do S "$d"; done
+S "$F"
+for h in "$APP"/Contents/Frameworks/aditus\ Helper*.app; do S --entitlements entitlements.plist "$h"; done
+S "$APP"
 codesign --verify --deep --strict "$APP"
 if [ -n "$NOTARY_PROFILE" ] || [ -n "$NOTARY_KEY" ]; then
   ditto -c -k --keepParent "$APP" target/bundle/notarize.zip
