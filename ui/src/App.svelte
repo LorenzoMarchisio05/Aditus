@@ -268,15 +268,22 @@
   function startResize(e) {
     e.preventDefault();
     resizing = true;
-    const move = (ev) => (width = Math.min(480, Math.max(160, ev.clientX)));
-    const up = () => {
-      removeEventListener('pointermove', move);
-      removeEventListener('pointerup', up);
+    const grip = e.currentTarget;
+    // Capture: the page view sits beside the sidebar, so without it the release over the page is never seen.
+    try { grip.setPointerCapture(e.pointerId); } catch {}
+    const move = (ev) => {
+      if (!ev.buttons) return end(); // button released somewhere we heard nothing
+      width = Math.min(480, Math.max(160, ev.clientX));
+    };
+    const end = () => {
+      if (!resizing) return;
       resizing = false;
+      for (const t of ['pointermove', 'pointerup', 'pointercancel', 'lostpointercapture']) grip.removeEventListener(t, t === 'pointermove' ? move : end);
+      removeEventListener('blur', end);
       settings({ sidebar_width: width });
     };
-    addEventListener('pointermove', move);
-    addEventListener('pointerup', up);
+    for (const t of ['pointermove', 'pointerup', 'pointercancel', 'lostpointercapture']) grip.addEventListener(t, t === 'pointermove' ? move : end);
+    addEventListener('blur', end);
   }
 
   function drop(e, target) {
@@ -653,7 +660,7 @@
   .bar > .star { color: var(--dim); }
   .bar > .star.on { color: var(--accent); }
   .bar > .shield.off { color: var(--dim); background: transparent; border: 1px dashed var(--line); }
-  .grip { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; }
+  .grip { position: absolute; top: 0; right: 0; width: 8px; height: 100%; cursor: col-resize; }
   form { flex: 1; }
   form input { width: 100%; }
   .find { height: 40px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 0 14px; border-top: 1px solid var(--line); }
