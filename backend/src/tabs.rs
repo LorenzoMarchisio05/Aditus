@@ -1012,6 +1012,20 @@ pub fn on_net_prompt(app: &AppHandle, label: &str, cert: bool, host: &str, detai
     Net::Wait(id)
 }
 
+/// A tab lost its view: permission and login/certificate cards asked by that view can never be answered.
+fn drop_prompts(app: &AppHandle, tab: u32) {
+    let gone: Vec<u64> = {
+        let mut g = shared(app).lock_app();
+        g.perm_prompt.retain(|p| p.2 != tab);
+        let gone = g.net_q.iter().filter(|p| p.tab == tab).map(|p| p.id).collect();
+        g.net_q.retain(|p| p.tab != tab);
+        gone
+    };
+    for id in gone {
+        engine::net_answer(id, false, "", "");
+    }
+}
+
 /// The card's answer. Proceeding past a certificate error is remembered for this session only.
 pub fn answer_net(app: &AppHandle, id: u64, allow: bool, user: &str, pass: &str) {
     {
@@ -1509,7 +1523,11 @@ fn hide_all_except(app: &AppHandle, win: &str, keep: Option<(u32, u32)>) {
         g.tabs.iter().filter(|t| t.win == win).flat_map(|t| [Some(label(t.id, t.gen)), t.retiring.clone()]).flatten().collect()
     };
     let keep = keep.map(|(i, g)| label(i, g));
+    let fs = engine::fullscreen_label(win);
     for l in labels {
+        if fs.as_deref() == Some(l.as_str()) && keep.as_deref() != Some(l.as_str()) {
+            engine::eval(&l, "document.exitFullscreen()");
+        }
         engine::set_visible(&l, keep.as_deref() == Some(l.as_str()));
     }
 }
@@ -1632,6 +1650,7 @@ pub fn close_tab(app: &AppHandle, id: u32) {
         engine::defer(move || engine::close(&r));
     }
     engine::close(&lbl);
+    drop_prompts(app, id);
     match next {
         Some(n) => activate(app, n),
         None if left == 0 => {
@@ -1716,11 +1735,32 @@ pub fn swap(app: &AppHandle, tab_id: u32, profile: &str, url: &str, announce: bo
     if let Some(d) = drop_now {
         engine::close(&d);
     }
+    drop_prompts(app, tab_id);
     // The old view (if any) keeps the screen; the new one is created hidden and revealed on commit.
     build_webview(app, tab_id, is_active && old_label.is_none());
     if old_label.is_some() {
         engine::defer_after(8000, move || finish_swap(&AppHandle, tab_id, gen));
     }
+    emit_state(app);
+}
+
+/// A private tab never swaps profile, but its blank app-page view still needs replacing by one that gets the page scripts.
+fn rebuild_private(app: &AppHandle, tab_id: u32, profile: &str, url: &str) {
+    let (old, is_active) = {
+        let mut g = shared(app).lock_app();
+        let active = g.active(&g.win_of(tab_id));
+        let Some(t) = g.tab(tab_id) else { return };
+        let old = label(t.id, t.gen);
+        t.gen += 1;
+        t.title.clear();
+        t.loading = true;
+        t.nav_post = false;
+        t.hist.push(url, profile);
+        t.mode = Mode::Traverse;
+        (old, active == tab_id)
+    };
+    engine::close(&old);
+    build_webview(app, tab_id, is_active);
     emit_state(app);
 }
 
@@ -1769,13 +1809,17 @@ pub fn dismiss_toast(app: &AppHandle) {
 /// Load a URL in a tab, honoring profile mappings. Address-bar loads are user-initiated.
 pub fn navigate(app: &AppHandle, tab_id: u32, url: Url, mode_push: bool) {
     let s = shared(app);
-    let (decision, lbl, was_discarded, fresh_view) = {
+    let (decision, lbl, was_discarded, fresh_view, private) = {
         let mut g = s.lock_app();
         let host = url.host_str().unwrap_or_default().to_string();
         let Some(t) = g.tabs.iter().find(|t| t.id == tab_id) else { return };
         let (profile, lbl, disc) = (t.profile.clone(), label(t.id, t.gen), t.discarded);
         let was_blank = is_blank(&t.url());
+        let private = t.private;
         let mut d = nav::decide(&g.cfg.mappings, &profile, &host, mode_push);
+        if private {
+            d = Decision::Allow; // a private tab never changes profile
+        }
         if let Decision::Prompt(h) = &d {
             if g.skipped.contains(h) || g.prompt.is_some() {
                 d = Decision::Allow;
@@ -1786,7 +1830,7 @@ pub fn navigate(app: &AppHandle, tab_id: u32, url: Url, mode_push: bool) {
         }
         // The new-tab view is an app page: its renderer never gets the page scripts, so web content needs a fresh view.
         let fresh = was_blank && !disc && matches!(d, Decision::Allow | Decision::Prompt(_));
-        (d, lbl, disc, fresh.then_some(profile))
+        (d, lbl, disc, fresh.then_some(profile), private)
     };
     match decision {
         Decision::Swap(p) => swap(app, tab_id, &p, url.as_str(), true),
@@ -1808,7 +1852,11 @@ pub fn navigate(app: &AppHandle, tab_id: u32, url: Url, mode_push: bool) {
                 }
                 activate(app, tab_id);
             } else if let Some(p) = fresh_view {
-                swap(app, tab_id, &p, url.as_str(), false);
+                if private {
+                    rebuild_private(app, tab_id, &p, url.as_str());
+                } else {
+                    swap(app, tab_id, &p, url.as_str(), false);
+                }
             } else {
                 engine::navigate(&lbl, url.as_str());
             }
@@ -2002,12 +2050,16 @@ pub fn reload(app: &AppHandle, tab_id: u32) {
 
 /// `pre` runs first in the page; it survives the reload only via storage.
 pub fn reload_with(app: &AppHandle, tab_id: u32, pre: &str) {
-    let lbl = {
+    let (lbl, url) = {
         let mut g = shared(app).lock_app();
         let Some(t) = g.tab(tab_id) else { return };
         t.mode = Mode::Traverse;
-        label(t.id, t.gen)
+        (label(t.id, t.gen), t.url())
     };
+    // An error page reloads the address that failed, not itself.
+    if let Some(target) = error_target(&url) {
+        return engine::navigate(&lbl, &target);
+    }
     engine::eval(&lbl, &format!("{pre}location.reload()"));
 }
 
@@ -2069,6 +2121,7 @@ pub fn skip_prompt(app: &AppHandle) {
 
 /// Destroy views of tabs idle past the configured timeout.
 pub fn discard_idle(app: &AppHandle) {
+    let mut slept: Vec<u32> = vec![];
     let victims: Vec<String> = {
         let mut g = shared(app).lock_app();
         let limit = Duration::from_secs(g.cfg.settings.idle_minutes * 60);
@@ -2081,6 +2134,7 @@ pub fn discard_idle(app: &AppHandle) {
             .flat_map(|t| {
                 t.discarded = true;
                 t.loading = false;
+                slept.push(t.id);
                 // New generation: a view that is parked instead of destroyed (`engine::close`) must not
                 // report its blank page, title or visits on the sleeping tab.
                 let old = label(t.id, t.gen);
@@ -2092,6 +2146,9 @@ pub fn discard_idle(app: &AppHandle) {
     };
     for l in &victims {
         engine::close(l);
+    }
+    for id in slept {
+        drop_prompts(app, id);
     }
     if !victims.is_empty() {
         emit_state(app);
@@ -2186,13 +2243,14 @@ fn sleep_for_memory_with(app: &AppHandle, rows: &[(u32, u32, u64)]) {
             t.loading = false;
             let old = label(t.id, t.gen); // new generation, as in `discard_idle`
             t.gen += 1;
-            [Some(old), t.retiring.take()]
+            (t.id, [Some(old), t.retiring.take()])
         })
     };
-    if let Some(ls) = victim {
+    if let Some((id, ls)) = victim {
         for l in ls.into_iter().flatten() {
             engine::close(&l);
         }
+        drop_prompts(app, id);
         emit_state(app);
     }
 }
@@ -2315,7 +2373,8 @@ pub fn window_closed(app: &AppHandle, label: &str) {
         }
     }
     engine::drop_context(&format!("private-{label}"));
-    emit(app, false);
+    // A closed window leaves the saved session unless the whole app is quitting.
+    emit(app, !engine::QUITTING.load(std::sync::atomic::Ordering::SeqCst));
 }
 
 // ---------- session ----------
@@ -2364,7 +2423,7 @@ pub fn save_session(app: &AppHandle) {
             tabs: g
                 .tabs
                 .iter()
-                .filter(|t| !t.private)
+                .filter(|t| !t.private && t.opener.is_none())
                 .map(|t| {
                     let (history, idx) = t.hist.for_save();
                     Saved {
@@ -2439,6 +2498,25 @@ pub fn restore_session(app: &AppHandle) {
     }
     for (win, first) in first_of {
         activate(app, to_activate.get(&win).copied().unwrap_or(first));
+    }
+    // "main" may have got no tabs (its tabs were all popups, or every window failed): never leave an empty window up.
+    let (main_empty, others) = {
+        let mut g = shared(app).lock_app();
+        let main_empty = !g.tabs.iter().any(|t| t.win == "main");
+        let with_tabs = g.tabs.first().map(|t| t.win.clone());
+        if !g.tabs.iter().any(|t| t.win == g.focused) {
+            if let Some(w) = with_tabs {
+                g.focused = w;
+            }
+        }
+        (main_empty, g.wins.len() > 1)
+    };
+    if main_empty {
+        if others {
+            engine::close_window("main");
+        } else {
+            open_tab_in(app, "main", None, None, true);
+        }
     }
 }
 

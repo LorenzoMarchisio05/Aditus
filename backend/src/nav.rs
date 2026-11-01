@@ -18,13 +18,10 @@ pub enum Decision {
 
 /// Hosts that take part in login flows. Never prompt or swap on these.
 const AUTH_HOSTS: &[&str] =
-    &["accounts.google.com", "login.microsoftonline.com", "login.live.com", "appleid.apple.com", "idmsa.apple.com", "github.com/login", "login.yahoo.com", "auth0.com", "okta.com"];
+    &["accounts.google.com", "login.microsoftonline.com", "login.live.com", "appleid.apple.com", "idmsa.apple.com", "login.yahoo.com", "auth0.com", "okta.com"];
 
 pub fn is_auth_host(host: &str) -> bool {
-    AUTH_HOSTS.iter().any(|a| {
-        let a = a.split('/').next().unwrap();
-        host == a || host.ends_with(&format!(".{a}"))
-    })
+    AUTH_HOSTS.iter().any(|a| host == *a || host.ends_with(&format!(".{a}")))
 }
 
 /// What a `window.open` request becomes.

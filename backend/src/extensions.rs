@@ -26,7 +26,7 @@ fn fetch(id: &str, have: Option<&str>) -> Result<Vec<u8>, String> {
     let v = have.map(|v| format!("%26v%3D{}", v.replace(|c: char| !(c.is_ascii_digit() || c == '.'), ""))).unwrap_or_default();
     let url = format!("https://clients2.google.com/service/update2/crx?response=redirect&prodversion=156.0.0.0&acceptformat=crx2,crx3&x=id%3D{id}{v}%26uc");
     let mut buf = Vec::new();
-    ureq::get(&url).call().map_err(|e| e.to_string())?.into_reader().take(MAX_CRX).read_to_end(&mut buf).map_err(|e| e.to_string())?;
+    ureq::get(&url).timeout(std::time::Duration::from_secs(300)).call().map_err(|e| e.to_string())?.into_reader().take(MAX_CRX).read_to_end(&mut buf).map_err(|e| e.to_string())?;
     Ok(buf)
 }
 
@@ -229,8 +229,12 @@ pub fn commit(id: &str) -> Result<(), String> {
         return Err("bad id".into());
     }
     let to = root().join(id);
+    let from = staging(id);
+    if !from.join("manifest.json").is_file() {
+        return Err("nothing staged for this extension".into()); // never delete the installed copy for nothing
+    }
     let _ = fs::remove_dir_all(&to);
-    fs::rename(staging(id), &to).map_err(|e| e.to_string())
+    fs::rename(from, &to).map_err(|e| e.to_string())
 }
 
 pub fn discard(id: &str) {
@@ -239,10 +243,26 @@ pub fn discard(id: &str) {
     }
 }
 
+/// Everything an extension can reach, as tagged strings: API and host permissions (also the optional ones),
+/// the pages its content scripts run on, and who may message it.
+fn access(dir: &Path) -> Option<std::collections::HashSet<String>> {
+    let m: Value = serde_json::from_str(&fs::read_to_string(dir.join("manifest.json")).ok()?).ok()?;
+    let strs = |v: &Value| v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect::<Vec<_>>()).unwrap_or_default();
+    let mut out = std::collections::HashSet::new();
+    for k in ["permissions", "host_permissions", "optional_permissions", "optional_host_permissions"] {
+        out.extend(strs(&m[k]).into_iter().map(|p| format!("{k}:{p}")));
+    }
+    for cs in m["content_scripts"].as_array().into_iter().flatten() {
+        out.extend(strs(&cs["matches"]).into_iter().map(|p| format!("cs:{p}")));
+    }
+    out.extend(strs(&m["externally_connectable"]["matches"]).into_iter().map(|p| format!("ec:{p}")));
+    out.extend(strs(&m["externally_connectable"]["ids"]).into_iter().map(|p| format!("ecid:{p}")));
+    Some(out)
+}
+
 /// Installed extensions that have a newer store version with no new permissions are replaced on disk;
 /// Chromium reads them at start-up, so the new code runs after the next restart.
 fn update_all() {
-    let perms = |d: &Value| -> Vec<String> { ["permissions", "hosts"].iter().flat_map(|k| d[k].as_array().cloned().unwrap_or_default()).filter_map(|v| v.as_str().map(String::from)).collect() };
     for id in ids() {
         let Some(old) = describe(&root().join(&id), &id) else { continue };
         let have = text(&old, "version");
@@ -251,7 +271,9 @@ fn update_all() {
             discard(&id);
             continue;
         };
-        if text(&new, "version") != have && perms(&new).iter().all(|p| perms(&old).contains(p)) {
+        // Anything wider than before is not installed unasked.
+        let same_or_narrower = matches!((access(&staging(&id)), access(&root().join(&id))), (Some(n), Some(o)) if n.is_subset(&o));
+        if text(&new, "version") != have && same_or_narrower {
             let _ = crate::applog::check("extension update commit", commit(&id));
         } else {
             discard(&id);

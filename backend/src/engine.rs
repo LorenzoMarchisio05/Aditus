@@ -234,8 +234,12 @@ fn maybe_quit() {
     }
 }
 
+/// Set once the app is quitting: closing windows then must not rewrite the saved session.
+pub static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Close every window (Cmd+Q, Quit menu); the message loop ends once the last browser is gone.
 pub fn quit() {
+    QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
     let wins: Vec<Window> = reg(|r| r.wins.values().cloned().collect());
     if wins.is_empty() {
         return quit_message_loop();
@@ -597,11 +601,26 @@ pub fn close(label: &str) {
     set_page(label, false);
     let docked = DEV.with(|d| d.borrow_mut().remove(label));
     let related = RELATED.with(|r| r.borrow_mut().remove(label));
-    let rec = reg(|r| {
+    // Prompts held for this view would never be answered; a fullscreen it owned would pin the window.
+    let held: Vec<u64> = NET.with(|n| n.borrow().iter().filter(|(_, (l, _))| l == label).map(|(id, _)| *id).collect());
+    for id in held {
+        net_answer(id, false, "", "");
+    }
+    let (rec, fs_win) = reg(|r| {
         r.pending.remove(label);
         r.find_text.remove(label);
-        r.views.remove(label)
+        let fs = r.fullscreen.iter().find(|(_, v)| *v == label).map(|(w, _)| w.clone());
+        if let Some(w) = &fs {
+            r.fullscreen.remove(w);
+        }
+        (r.views.remove(label), fs)
     });
+    if let Some(w) = fs_win {
+        if let Some(win) = window(&w) {
+            win.set_fullscreen(0);
+        }
+        relayout(&w);
+    }
     PREF.with(|p| p.borrow_mut().remove(label));
     let Some(rec) = rec else { return };
     // CloseBrowser on a view still in the window would close the whole window, so a browser is always taken out
@@ -1434,7 +1453,7 @@ wrap_request_handler! {
             let realm = realm.map(|h| h.to_string()).unwrap_or_default();
             let detail = if is_proxy != 0 { format!("proxy {realm}") } else { realm };
             match tabs::on_net_prompt(&tabs::AppHandle, &self.label, false, &host, detail.trim()) {
-                tabs::Net::Wait(id) => NET.with(|n| n.borrow_mut().insert(id, Pending::Auth(cb.clone()))),
+                tabs::Net::Wait(id) => NET.with(|n| n.borrow_mut().insert(id, (self.label.clone(), Pending::Auth(cb.clone())))),
                 _ => {
                     cb.cancel();
                     None
@@ -1465,7 +1484,7 @@ wrap_request_handler! {
             match tabs::on_net_prompt(&tabs::AppHandle, &self.label, true, &host, text) {
                 tabs::Net::Allow => cb.cont(),
                 tabs::Net::Wait(id) => {
-                    NET.with(|n| n.borrow_mut().insert(id, Pending::Cert(cb.clone())));
+                    NET.with(|n| n.borrow_mut().insert(id, (self.label.clone(), Pending::Cert(cb.clone()))));
                 }
                 tabs::Net::Deny => cb.cancel(),
             }
@@ -1488,16 +1507,16 @@ enum Pending {
 thread_local! {
     /// Host each page view last started a main-frame navigation to.
     static NAV_HOST: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
-    static NET: RefCell<HashMap<u64, Pending>> = RefCell::new(HashMap::new());
+    static NET: RefCell<HashMap<u64, (String, Pending)>> = RefCell::new(HashMap::new());
 }
 
 /// Finish a held login or certificate request. Without `allow` it is cancelled.
 pub fn net_answer(id: u64, allow: bool, user: &str, pass: &str) {
     match NET.with(|n| n.borrow_mut().remove(&id)) {
-        Some(Pending::Auth(cb)) if allow => cb.cont(Some(&s(user)), Some(&s(pass))),
-        Some(Pending::Auth(cb)) => cb.cancel(),
-        Some(Pending::Cert(cb)) if allow => cb.cont(),
-        Some(Pending::Cert(cb)) => cb.cancel(),
+        Some((_, Pending::Auth(cb))) if allow => cb.cont(Some(&s(user)), Some(&s(pass))),
+        Some((_, Pending::Auth(cb))) => cb.cancel(),
+        Some((_, Pending::Cert(cb))) if allow => cb.cont(),
+        Some((_, Pending::Cert(cb))) => cb.cancel(),
         None => {}
     }
 }

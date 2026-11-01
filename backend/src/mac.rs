@@ -23,6 +23,7 @@ define_class! {
     unsafe impl NSApplicationDelegate for AppDelegate {
         #[unsafe(method(applicationShouldTerminate:))]
         unsafe fn application_should_terminate(&self, _sender: &NSApplication) -> NSApplicationTerminateReply {
+            crate::engine::QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
             NSApplicationTerminateReply::TerminateNow
         }
 

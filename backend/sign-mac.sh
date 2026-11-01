@@ -20,6 +20,7 @@ codesign --verify --deep --strict "$APP"
 if [ -n "$NOTARY_PROFILE" ] || [ -n "$NOTARY_KEY" ]; then
   ditto -c -k --keepParent "$APP" target/bundle/notarize.zip
   if [ -n "$NOTARY_KEY" ]; then
+    trap 'rm -f target/bundle/notary.p8' EXIT
     echo "$NOTARY_KEY" | base64 --decode > target/bundle/notary.p8
     xcrun notarytool submit target/bundle/notarize.zip --key target/bundle/notary.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait
     rm -f target/bundle/notary.p8

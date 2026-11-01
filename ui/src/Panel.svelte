@@ -86,12 +86,15 @@
   const library = $derived(view === 'history' || view === 'downloads');
   const bookmarksView = $derived(view === 'bookmarks');
   let marks = $state([]);
+  let reqSeq = 0; // drop replies that arrive after a newer query
   async function loadMarks() {
-    marks = await call('bookmark_search', { q });
+    const n = ++reqSeq, r = await call('bookmark_search', { q });
+    if (n === reqSeq) marks = r;
   }
 
   async function loadHistory() {
-    rows = await call('history_search', { q });
+    const n = ++reqSeq, r = await call('history_search', { q });
+    if (n === reqSeq) rows = r;
   }
   async function loadDownloads() {
     downloads = await call('downloads_list');
@@ -192,6 +195,13 @@
     setTimeout(() => (impMsg = ''), 4000);
   }
   const set = (patch) => call('save_settings', { settings: { ...st.cfg.settings, ...patch } });
+  // Number field -> clamped setting; empty/NaN input snaps back to the saved value, others show the clamped value.
+  function setNum(e, key, lo, hi = Infinity) {
+    const el = e.currentTarget, v = el.value.trim() === '' ? NaN : +el.value;
+    if (Number.isNaN(v)) return void (el.value = st.cfg.settings[key]);
+    el.value = Math.min(hi, Math.max(lo, v));
+    set({ [key]: +el.value });
+  }
   const engine = $derived(
     !st ? 'ddg' : st.cfg.settings.search_template.includes('duckduckgo') ? 'ddg' : st.cfg.settings.search_template.includes('google.com/search') ? 'google' : 'custom'
   );
@@ -378,7 +388,7 @@
             </div>
             <label class="item">
               <span class="grow"><b>Sidebar width</b><small>Set it here, or drag the edge when dragging is on.</small></span>
-              <span><input type="number" min="160" max="480" value={st.cfg.settings.sidebar_width} onchange={(e) => set({ sidebar_width: Math.min(480, Math.max(160, +e.currentTarget.value)) })} /> px</span>
+              <span><input type="number" min="160" max="480" value={st.cfg.settings.sidebar_width} onchange={(e) => setNum(e, 'sidebar_width', 160, 480)} /> px</span>
             </label>
             <div class="item">
               <span class="grow"><b>Developer tools</b><small>Where they open. A tab whose tools are already open keeps its position; "Window" applies to the next ones.</small></span>
@@ -405,7 +415,7 @@
             </div>
             <label class="item">
               <span class="grow"><b>Page zoom</b><small>Applied to every site.</small></span>
-              <span><input type="number" min="50" max="300" step="10" value={st.cfg.settings.page_zoom} onchange={(e) => set({ page_zoom: Math.min(300, Math.max(50, +e.currentTarget.value)) })} /> %</span>
+              <span><input type="number" min="50" max="300" step="10" value={st.cfg.settings.page_zoom} onchange={(e) => setNum(e, 'page_zoom', 50, 300)} /> %</span>
             </label>
           </div>
         </section>
@@ -426,11 +436,11 @@
             </label>
             <label class="item">
               <span class="grow"><b>Sleep idle tabs after</b><small>Pinned and playing tabs stay awake.</small></span>
-              <span><input type="number" min="1" max="1440" value={st.cfg.settings.idle_minutes} onchange={(e) => set({ idle_minutes: Math.max(1, +e.currentTarget.value) })} /> min</span>
+              <span><input type="number" min="1" max="1440" value={st.cfg.settings.idle_minutes} onchange={(e) => setNum(e, 'idle_minutes', 1)} /> min</span>
             </label>
             <label class="item">
               <span class="grow"><b>Memory limit</b><small>Over this, the least recently used background tabs sleep. 0 turns it off.</small></span>
-              <span><input type="number" min="0" max="65536" step="256" value={st.cfg.settings.memory_limit_mb} onchange={(e) => set({ memory_limit_mb: Math.max(0, +e.currentTarget.value) })} /> MB</span>
+              <span><input type="number" min="0" max="65536" step="256" value={st.cfg.settings.memory_limit_mb} onchange={(e) => setNum(e, 'memory_limit_mb', 0)} /> MB</span>
             </label>
           </div>
         </section>
@@ -524,14 +534,14 @@
             <div class="tiles">
               <div class="card tile"><b>{ab.rules.toLocaleString()}</b>rules loaded</div>
               <div class="card tile"><b>{ab.lists.filter((l) => l.enabled).length}/{ab.lists.length}</b>lists on</div>
-              <div class="card tile"><b>{ago(Math.min(...ab.lists.filter((l) => l.age_hours != null).map((l) => l.age_hours)))}</b>since refresh</div>
+              <div class="card tile"><b>{ago(ab.lists.reduce((m, l) => (l.age_hours == null ? m : Math.min(m ?? Infinity, l.age_hours)), null))}</b>since refresh</div>
               <div class="card tile"><b>{st.cfg.allowlist.length}</b>sites paused</div>
             </div>
             <h2>Filter lists</h2>
             <div class="card list2">
               {#each ab.lists as l}
                 <label class="item">
-                  <span class="grow"><b>{NAMES[l.name][0]}</b><small>{NAMES[l.name][1]} · updated {ago(l.age_hours)}</small></span>
+                  <span class="grow"><b>{NAMES[l.name]?.[0] ?? l.name}</b><small>{NAMES[l.name]?.[1] ?? ''} · updated {ago(l.age_hours)}</small></span>
                   <input type="checkbox" class="sw" checked={l.enabled} onchange={(e) => toggleList(l.name, e.currentTarget.checked)} />
                 </label>
               {/each}
@@ -567,7 +577,7 @@
             </label>
             <label class="item">
               <span class="grow"><b>Delete history older than</b><small>0 keeps everything. Runs at launch.</small></span>
-              <span><input type="number" min="0" max="3650" value={st.cfg.settings.history_days} onchange={(e) => set({ history_days: Math.max(0, +e.currentTarget.value) })} /> days</span>
+              <span><input type="number" min="0" max="3650" value={st.cfg.settings.history_days} onchange={(e) => setNum(e, 'history_days', 0)} /> days</span>
             </label>
           </div>
           <h2>Saved passwords</h2>

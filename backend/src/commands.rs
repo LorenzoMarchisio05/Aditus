@@ -223,13 +223,18 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
         }
         "adblock_info" => ok(serde_json::to_value(adblock::info(&APP)).unwrap_or(Value::Null)),
         "install_update" => {
-            // Re-checks GitHub itself; the UI only says "go".
+            // Re-checks GitHub itself; the UI only says "go". One install at a time.
+            static INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            if INSTALLING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return reply.done(Err("An update is already installing".into()));
+            }
             std::thread::spawn(move || match crate::update::install() {
                 Ok(()) => {
                     reply.done(Ok(Value::Null));
                     engine::defer_from_thread(engine::quit);
                 }
                 Err(e) => {
+                    INSTALLING.store(false, std::sync::atomic::Ordering::SeqCst);
                     crate::applog::log(&format!("update install: {e}"));
                     reply.done(Err(e))
                 }
@@ -262,13 +267,24 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
             let key = str_arg(&a, "name"); // a name or an id
             let found = shared(&APP).lock_app().cfg.profile(&key).map(|p| (p.id.clone(), config::Config::data_dir(&shared(&APP).data_dir.join("cef"), p)));
             if let Some((id, dir)) = found.filter(|(id, _)| !shared(&APP).lock_app().tabs.iter().any(|t| &t.profile == id)) {
+                let first = shared(&APP).lock_app().cfg.profiles.first().is_some_and(|f| f.id == id);
+                let mut deleted = false;
                 mutate_cfg(|c| {
                     if c.profiles.len() > 1 {
                         let _ = std::fs::remove_dir_all(&dir);
                         c.profiles.retain(|p| p.id != id);
                         c.mappings.retain(|m| m.profile != id);
+                        deleted = true;
                     }
                 });
+                if deleted {
+                    // Saved passwords live in the OS keychain; they and the profile's rows must not outlive it.
+                    let db = &shared(&APP).db;
+                    for (origin, user, _) in db.logins(Some(&id), None) {
+                        passwords::delete(passwords::SERVICE, &id, &origin, &user, first);
+                    }
+                    db.delete_profile_data(&id);
+                }
             }
             ok(Value::Null)
         }
@@ -381,22 +397,24 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
                 crate::applog::log("import bookmarks: no Chrome bookmarks file");
                 return reply.done(Err("No Chrome bookmarks file found".into()));
             };
-            let list = crate::import::chrome_bookmarks(&text);
-            for (u, t) in &list {
-                shared(&APP).db.add_bookmark(u, t, "");
-            }
-            tabs::emit_state(&APP);
-            ok(json!(list.len()))
+            std::thread::spawn(move || {
+                let list = crate::import::chrome_bookmarks(&text);
+                shared(&APP).db.import_bookmarks(&list, "");
+                engine::defer_from_thread(|| tabs::emit_state(&APP));
+                reply.done(Ok(json!(list.len())));
+            });
         }
         "import_history" => {
             // Optional `path` (tests); default is the History file next to Chrome's Bookmarks.
             let path = a["path"].as_str().map(Into::into).or_else(|| crate::import::chrome_path().map(|p| p.with_file_name("History")));
-            let Some(rows) = path.and_then(|p| crate::import::chrome_history(&p)) else {
-                crate::applog::log("import history: no Chrome history readable");
-                return reply.done(Err("No Chrome history found".into()));
-            };
-            shared(&APP).db.import_visits(&rows, "");
-            ok(json!(rows.len()))
+            std::thread::spawn(move || {
+                let Some(rows) = path.and_then(|p| crate::import::chrome_history(&p)) else {
+                    crate::applog::log("import history: no Chrome history readable");
+                    return reply.done(Err("No Chrome history found".into()));
+                };
+                shared(&APP).db.import_visits(&rows, "");
+                reply.done(Ok(json!(rows.len())));
+            });
         }
         "clear_data" => {
             let s = shared(&APP);
@@ -668,7 +686,10 @@ fn search_suggest(on: bool, template: &str, private: bool, q: &str) -> Vec<Strin
 
 /// Files that run code when opened: installers, scripts, app bundles, or anything with an exec bit.
 fn is_risky_download(path: &str, mode: Option<u32>) -> bool {
-    const RISKY: &[&str] = &["app", "dmg", "pkg", "command", "sh", "jar", "scpt", "terminal"];
+    const RISKY: &[&str] = &[
+        "app", "dmg", "pkg", "command", "sh", "jar", "scpt", "terminal", "mobileconfig", "mpkg", "workflow", "action", "wflow", "applescript", "scptd", "zsh", "bash", "py", "pl", "rb", "iso", "img",
+        "sparseimage", "webloc", "inetloc", "term", "tool", "shortcut",
+    ];
     let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
     RISKY.contains(&ext.as_str()) || mode.is_some_and(|m| m & 0o111 != 0)
 }

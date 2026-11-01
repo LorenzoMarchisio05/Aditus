@@ -15,7 +15,6 @@
   let netPass = $state('');
   let width = $state(250);
   let newer = $state(null); // { latest, url } when a release is available
-  let checked = false;
   let resizing = false;
   let urlText = $state('');
   let pillEl;
@@ -139,6 +138,18 @@
   });
 
   $effect(() => {
+    if (collapsed) tabQuery = null;
+  });
+
+  // Picking a suggestion navigates from the overlay; leave edit mode so the bar shows the real URL.
+  let lastUrl;
+  $effect(() => {
+    const u = tab?.url;
+    if (editing && lastUrl !== undefined && u !== lastUrl) addrEl?.blur();
+    lastUrl = u;
+  });
+
+  $effect(() => {
     if (!editing) urlText = tab?.url ?? '';
   });
 
@@ -190,11 +201,11 @@
   }
 
   $effect(() => {
-    if (!cfg || checked || !cfg.settings.auto_update) return;
-    checked = true;
+    if (!cfg?.settings.auto_update) return;
     const look = () => call('check_update').then((u) => { if (u?.newer) newer = u; }).catch(() => {});
     look();
-    setInterval(look, 6 * 3600 * 1000); // long-running sessions still hear about releases
+    const id = setInterval(look, 6 * 3600 * 1000); // long-running sessions still hear about releases
+    return () => clearInterval(id);
   });
   let updating = $state('');
   async function installUpdate() {
@@ -288,13 +299,14 @@
 
   function drop(e, target) {
     e.preventDefault();
-    if (dragId == null || dragId === target.id) return;
+    if (dragId == null) return;
+    if (dragId === target.id) return void (dragId = null);
     call('reorder_tab', { id: dragId, to: st.tabs.findIndex((t) => t.id === target.id) });
     dragId = null;
   }
 
   function favicon(t) {
-    return t.host ? `https://${t.host}/favicon.ico` : '';
+    return t.host && !st.incognito && !t.discarded ? `https://${t.host}/favicon.ico` : '';
   }
 
   const ctx = (e, t) => { e.preventDefault(); call('tab_menu', { id: t.id }); };
@@ -355,10 +367,11 @@
     onmouseenter={(e) => hoverTab(e, t)}
     onmouseleave={leaveTab}
     ondragstart={() => (dragId = t.id)}
+    ondragend={() => (dragId = null)}
     ondragover={(e) => e.preventDefault()}
     ondrop={(e) => drop(e, t)}
     onclick={() => call('activate_tab', { id: t.id })}
-    onkeydown={(e) => e.key === 'Enter' && call('activate_tab', { id: t.id })}
+    onkeydown={(e) => e.key === 'Enter' && e.target === e.currentTarget && call('activate_tab', { id: t.id })}
     oncontextmenu={(e) => ctx(e, t)}
   >
     <span class="fav">
@@ -402,7 +415,7 @@
   {/if}
 
   {#if tabQuery !== null && !collapsed}
-    <input class="tabsearch" bind:this={tabSearchEl} bind:value={tabQuery} onkeydown={tabSearchKey} placeholder="Search tabs" spellcheck="false" />
+    <input class="tabsearch" bind:this={tabSearchEl} bind:value={tabQuery} onkeydown={tabSearchKey} onblur={() => (tabQuery = null)} placeholder="Search tabs" spellcheck="false" />
   {/if}
 
   {#if pinned.length}

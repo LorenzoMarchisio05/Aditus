@@ -13,10 +13,10 @@ const LIB: &[(&str, &str)] = &[
         "aditus-re.fn",
         r#"function aditusRe(s){s=String(s||'');const m=/^\/(.+)\/([gimsu]*)$/.exec(s);try{return m?new RegExp(m[1],m[2].replace('g','')):new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'))}catch(e){return /^$/}}"#,
     ),
-    // Replaces the property at dotted path `chain` on window with an accessor, now or once its parents exist.
+    // Replaces the property at dotted path `chain` on window with an accessor, now or once its parents exist. Several traps under one root chain their setters (`__a` marks ours) instead of overwriting each other.
     (
         "aditus-trap.fn",
-        r#"function aditusTrap(chain,get,set){const p=String(chain).split('.');const walk=(o,i)=>{if(!o||(typeof o!=='object'&&typeof o!=='function'))return;const k=p[i];let v=o[k];if(i===p.length-1){Object.defineProperty(o,k,{configurable:true,enumerable:true,get:()=>get(v),set:x=>{v=set(v,x)}});return}if(v&&(typeof v==='object'||typeof v==='function'))walk(v,i+1);else Object.defineProperty(o,k,{configurable:true,enumerable:true,get:()=>v,set:x=>{v=x;try{walk(x,i+1)}catch(e){}}})};walk(window,0)}"#,
+        r#"function aditusTrap(chain,get,set){const p=String(chain).split('.');const walk=(o,i)=>{if(!o||(typeof o!=='object'&&typeof o!=='function'))return;const k=p[i];let v=o[k];if(i===p.length-1){Object.defineProperty(o,k,{configurable:true,enumerable:true,get:()=>get(v),set:x=>{v=set(v,x)}});return}if(v&&(typeof v==='object'||typeof v==='function'))walk(v,i+1);else{const d=Object.getOwnPropertyDescriptor(o,k),ps=d&&d.set&&d.set.__a?d.set:null,st=x=>{if(ps)ps(x);v=x;try{walk(x,i+1)}catch(e){}};st.__a=1;Object.defineProperty(o,k,{configurable:true,enumerable:true,get:()=>v,set:st})}};walk(window,0)}"#,
     ),
     (
         "aditus-prune.fn",
@@ -88,4 +88,20 @@ pub fn resources() -> Vec<Resource> {
         out.push(res(&format!("{name}.js"), al, MimeType::ApplicationJavascript, deps, src));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    /// Two set-constant rules under one root must both apply (needs `node`; skipped without it).
+    #[test]
+    fn traps_under_one_root_both_apply() {
+        let lib = super::LIB.iter().find(|(n, _)| *n == "aditus-trap.fn").unwrap().1;
+        let js = format!(
+            "globalThis.window=globalThis;{lib}aditusTrap('r.a',()=>1,v=>v);aditusTrap('r.b',()=>2,v=>v);r={{a:0,b:0}};if(r.a!==1||r.b!==2)throw new Error(r.a+','+r.b)"
+        );
+        match std::process::Command::new("node").args(["-e", &js]).output() {
+            Ok(o) => assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr)),
+            Err(_) => eprintln!("node missing, skipped"),
+        }
+    }
 }

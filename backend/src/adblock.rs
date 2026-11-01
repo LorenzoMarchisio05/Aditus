@@ -271,7 +271,7 @@ fn download(dir: &PathBuf) {
         let res = ureq::get(url).timeout(Duration::from_secs(60)).call();
         if let Ok(text) = res.and_then(|r| r.into_string().map_err(Into::into)) {
             if text.len() > 1000 {
-                let _ = std::fs::write(&path, text);
+                let _ = crate::config::write_atomic(&path, text);
             }
         }
     }
@@ -292,6 +292,10 @@ fn disabled_lists(app: &AppHandle) -> Vec<String> {
 /// Rebuild from the cached lists (or the fallback). Runs on a worker thread; the engine swap is atomic.
 pub fn rebuild(app: &AppHandle) {
     let Some(b) = BLOCKER.get() else { return };
+    // One rebuild at a time, each reading the settings only once it holds the lock: a slow older build can never
+    // install over a newer one made from fresher settings.
+    static REBUILD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = REBUILD.lock().unwrap_or_else(|e| e.into_inner());
     install(&load_texts(&b.dir, &disabled_lists(app)));
 }
 

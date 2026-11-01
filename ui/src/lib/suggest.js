@@ -16,6 +16,8 @@ export function createSuggest({ anchor = () => ({ x: 0, y: 0, w: 0 }), palette =
     seq++;
     clearTimeout(timer);
     rows = [];
+    sel = -1;
+    typed = '';
     call('suggest_hide');
   }
 

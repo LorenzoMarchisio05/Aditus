@@ -14,6 +14,7 @@
       offs.push(await onState((s) => { url = s.tabs.find((t) => t.id === s.active)?.url ?? ''; applyTheme(s.cfg.settings); }));
       offs.push(
         await on('palette-open', () => {
+          sg.hide();
           text = url;
           input.focus();
           input.select();
@@ -27,11 +28,12 @@
 
   function submit(e) {
     e.preventDefault();
+    sg.hide();
     call('address', { input: text });
     call('hide_palette');
   }
   // delayed so a press on a suggestion lands before the palette closes
-  const close = () => setTimeout(() => call('hide_palette'), 150);
+  const close = () => setTimeout(() => { sg.hide(); call('hide_palette'); }, 150);
 </script>
 
 <form onsubmit={submit}>

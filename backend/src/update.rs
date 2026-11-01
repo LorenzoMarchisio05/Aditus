@@ -95,6 +95,10 @@ fn run(cmd: &mut Command) -> Result<String, String> {
     }
 }
 
+fn bundle_version(app: &Path) -> Result<String, String> {
+    run(Command::new("/usr/libexec/PlistBuddy").args(["-c", "Print :CFBundleShortVersionString"]).arg(app.join("Contents/Info.plist")))
+}
+
 fn bundle_id(app: &Path) -> Result<String, String> {
     run(Command::new("/usr/libexec/PlistBuddy").args(["-c", "Print :CFBundleIdentifier"]).arg(app.join("Contents/Info.plist")))
 }
@@ -152,6 +156,11 @@ fn install_inner() -> Result<(), String> {
     run(Command::new("codesign").args(["--verify", "--deep", "--strict"]).arg(&new)).map_err(|e| format!("Bad signature: {e}"))?;
     if bundle_id(&new)? != bundle_id(&cur)? {
         return Err("Downloaded app has a different identity".into());
+    }
+    // The signed zip must really hold the release it was published as, and never an older build (rollback).
+    let ver = bundle_version(&new)?;
+    if ver != r.tag || !is_newer(&ver, env!("CARGO_PKG_VERSION")) {
+        return Err(format!("Downloaded app is version {ver}, expected {}", r.tag));
     }
     // A Developer-ID-signed install only accepts updates from the same team, so a forged release can't swap in
     // another signer. Ad-hoc builds have no Team ID to pin (the bundle id above is all they can check).

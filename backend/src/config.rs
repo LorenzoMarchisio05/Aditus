@@ -188,7 +188,11 @@ pub static BACKED_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 
 impl Config {
     pub fn load(path: &Path) -> Self {
-        let Ok(s) = std::fs::read_to_string(path) else { return Self::default() };
+        let s = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Self::default(),
+            Err(_) => String::new(), // unreadable (bad UTF-8, permissions): take the backup path below
+        };
         match toml::from_str(&s).ok().filter(|c: &Config| !c.profiles.is_empty()) {
             Some(mut c) => {
                 c.sanitize();

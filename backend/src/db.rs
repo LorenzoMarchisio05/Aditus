@@ -43,8 +43,13 @@ impl Db {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        Self::init(Connection::open(path)?).or_else(|_| {
-            // Corrupt or unopenable: move it aside (history is lost, the browser still launches).
+        Self::init(Connection::open(path)?).or_else(|e| {
+            // Only a corrupt file is moved aside; a busy/locked one belongs to another process.
+            use rusqlite::ErrorCode::{DatabaseCorrupt, NotADatabase};
+            if !matches!(&e, rusqlite::Error::SqliteFailure(f, _) if matches!(f.code, NotADatabase | DatabaseCorrupt)) {
+                return Err(e);
+            }
+            // Corrupt: move it aside (history is lost, the browser still launches).
             let _ = std::fs::rename(path, path.with_extension("db.bak"));
             let _ = std::fs::remove_file(path.with_extension("db-wal"));
             let _ = std::fs::remove_file(path.with_extension("db-shm"));
@@ -107,13 +112,14 @@ impl Db {
         if c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? >= 3 {
             return Ok(());
         }
-        c.execute_batch("BEGIN")?;
+        let tx = c.unchecked_transaction()?; // dropped on error: rolls back
         for (name, id) in profiles {
             for t in ["history", "bookmarks"] {
-                c.execute(&format!("UPDATE {t} SET profile=?2 WHERE profile=?1"), params![name, id])?;
+                tx.execute(&format!("UPDATE {t} SET profile=?2 WHERE profile=?1"), params![name, id])?;
             }
         }
-        c.execute_batch("PRAGMA user_version=3; COMMIT")
+        tx.execute_batch("PRAGMA user_version=3")?;
+        tx.commit()
     }
 
     pub fn add_visit(&self, url: &str, title: &str, profile: &str) {
@@ -153,6 +159,28 @@ impl Db {
             "db add_bookmark",
             self.0.lock().unwrap().execute("INSERT OR REPLACE INTO bookmarks(url,title,profile,added_at) VALUES(?1,?2,?3,strftime('%s','now'))", params![url, title, profile]),
         );
+    }
+
+    /// Bulk insert for imports, one transaction; bookmarks already saved are kept as they are.
+    pub fn import_bookmarks(&self, rows: &[(String, String)], profile: &str) {
+        self.bump();
+        let mut c = self.0.lock().unwrap();
+        let Ok(tx) = c.transaction() else { return };
+        for (u, t) in rows {
+            let _ = tx.execute("INSERT OR IGNORE INTO bookmarks(url,title,profile,added_at) VALUES(?1,?2,?3,strftime('%s','now'))", params![u, t, profile]);
+        }
+        let _ = crate::applog::check("db import_bookmarks", tx.commit());
+    }
+
+    /// A deleted profile's history, bookmarks and login index.
+    pub fn delete_profile_data(&self, profile: &str) {
+        self.bump();
+        let mut c = self.0.lock().unwrap();
+        let Ok(tx) = c.transaction() else { return };
+        for t in ["history", "bookmarks", "logins"] {
+            let _ = tx.execute(&format!("DELETE FROM {t} WHERE profile=?1"), params![profile]);
+        }
+        let _ = crate::applog::check("db delete_profile_data", tx.commit());
     }
 
     pub fn remove_bookmark(&self, url: &str) {

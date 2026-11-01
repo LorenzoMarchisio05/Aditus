@@ -13,7 +13,12 @@ let mouse = [0, 0];
 addEventListener('mousedown', (e) => (mouse = [e.clientX, e.clientY]), true);
 addEventListener('contextmenu', (e) => (mouse = [e.clientX, e.clientY]), true);
 const AT = new Set(['tab_menu', 'profile_menu']);
-export const call = (cmd, args) => send(cmd, AT.has(cmd) ? { ...args, _x: mouse[0], _y: mouse[1] } : args);
+// Callers that don't await/catch still get failures logged (the original promise is returned untouched).
+export const call = (cmd, args) => {
+  const p = send(cmd, AT.has(cmd) ? { ...args, _x: mouse[0], _y: mouse[1] } : args);
+  p.catch((e) => console.error(`[aditus] ${cmd} failed:`, e));
+  return p;
+};
 
 const listeners = new Map();
 window.__aditus_emit = (ev, payload) => listeners.get(ev)?.forEach((fn) => fn(payload));
@@ -31,7 +36,7 @@ const push = (s) => ((cur = s), subs.forEach((fn) => fn(s)));
 on('state', (s) => s.win === WIN && push(s));
 on('state-delta', (d) => {
   if (d.win !== WIN) return;
-  if (!cur || d.seq !== cur.seq + 1) return send('get_state');
+  if (!cur || d.seq !== cur.seq + 1) return send('get_state').catch(console.error);
   const by = new Map(d.tabs.map((t) => [t.id, t]));
   push({ ...cur, seq: d.seq, tabs: cur.tabs.map((t) => (by.has(t.id) ? { ...t, ...by.get(t.id) } : t)) });
 });
