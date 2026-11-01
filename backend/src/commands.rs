@@ -687,8 +687,34 @@ fn search_suggest(on: bool, template: &str, private: bool, q: &str) -> Vec<Strin
 /// Files that run code when opened: installers, scripts, app bundles, or anything with an exec bit.
 fn is_risky_download(path: &str, mode: Option<u32>) -> bool {
     const RISKY: &[&str] = &[
-        "app", "dmg", "pkg", "command", "sh", "jar", "scpt", "terminal", "mobileconfig", "mpkg", "workflow", "action", "wflow", "applescript", "scptd", "zsh", "bash", "py", "pl", "rb", "iso", "img",
-        "sparseimage", "webloc", "inetloc", "term", "tool", "shortcut",
+        "app",
+        "dmg",
+        "pkg",
+        "command",
+        "sh",
+        "jar",
+        "scpt",
+        "terminal",
+        "mobileconfig",
+        "mpkg",
+        "workflow",
+        "action",
+        "wflow",
+        "applescript",
+        "scptd",
+        "zsh",
+        "bash",
+        "py",
+        "pl",
+        "rb",
+        "iso",
+        "img",
+        "sparseimage",
+        "webloc",
+        "inetloc",
+        "term",
+        "tool",
+        "shortcut",
     ];
     let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
     RISKY.contains(&ext.as_str()) || mode.is_some_and(|m| m & 0o111 != 0)

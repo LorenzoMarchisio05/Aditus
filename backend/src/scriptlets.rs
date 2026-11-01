@@ -96,9 +96,7 @@ mod tests {
     #[test]
     fn traps_under_one_root_both_apply() {
         let lib = super::LIB.iter().find(|(n, _)| *n == "aditus-trap.fn").unwrap().1;
-        let js = format!(
-            "globalThis.window=globalThis;{lib}aditusTrap('r.a',()=>1,v=>v);aditusTrap('r.b',()=>2,v=>v);r={{a:0,b:0}};if(r.a!==1||r.b!==2)throw new Error(r.a+','+r.b)"
-        );
+        let js = format!("globalThis.window=globalThis;{lib}aditusTrap('r.a',()=>1,v=>v);aditusTrap('r.b',()=>2,v=>v);r={{a:0,b:0}};if(r.a!==1||r.b!==2)throw new Error(r.a+','+r.b)");
         match std::process::Command::new("node").args(["-e", &js]).output() {
             Ok(o) => assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr)),
             Err(_) => eprintln!("node missing, skipped"),
