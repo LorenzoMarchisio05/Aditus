@@ -8,6 +8,7 @@
   ];
   import { onMount } from 'svelte';
   import Mascot from './Mascot.svelte';
+  import { forVersion, parse } from './lib/notes.js';
   import { call, on, onState, color, applyTheme, setProfileColors, ACCENT_NAMES } from './lib/api.js';
 
   let { view } = $props();
@@ -80,11 +81,15 @@
   const SHORTCUTS = [['New tab', '⌘T'], ['New window', '⌘N'], ['Close tab', '⌘W'], ['Reopen closed tab', '⇧⌘T'], ['Open location', '⌘L'], ['Find in page', '⌘F'], ['Search tabs', '⇧⌘A'], ['Reload', '⌘R'], ['Back / forward', '⌘[ / ⌘]'], ['Toggle sidebar', '⌘\\'], ['Toggle top bar', '⇧⌘L'], ['Developer tools', '⌥⌘I'], ['Bookmark page', '⌘D'], ['Bookmarks', '⌥⌘B'], ['History', '⌘Y'], ['Downloads', '⇧⌘J'], ['Settings', '⌘,']];
   const newtab = $derived(view === 'newtab');
   $effect(() => {
-    if (!newtab) document.title = { history: 'History', downloads: 'Downloads', bookmarks: 'Bookmarks', settings: 'Settings' }[view] ?? 'Aditus';
+    if (!newtab) document.title = { history: 'History', downloads: 'Downloads', bookmarks: 'Bookmarks', settings: 'Settings', whatsnew: "What's new" }[view] ?? 'Aditus';
   });
   const closeTab = () => call('close_tab', { id: st.active });
   const library = $derived(view === 'history' || view === 'downloads');
   const bookmarksView = $derived(view === 'bookmarks');
+  const whatsnew = $derived(view === 'whatsnew');
+  const LABEL = { new: 'New', improved: 'Improved', fix: 'Fix' };
+  const nowNotes = forVersion(__APP_VERSION__);
+  const nextNotes = $derived(upd && upd !== 'checking' && upd.newer ? parse(upd.notes) : []);
   let marks = $state([]);
   let reqSeq = 0; // drop replies that arrive after a newer query
   async function loadMarks() {
@@ -113,6 +118,8 @@
         })
       );
       offs.push(await on('downloads-changed', loadDownloads));
+      // The new-tab page is hidden and reused, not rebuilt: reload what it shows when it comes back.
+      if (newtab) offs.push(await on('panel-open', () => { now = new Date(); q = ''; loadHistory(); loadDownloads(); loadMarks(); }));
       call('get_state'); // after listeners exist, or the reply is lost
     })();
     if (bookmarksView) loadMarks();
@@ -130,6 +137,7 @@
 
   $effect(() => {
     if (view === 'settings') call('adblock_info').then((i) => (ab = i));
+    if (view === 'whatsnew') call('check_update').then((u) => (upd = u)).catch(() => {});
   });
   let updMsg = $state('');
   async function installUpdate() {
@@ -237,16 +245,47 @@
   );
   // New-tab tiles are the bookmarks.
   const topSites = $derived(marks.map((m) => ({ host: host(m.url).replace(/^www\./, ''), url: m.url, profile: m.profile })));
-  const now = new Date();
-  const greeting = now.getHours() < 5 ? 'Still up' : now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
-  const today = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  let now = $state(new Date()); // refreshed each time the kept-alive new-tab page is shown
+  const greeting = $derived(now.getHours() < 5 ? 'Still up' : now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening');
+  const today = $derived(now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }));
   const count = (name) => st.tabs.filter((t) => t.profile === name).length;
   const sites = (name) => st.cfg.mappings.filter((m) => m.profile === name).length;
 </script>
 
 <div class="panel">
   {#if st}<Mascot incognito={st.incognito} roam={newtab || view === 'settings' || view === 'history'} side={view === 'settings'} tabs={st.tabs} />{/if}
-  {#if bookmarksView}
+  {#snippet noteList(items)}
+    <ul class="notes">
+      {#each items as n}
+        <li><span class="tag {n.kind}">{LABEL[n.kind]}</span><span>{n.text}</span></li>
+      {/each}
+    </ul>
+  {/snippet}
+  {#if whatsnew}
+    <div class="lib" style="grid-template-columns: minmax(0, 1fr)">
+      <section class="hist wn">
+        <header>
+          <h1>What's new</h1>
+          <span class="grow"></span>
+          <button class="x" onclick={closeTab} aria-label="Close">✕</button>
+        </header>
+        <div class="list">
+          {#if nextNotes.length}
+            <div class="release next">
+              <div class="rhead"><b>Aditus {upd.latest}</b><span class="chip">Available</span></div>
+              {@render noteList(nextNotes)}
+              {#if upd.can_install}<button class="solid" onclick={installUpdate} disabled={updMsg === 'Downloading…'}>Install and restart</button>{/if}
+              {#if updMsg}<p class="meta">{updMsg}</p>{/if}
+            </div>
+          {/if}
+          <div class="release">
+            <div class="rhead"><b>Aditus {__APP_VERSION__}</b><span class="chip">Installed</span></div>
+            {#if nowNotes.length}{@render noteList(nowNotes)}{:else}<p class="meta">No notes for this version.</p>{/if}
+          </div>
+        </div>
+      </section>
+    </div>
+  {:else if bookmarksView}
     <div class="lib" style="grid-template-columns: minmax(0, 1fr)">
       <section class="hist">
         <header>
@@ -732,6 +771,19 @@
   .chips button.on { background: var(--accent); border-color: var(--accent); color: #111114; font-weight: 600; }
   .chips i, .who i { width: 8px; height: 8px; border-radius: 50%; display: block; }
   .list { flex: 1; overflow-y: auto; }
+  .wn .list { display: flex; flex-direction: column; gap: 18px; max-width: 720px; }
+  .release { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+  .release.next { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
+  .rhead { display: flex; align-items: center; gap: 12px; }
+  .rhead b { font: 800 22px 'Bricolage Grotesque Variable', system-ui, sans-serif; letter-spacing: -.02em; }
+  .chip { font: 500 10.5px ui-monospace, 'SF Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); border: 1px solid var(--line); border-radius: 99px; padding: 3px 9px; }
+  .next .chip { color: #111114; background: var(--accent); border-color: var(--accent); }
+  ul.notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; width: 100%; }
+  ul.notes li { display: flex; align-items: baseline; gap: 12px; line-height: 1.45; font-size: 14px; user-select: text; -webkit-user-select: text; }
+  .tag { flex: none; width: 74px; text-align: center; font: 600 10.5px ui-monospace, 'SF Mono', monospace; letter-spacing: .08em; text-transform: uppercase; border-radius: 6px; padding: 3px 0; }
+  .tag.new { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  .tag.improved { color: #6ea8ff; background: color-mix(in srgb, #6ea8ff 16%, transparent); }
+  .tag.fix { color: #5fd38d; background: color-mix(in srgb, #5fd38d 16%, transparent); }
   .day { padding: 16px 0 8px; color: var(--dim); font: 500 10.5px ui-monospace, 'SF Mono', monospace; letter-spacing: .1em; text-transform: uppercase; }
   .hrow { display: flex; align-items: center; gap: 14px; width: 100%; height: 52px; border-radius: 0; border-bottom: 1px solid var(--line); text-align: left; padding: 0 6px; }
   .hrow:hover { background: var(--bg2); }

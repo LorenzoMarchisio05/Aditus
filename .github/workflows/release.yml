@@ -82,8 +82,14 @@ jobs:
           "$(brew --prefix openssl@3)/bin/openssl" pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/update.pem" -in "$RUNNER_TEMP/sha.txt" -out "$ASSET.sig"
           rm -f "$RUNNER_TEMP/update.pem"
           [ "$(wc -c < "$ASSET.sig")" -eq 64 ]
+      # Release body = this version's CHANGELOG.md section; the app shows it. No section, no release.
+      - name: Release notes
+        run: |
+          awk -v v="${GITHUB_REF_NAME#v}" '/^## /{p=($2==v);next} p' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          [ -n "$(tr -d '[:space:]' < "$RUNNER_TEMP/notes.md")" ] || { echo "::error::CHANGELOG.md has no section for ${GITHUB_REF_NAME#v}"; exit 1; }
       - uses: softprops/action-gh-release@v2
         with:
+          body_path: ${{ runner.temp }}/notes.md
           # Published, not a draft: the in-app updater only sees published releases.
           draft: false
           files: |

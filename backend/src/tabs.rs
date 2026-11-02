@@ -776,6 +776,7 @@ pub fn apply_layout(app: &AppHandle) {
             engine::set_bounds(&l, engine::dock_split(&win, &l, area));
         }
         engine::set_bounds(&wv_label("panel", &win), area);
+        crate::commands::notify_place(&win);
         engine::place_window_buttons(&win);
     }
 }
@@ -1595,7 +1596,11 @@ pub fn activate(app: &AppHandle, id: u32) {
     let (need_build, gen, win) = {
         let mut g = shared(app).lock_app();
         let Some(win) = g.tabs.iter().find(|t| t.id == id).map(|t| t.win.clone()) else { return };
-        g.win(&win).active = id;
+        // The idle clock runs from the moment a tab is left, not from when it was opened.
+        let prev = std::mem::replace(&mut g.win(&win).active, id);
+        if let Some(p) = g.tab(prev) {
+            p.last_active = Instant::now();
+        }
         let Some(t) = g.tab(id) else { return };
         t.last_active = Instant::now();
         // A sleeping tab that has an opener is a popup placeholder: CEF builds its view, never us.

@@ -2,7 +2,8 @@
   // A site on a real host is remembered (mapping); blank tabs just switch.
   const setProfile = (t, profile) => (t.host ? call('assign_mapping', { host: t.host, profile }) : call('switch_profile', { profile }));
   import { onMount, tick } from 'svelte';
-  import { call, on, onState, color, applyTheme, setProfileColors } from './lib/api.js';
+  import { call, on, onState, color, applyTheme, setProfileColors, WIN } from './lib/api.js';
+  import { forVersion } from './lib/notes.js';
   import { createSuggest } from './lib/suggest.js';
   import Mascot from './Mascot.svelte';
 
@@ -11,10 +12,7 @@
   const FIND = 40;
 
   let st = $state({ tabs: [], active: 0, cfg: null, prompt: null, toast: null, adblock_site: true });
-  let netUser = $state('');
-  let netPass = $state('');
   let width = $state(250);
-  let newer = $state(null); // { latest, url } when a release is available
   let resizing = false;
   let urlText = $state('');
   let pillEl;
@@ -78,8 +76,6 @@
   const tipTab = $derived(tip && st?.tabs.find((t) => t.id === tip.id));
   const mem = (mb) => (mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb + ' MB');
   let addrEl, findEl;
-  let toastTimer;
-  let offer = $state(null);
 
   const cfg = $derived(st.cfg);
   const collapsed = $derived(cfg?.settings.sidebar_collapsed ?? false);
@@ -153,11 +149,6 @@
     if (!editing) urlText = tab?.url ?? '';
   });
 
-  $effect(() => {
-    clearTimeout(toastTimer);
-    if (st.toast) toastTimer = setTimeout(() => call('dismiss_toast'), 7000);
-  });
-
   function settings(patch) {
     call('save_settings', { settings: { ...cfg.settings, ...patch } });
   }
@@ -200,31 +191,21 @@
     call('find_clear');
   }
 
+  // After an update, show the new version's notes once. A fresh install (nothing recorded yet) just records.
+  let seenChecked = false;
   $effect(() => {
-    if (!cfg?.settings.auto_update) return;
-    const look = () => call('check_update').then((u) => { if (u?.newer) newer = u; }).catch(() => {});
-    look();
-    const id = setInterval(look, 6 * 3600 * 1000); // long-running sessions still hear about releases
-    return () => clearInterval(id);
+    if (seenChecked || WIN !== 'main') return;
+    seenChecked = true;
+    const s = cfg.settings;
+    if (s.last_seen_version === __APP_VERSION__) return;
+    if (s.last_seen_version && forVersion(__APP_VERSION__).length) call('show_panel', { view: 'whatsnew' });
+    call('save_settings', { settings: { ...s, last_seen_version: __APP_VERSION__ } });
   });
-  let updating = $state('');
-  async function installUpdate() {
-    updating = 'Downloading…';
-    try {
-      await call('install_update');
-      updating = 'Restarting…';
-    } catch (e) {
-      updating = '';
-      call('new_tab', { url: newer.url }); // fall back to the release page
-      newer = null;
-    }
-  }
-
   onMount(() => {
+    call('notify_init'); // the notification overlay lives bottom-right over the page, not in this sidebar
     const offs = [];
     (async () => {
       offs.push(await onState((s) => { setProfileColors(s.cfg.profiles); st = s; }));
-      offs.push(await on('login-offer', (o) => (offer = o)));
       offs.push(await on('page-pointer', (p) => (p.c ? poke++ : (look = [p.x, p.y]))));
       offs.push(
         await on('menu', (id) => {
@@ -442,52 +423,6 @@
     </form>
   {/if}
 
-  {#if newer && !collapsed}
-    <div class="card toast">
-      <span>Aditus {newer.latest} is out</span>
-      {#if updating}<small>{updating}</small>
-      {:else if newer.can_install}<button onclick={installUpdate}>Install and restart</button>
-      {:else}<button onclick={() => { call('new_tab', { url: newer.url }); newer = null; }}>Get</button>{/if}
-    </div>
-  {/if}
-
-  {#if st.perm && !collapsed}
-    <div class="card perm">
-      <span><b>{st.perm[0]}</b> wants to use your {st.perm[1]}</span>
-      <div class="row2"><button onclick={() => call('answer_permission', { allow: false })}>Block</button><button class="ok" onclick={() => call('answer_permission', { allow: true })}>Allow</button></div>
-    </div>
-  {/if}
-
-  {#if st.net && !collapsed}
-    {#key st.net.id}
-      <form class="card perm" onsubmit={(e) => { e.preventDefault(); call('answer_net', { id: st.net.id, allow: true, user: netUser, pass: netPass }); netUser = netPass = ''; }}>
-        {#if st.net.cert}
-          <span><b>{st.net.host}</b> is not secure: {st.net.detail}. Proceeding may expose your data. Allowed until you quit.</span>
-          <div class="row2"><button type="button" class="ok" onclick={() => call('answer_net', { id: st.net.id, allow: false })}>Go back</button><button type="button" onclick={() => call('answer_net', { id: st.net.id, allow: true })}>Proceed anyway</button></div>
-        {:else}
-          <span><b>{st.net.host}</b> asks you to sign in{st.net.detail ? ` (${st.net.detail})` : ''}</span>
-          <input placeholder="Username" autocomplete="off" bind:value={netUser} />
-          <input type="password" placeholder="Password" autocomplete="off" bind:value={netPass} />
-          <div class="row2"><button type="button" onclick={() => { call('answer_net', { id: st.net.id, allow: false }); netUser = netPass = ''; }}>Cancel</button><button class="ok" type="submit">Sign in</button></div>
-        {/if}
-      </form>
-    {/key}
-  {/if}
-
-  {#if offer && !collapsed}
-    <div class="card perm">
-      <span>Save password for <b>{offer.username || 'this login'}</b> on <b>{offer.origin.replace(/^https?:\/\//, '')}</b>?</span>
-      <div class="row2"><button onclick={() => { call('login_dismiss', { label: offer.label }); offer = null; }}>Not now</button><button class="ok" onclick={() => { call('login_save', { label: offer.label }).catch(() => {}); offer = null; }}>Save</button></div>
-    </div>
-  {/if}
-
-  {#if st.toast && !collapsed}
-    <div class="card toast">
-      <span>{st.toast.message}</span>
-      {#if st.toast.undo}<button onclick={() => call('undo_swap')}>Undo</button>{/if}
-    </div>
-  {/if}
-
   <div class="foot" class:perched>
     {#if !collapsed}
       <button class="newtab" onclick={() => call('new_tab', {})}>
@@ -633,13 +568,6 @@
   .group span { flex: 1; }
   .group em { font-style: normal; }
   .card { margin: 6px 10px; padding: 8px 8px 8px 14px; background: var(--bg3); border-radius: 12px; display: flex; flex-direction: column; gap: 6px; }
-  .card.perm { gap: 10px; }
-  .card.perm span { overflow-wrap: anywhere; }
-  .row2 { display: flex; gap: 8px; justify-content: flex-end; }
-  .row2 button { height: 30px; padding: 0 14px; border-radius: 8px; background: var(--bg3); font-weight: 500; }
-  .row2 .ok { background: var(--accent); color: #111114; font-weight: 600; }
-  .card.toast { flex-direction: row; align-items: center; justify-content: space-between; }
-  .card.toast button { color: var(--accent); font-weight: 600; }
   .foot.perched { margin-top: 28px; } /* room for the mascot that sits on this line, so cards above never hide behind it */
   .foot { display: flex; gap: 6px; padding: 10px 10px 6px; margin: 0 0 0; border-top: 1px solid var(--line); }
   .newtab { flex: 1; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--bg2); border-radius: 10px; font-weight: 500; color: var(--dim); }

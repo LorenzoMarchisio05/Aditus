@@ -18,6 +18,6 @@ export default defineConfig({
   ],
   define: { __APP_VERSION__: JSON.stringify(version) },
   clearScreen: false,
-  server: { port: 1420, strictPort: true },
+  server: { port: 1420, strictPort: true, fs: { allow: ['..'] } }, // CHANGELOG.md lives at the repo root
   build: { target: 'chrome130' },
 });

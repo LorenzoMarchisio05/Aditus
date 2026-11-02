@@ -48,6 +48,7 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
 struct Release {
     tag: String,
     page: String,
+    notes: String,                           // release body: the CHANGELOG.md section, see ui/src/lib/notes.js
     asset: Option<(String, String, String)>, // (download url, sha256 hex, signature url)
 }
 
@@ -66,7 +67,7 @@ fn latest() -> Option<Release> {
         let sha = a["digest"].as_str()?.strip_prefix("sha256:")?;
         Some((url_of(&asset())?.to_string(), sha.to_lowercase(), url_of(&format!("{}.sig", asset()))?.to_string()))
     });
-    Some(Release { tag: v["tag_name"].as_str()?.trim_start_matches('v').into(), page: v["html_url"].as_str()?.into(), asset })
+    Some(Release { tag: v["tag_name"].as_str()?.trim_start_matches('v').into(), page: v["html_url"].as_str()?.into(), notes: v["body"].as_str().unwrap_or_default().into(), asset })
 }
 
 /// The running `.app` bundle, when its parent directory is writable (else we can't swap it).
@@ -80,10 +81,10 @@ fn bundle() -> Option<PathBuf> {
 
 pub fn check() -> Value {
     let current = env!("CARGO_PKG_VERSION");
-    let Some(r) = latest() else { return json!({ "current": current, "latest": null, "url": null, "newer": false, "can_install": false }) };
+    let Some(r) = latest() else { return json!({ "current": current, "latest": null, "url": null, "newer": false, "can_install": false, "notes": "" }) };
     let newer = is_newer(&r.tag, current);
     let can_install = cfg!(target_os = "macos") && newer && r.asset.is_some() && key_is_set(UPDATE_PUBKEY) && bundle().is_some();
-    json!({ "current": current, "latest": r.tag, "url": r.page, "newer": newer, "can_install": can_install })
+    json!({ "current": current, "latest": r.tag, "url": r.page, "newer": newer, "can_install": can_install, "notes": r.notes })
 }
 
 fn run(cmd: &mut Command) -> Result<String, String> {

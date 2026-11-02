@@ -469,17 +469,43 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
         "show_panel" => {
             let view = str_arg(&a, "view");
             if view == "newtab" {
+                // Kept alive and hidden between uses: building a browser view per blank tab flashed the page.
                 let label = tabs::wv_label("panel", win);
-                engine::close(&label);
-                engine::create(overlay(&label, win, &view, tabs::content_rect(&APP, win)));
+                let bounds = tabs::content_rect(&APP, win);
+                if engine::has_view(&label) {
+                    engine::set_bounds(&label, bounds);
+                    engine::set_visible(&label, true);
+                    engine::emit_to(&label, "panel-open", "null");
+                } else {
+                    engine::create(overlay(&label, win, &view, bounds));
+                }
                 engine::focus(&tabs::wv_label("ui", win)); // the address bar takes the keys on a new tab
             } else {
                 tabs::open_internal(&APP, win, &view);
             }
             ok(Value::Null)
         }
+        "notify_init" => {
+            // Built once per window and kept hidden until it reports something to show.
+            let label = tabs::wv_label("notify", win);
+            if !engine::has_view(&label) {
+                engine::create(overlay(&label, win, "notify", (0.0, 0.0, 1.0, 1.0)));
+                engine::set_visible(&label, false);
+            }
+            ok(Value::Null)
+        }
+        "notify_size" => {
+            let h = num(&a, "h");
+            {
+                let mut g = NOTIFY_H.lock().unwrap();
+                g.retain(|(w, _)| w != win);
+                g.push((win.to_string(), h));
+            }
+            notify_place(win);
+            ok(Value::Null)
+        }
         "hide_panel" => {
-            engine::close(&tabs::wv_label("panel", win));
+            engine::set_visible(&tabs::wv_label("panel", win), false);
             ok(Value::Null)
         }
         "profile_menu" => {
@@ -532,7 +558,7 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
                 if passwords::get(passwords::SERVICE, &pid, &origin, &user, first).as_deref() != Some(pw.as_str()) {
                     let ev = json!({"label": ctx.label, "origin": origin, "username": user}).to_string();
                     passwords::offer(&ctx.label, pid, origin, user, pw);
-                    engine::emit_to(&tabs::wv_label("ui", &ctx.win), "login-offer", &ev);
+                    engine::emit_to(&tabs::wv_label("notify", &ctx.win), "login-offer", &ev);
                 }
             }
             ok(Value::Null)
@@ -622,6 +648,26 @@ fn pos_arg(a: &Value, x: f64, y: f64) -> (i32, i32) {
 
 fn overlay(label: &str, win: &str, view: &str, bounds: engine::Bounds) -> Spec {
     Spec { label: label.to_string(), win: win.to_string(), url: view_url(view, win), kind: Kind::Overlay, app_page: true, store: None, bounds, visible: true, zoom: 100, yt: false }
+}
+
+/// Height each window's notification stack asked for (0: nothing to show).
+static NOTIFY_H: Mutex<Vec<(String, f64)>> = Mutex::new(Vec::new());
+
+/// Notifications sit in the bottom-right corner of the page area; also called on every relayout.
+pub fn notify_place(win: &str) {
+    let label = tabs::wv_label("notify", win);
+    if !engine::has_view(&label) {
+        return;
+    }
+    let h = NOTIFY_H.lock().unwrap().iter().find(|(w, _)| w == win).map_or(0.0, |(_, h)| *h);
+    if h <= 0.0 {
+        engine::set_visible(&label, false);
+        return;
+    }
+    let (x, y, cw, ch) = tabs::content_rect(&APP, win);
+    let w = 340.0_f64.min(cw - 24.0).max(1.0);
+    engine::set_bounds(&label, (x + cw - w - 16.0, y + ch - h - 16.0, w, h));
+    engine::set_visible(&label, true);
 }
 
 fn save_settings(settings: Settings) {

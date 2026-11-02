@@ -62,6 +62,9 @@ pub struct Settings {
     pub links_background: bool,
     #[serde(default = "yes")]
     pub auto_update: bool,
+    /// Version whose "What's new" page was last shown; empty on a fresh install.
+    #[serde(default)]
+    pub last_seen_version: String,
     /// Ask the search engine for suggestions while typing in the address bar (not in private windows).
     #[serde(default)]
     pub search_suggestions: bool,
@@ -129,6 +132,7 @@ impl Default for Settings {
             compact_tabs: false,
             links_background: false,
             auto_update: true,
+            last_seen_version: String::new(),
             search_suggestions: false,
             page_zoom: default_zoom(),
         }

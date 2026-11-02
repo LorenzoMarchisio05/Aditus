@@ -96,6 +96,12 @@ Rust, CEF 156 via `cef-rs` (Views framework), Svelte 5, SQLite for history and d
 - Extensions: updates need a restart, no tab-aware popups, shared across profiles (Chromium loads them once per process; per-profile isolation would need a separate engine context per profile, not done).
 - Release builds are signed and notarized only when signing secrets are set in CI; otherwise unsigned (right-click → Open).
 
+## Releasing
+
+1. Bump `version` in `backend/Cargo.toml` (the tag must match; the workflow checks).
+2. Add a `## <version>` section to `CHANGELOG.md` with `**New**` / `**Improved**` / `**Fix**` bullets. Required: the release workflow fails without it, and the app shows these notes (in the update toast and on first launch after updating).
+3. Run `cargo fmt` in `backend/` (the workflow runs `cargo fmt --check`), commit, then tag `v<version>` and push the tag.
+
 ## Release signing
 
 The in-app updater only installs a release zip whose detached ed25519 signature (`<zip>.sig`, over the zip's sha256 hex) verifies against `UPDATE_PUBKEY` in `backend/src/update.rs`. The shipped value is a placeholder, so installing updates is refused until you set it:
