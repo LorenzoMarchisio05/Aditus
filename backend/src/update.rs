@@ -48,8 +48,8 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
 struct Release {
     tag: String,
     page: String,
-    notes: String,                           // release body: the CHANGELOG.md section, see ui/src/lib/notes.js
-    asset: Option<(String, String, String)>, // (download url, sha256 hex, signature url)
+    notes: String,                                   // release body: the CHANGELOG.md section, see ui/src/lib/notes.js
+    asset: Option<(String, Option<String>, String)>, // (download url, API sha256 hex if known, signature url)
 }
 
 /// Debug builds only: ADITUS_UPDATE_API points the check at a local fake release (see scripts/update-e2e.sh).
@@ -57,7 +57,32 @@ fn api_url() -> String {
     std::env::var("ADITUS_UPDATE_API").ok().filter(|_| cfg!(debug_assertions)).unwrap_or_else(|| format!("https://api.github.com/repos/{REPO}/releases/latest"))
 }
 
+/// The API allows 60 unauthenticated calls an hour per IP and answers 403 beyond that. Then ask the public
+/// pages instead: the `releases/latest` redirect names the tag, the asset URLs follow from it, and the notes come
+/// from CHANGELOG.md at that tag. The download is still verified by its ed25519 signature, so nothing is trusted here.
+fn latest_web() -> Option<Release> {
+    let agent = ureq::AgentBuilder::new().redirects(0).build();
+    let page = format!("https://github.com/{REPO}/releases/latest");
+    let loc = agent.get(&page).set("User-Agent", "aditus").timeout(Duration::from_secs(10)).call().ok()?.header("location")?.to_string();
+    let tag = loc.rsplit_once("/tag/")?.1.trim_start_matches('v').to_string();
+    let dl = |name: &str| format!("https://github.com/{REPO}/releases/download/v{tag}/{name}");
+    let notes = ureq::get(&format!("https://raw.githubusercontent.com/{REPO}/v{tag}/CHANGELOG.md"))
+        .set("User-Agent", "aditus")
+        .timeout(Duration::from_secs(10))
+        .call()
+        .ok()
+        .and_then(|r| r.into_string().ok())
+        .and_then(|md| md.split("\n## ").find(|sec| sec.lines().next().is_some_and(|h| h.trim().trim_start_matches("## ") == tag)).map(|sec| sec.lines().skip(1).collect::<Vec<_>>().join("\n")))
+        .unwrap_or_default();
+    Some(Release { page: format!("https://github.com/{REPO}/releases/tag/v{tag}"), notes, asset: Some((dl(&asset()), None, dl(&format!("{}.sig", asset())))), tag })
+}
+
 fn latest() -> Option<Release> {
+    let overridden = cfg!(debug_assertions) && std::env::var_os("ADITUS_UPDATE_API").is_some();
+    latest_api().or_else(|| if overridden { None } else { latest_web() })
+}
+
+fn latest_api() -> Option<Release> {
     let body = ureq::get(&api_url()).set("User-Agent", "aditus").timeout(Duration::from_secs(10)).call().ok()?.into_string().ok()?;
     let v: Value = serde_json::from_str(&body).ok()?;
     let ok = |url: &str| url.starts_with(&format!("https://github.com/{REPO}/releases/download/")) || (cfg!(debug_assertions) && std::env::var_os("ADITUS_UPDATE_API").is_some());
@@ -65,7 +90,7 @@ fn latest() -> Option<Release> {
     let url_of = |name: &str| assets.iter().find(|a| a["name"] == name).and_then(|a| a["browser_download_url"].as_str()).filter(|u| ok(u));
     let asset = assets.iter().find(|a| a["name"] == asset().as_str()).and_then(|a| {
         let sha = a["digest"].as_str()?.strip_prefix("sha256:")?;
-        Some((url_of(&asset())?.to_string(), sha.to_lowercase(), url_of(&format!("{}.sig", asset()))?.to_string()))
+        Some((url_of(&asset())?.to_string(), Some(sha.to_lowercase()), url_of(&format!("{}.sig", asset()))?.to_string()))
     });
     Some(Release { tag: v["tag_name"].as_str()?.trim_start_matches('v').into(), page: v["html_url"].as_str()?.into(), notes: v["body"].as_str().unwrap_or_default().into(), asset })
 }
@@ -139,13 +164,13 @@ fn install_inner() -> Result<(), String> {
     let res = ureq::get(&url).set("User-Agent", "aditus").timeout(Duration::from_secs(900)).call().map_err(|e| e.to_string())?;
     std::io::copy(&mut res.into_reader(), &mut std::fs::File::create(&zip).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
 
-    let got = run(Command::new("shasum").args(["-a", "256"]).arg(&zip))?;
-    if got.split_whitespace().next() != Some(sha.as_str()) {
+    let got = run(Command::new("shasum").args(["-a", "256"]).arg(&zip))?.split_whitespace().next().unwrap_or_default().to_string();
+    if sha.as_ref().is_some_and(|s| *s != got) {
         return Err("Download doesn't match the published checksum".into());
     }
     let mut sig = Vec::new();
     ureq::get(&sig_url).set("User-Agent", "aditus").timeout(Duration::from_secs(30)).call().map_err(|e| e.to_string())?.into_reader().take(1024).read_to_end(&mut sig).map_err(|e| e.to_string())?;
-    if !verify_sig(UPDATE_PUBKEY, &sha, &sig) {
+    if !verify_sig(UPDATE_PUBKEY, &got, &sig) {
         return Err("Release signature is missing or invalid".into());
     }
     let stage = dir.join("new");
@@ -186,6 +211,16 @@ rm -rf "$2.old"; mv "$2" "$2.old" && mv "$3" "$2" && { rm -rf "$2.old" "$4"; ope
 
 #[cfg(test)]
 mod tests {
+    /// Network: the rate-limit fallback finds the published release.
+    #[test]
+    #[ignore]
+    fn web_fallback() {
+        let r = super::latest_web().expect("release found");
+        assert!(super::is_newer(&r.tag, "0.0.1"));
+        assert!(r.asset.is_some_and(|(u, sha, _)| u.contains(&r.tag) && sha.is_none()));
+        assert!(r.notes.contains("**"), "notes: {:?}", r.notes);
+    }
+
     #[test]
     fn signatures() {
         use base64::{engine::general_purpose::STANDARD, Engine};

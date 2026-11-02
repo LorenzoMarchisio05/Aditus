@@ -18,8 +18,10 @@
     if (st?.toast) toastTimer = setTimeout(() => call('dismiss_toast'), 7000);
   });
 
+  // A primitive: the effect re-runs only when the setting flips, not on every state broadcast.
+  const autoUpdate = $derived(!!st?.cfg.settings.auto_update);
   $effect(() => {
-    if (!st?.cfg.settings.auto_update) return;
+    if (!autoUpdate) return;
     const look = () => call('check_update').then((u) => { if (u?.newer) newer = u; }).catch(() => {});
     look();
     const id = setInterval(look, 6 * 3600 * 1000); // long-running sessions still hear about releases

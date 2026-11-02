@@ -3,6 +3,9 @@
 One section per release, newest first. Each bullet starts with a bold tag: **New**, **Improved** or **Fix**.
 The release workflow publishes the matching section as the GitHub release notes, and the app shows it.
 
+## 0.1.12
+- **Fix** Update checks no longer hammer GitHub, and still find new releases when GitHub's API rate limit is hit.
+
 ## 0.1.11
 - **New** Release notes: a "What's new" page shows up after an update, and from the update notification.
 - **Improved** Notifications (updates, permissions, sign-in, save password, undo) now appear bottom-right over the page, so they no longer cover the mascot.
