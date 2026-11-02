@@ -39,7 +39,7 @@ dependencies = [
 
 [[package]]
 name = "aditus"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "adblock",
  "arboard",

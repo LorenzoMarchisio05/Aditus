@@ -194,9 +194,9 @@
   // After an update, show the new version's notes once. A fresh install (nothing recorded yet) just records.
   let seenChecked = false;
   $effect(() => {
-    if (seenChecked || WIN !== 'main') return;
+    const s = cfg?.settings; // null until the first state arrives
+    if (!s || seenChecked || WIN !== 'main') return;
     seenChecked = true;
-    const s = cfg.settings;
     if (s.last_seen_version === __APP_VERSION__) return;
     if (s.last_seen_version && forVersion(__APP_VERSION__).length) call('show_panel', { view: 'whatsnew' });
     call('save_settings', { settings: { ...s, last_seen_version: __APP_VERSION__ } });

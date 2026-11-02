@@ -41,6 +41,8 @@ async function evalIn(t, expression) {
 try {
   const ui = await until(async () => (await targets()).find((t) => t.url.includes('index.html?win=main')));
   check('ui loads', !!ui);
+  // A fresh profile opens one tab; a sidebar that threw during startup shows none.
+  if (ui) check('sidebar shows the first tab', !!(await until(async () => (await evalIn(ui, `document.querySelectorAll('.tab').length`)) >= 1)));
   if (ui) {
     await evalIn(ui, `new Promise((s) => cefQuery({ request: JSON.stringify({ cmd: 'new_tab', args: { url: 'http://127.0.0.1:${webPort}/' } }), onSuccess: s, onFailure: s }))`);
     const page = await until(async () => (await targets()).find((t) => t.url.startsWith(`http://127.0.0.1:${webPort}`) && t.title === 'smoke'));
