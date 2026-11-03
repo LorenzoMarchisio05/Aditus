@@ -3,6 +3,9 @@
 One section per release, newest first. Each bullet starts with a bold tag: **New**, **Improved** or **Fix**.
 The release workflow publishes the matching section as the GitHub release notes, and the app shows it.
 
+## 0.1.16
+- **New** Settings > About has a Release notes button that opens the What's new page.
+
 ## 0.1.15
 - **Improved** The "What's new" page is now a timeline of every release, grouped into New, Improved and Fix.
 

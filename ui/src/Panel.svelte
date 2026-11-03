@@ -733,6 +733,10 @@
               <input type="checkbox" class="sw" checked={st.cfg.settings.auto_update} onchange={(e) => set({ auto_update: e.currentTarget.checked })} />
             </label>
             <div class="item">
+              <span class="grow"><b>Release notes</b><small>What changed in each version.</small></span>
+              <button class="ghost" onclick={() => call('show_panel', { view: 'whatsnew' })}>View</button>
+            </div>
+            <div class="item">
               <span class="grow"><b>Default browser</b><small>Your system decides; this opens its setting.</small></span>
               <button class="ghost" onclick={() => call('default_browser_settings')}>Open settings</button>
             </div>
