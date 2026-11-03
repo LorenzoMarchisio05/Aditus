@@ -361,9 +361,14 @@ wrap_browser_view_delegate! {
     }
 }
 
-fn background(kind: Kind) -> u32 {
-    let _ = kind;
-    0xFF14_1414
+/// The canvas colour shown where a page paints no background. Web pages assume the browser default (white):
+/// a dark canvas under a page that sets only dark text makes it unreadable. Aditus's own pages are dark.
+fn background(kind: Kind, app_page: bool) -> u32 {
+    if kind == Kind::Page && !app_page {
+        0xFFFF_FFFF
+    } else {
+        0xFF14_1414
+    }
 }
 
 /// Creates a page or UI view. The view appears once its context is ready; until then bounds and
@@ -390,7 +395,7 @@ fn build(spec: Spec, ctx: Option<RequestContext>) {
         e.set_bool(Some(&s("page")), (spec.kind == Kind::Page && !spec.app_page) as i32);
         e.set_bool(Some(&s("yt")), spec.yt as i32);
     }
-    let settings = BrowserSettings { background_color: background(spec.kind), ..Default::default() };
+    let settings = BrowserSettings { background_color: background(spec.kind, spec.app_page), ..Default::default() };
     let mut ctx = ctx;
     let mut delegate = PageViewDelegate::new(spec.label.clone(), false);
     let Some(bv) = browser_view_create(Some(&mut client(&spec.label)), Some(&s(&spec.url)), Some(&settings), extra.as_mut(), ctx.as_mut(), Some(&mut delegate)) else {
@@ -1146,7 +1151,7 @@ wrap_window_delegate! {
 pub fn create_window(label: &str, private: bool) -> bool {
     let url = format!("{SCHEME}://{}/index.html?win={label}", scheme::HOST);
     let _ = private;
-    let settings = BrowserSettings { background_color: background(Kind::Ui), ..Default::default() };
+    let settings = BrowserSettings { background_color: background(Kind::Ui, true), ..Default::default() };
     let mut delegate = PageViewDelegate::new(tabs::wv_label("ui", label), false);
     let Some(ui) = browser_view_create(Some(&mut client(&tabs::wv_label("ui", label))), Some(&s(&url)), Some(&settings), None, None, Some(&mut delegate)) else {
         return false;

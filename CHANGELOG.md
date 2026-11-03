@@ -3,6 +3,9 @@
 One section per release, newest first. Each bullet starts with a bold tag: **New**, **Improved** or **Fix**.
 The release workflow publishes the matching section as the GitHub release notes, and the app shows it.
 
+## 0.1.14
+- **Fix** Pages that don't set their own background (parts of Apple's developer site, for example) showed dark text on a black canvas. Web pages now get the usual white.
+
 ## 0.1.13
 - **Fix** The window opened empty, with no tabs, in 0.1.11.
 - **Fix** Update checks no longer hammer GitHub, and still find new releases when GitHub's API rate limit is hit.
