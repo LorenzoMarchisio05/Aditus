@@ -9,3 +9,14 @@ export const parse = (md) =>
   });
 
 export const forVersion = (v) => parse(changelog.split(/^## /m).find((s) => s.split('\n')[0].trim() === v));
+
+const num = (v) => v.split('.').map((n) => parseInt(n, 10) || 0);
+const cmp = (a, b) => { const [x, y] = [num(a), num(b)]; return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; };
+
+// Every released version up to `current`, newest first, as written in CHANGELOG.md.
+export const history = (current) =>
+  changelog
+    .split(/^## /m)
+    .slice(1)
+    .map((s) => ({ version: s.split('\n')[0].trim(), items: parse(s) }))
+    .filter((r) => r.items.length && cmp(r.version, current) <= 0);

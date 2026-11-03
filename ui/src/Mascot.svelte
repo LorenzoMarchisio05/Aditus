@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import { call } from './lib/api.js';
   // side: roam only in a strip on the right (settings page).
-  let { incognito = false, roam = false, side = false, tabs = [], guest = null, ondone, onbeat, perch = null, look = null, pulse = 0, groove = false, watching = null } = $props();
+  let { incognito = false, roam = false, side = false, sideWidth = 360, tabs = [], guest = null, ondone, onbeat, perch = null, look = null, pulse = 0, groove = false, watching = null } = $props();
   // perch: sits on a fixed spot (the sidebar's footer line) while a page is open, watching the pointer over it.
   // guest: a one-off visit at a fixed spot (the sidebar) instead of roaming.
   // Swing wanders the bottom of the browser pages, picking something to do every few seconds.
@@ -218,7 +218,7 @@
 
 <svelte:window onpointermove={track} />
 
-<div class="floor" class:corner={!roam} class:side class:small={!!guest || !!perch} style={guest || perch ? `left:${(guest || perch).x}px; top:${(guest || perch).y}px` : ''} bind:this={floorEl} aria-hidden="true">
+<div class="floor" class:corner={!roam} class:side class:small={!!guest || !!perch} style={guest || perch ? `left:${(guest || perch).x}px; top:${(guest || perch).y}px` : side ? `width:${sideWidth}px` : ''} bind:this={floorEl} aria-hidden="true">
   <div class="walker" class:fade style="left:{x}px; --d:{dur}s">
     {#if said}<span class="say" class:hop={mode === 'jump' || hop || startled}>{said}</span>{/if}
     <button class="mascot m-{mode}" class:perch={!!perch} class:groove class:hop class:startle={startled} bind:this={mascotEl} onclick={poke} tabindex="-1" aria-label="Swing">

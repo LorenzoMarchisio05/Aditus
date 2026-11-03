@@ -3,6 +3,9 @@
 One section per release, newest first. Each bullet starts with a bold tag: **New**, **Improved** or **Fix**.
 The release workflow publishes the matching section as the GitHub release notes, and the app shows it.
 
+## 0.1.15
+- **Improved** The "What's new" page is now a timeline of every release, grouped into New, Improved and Fix.
+
 ## 0.1.14
 - **Fix** Pages that don't set their own background (parts of Apple's developer site, for example) showed dark text on a black canvas. Web pages now get the usual white.
 

@@ -8,7 +8,7 @@
   ];
   import { onMount } from 'svelte';
   import Mascot from './Mascot.svelte';
-  import { forVersion, parse } from './lib/notes.js';
+  import { history, parse } from './lib/notes.js';
   import { call, on, onState, color, applyTheme, setProfileColors, ACCENT_NAMES } from './lib/api.js';
 
   let { view } = $props();
@@ -87,8 +87,17 @@
   const library = $derived(view === 'history' || view === 'downloads');
   const bookmarksView = $derived(view === 'bookmarks');
   const whatsnew = $derived(view === 'whatsnew');
-  const LABEL = { new: 'New', improved: 'Improved', fix: 'Fix' };
-  const nowNotes = forVersion(__APP_VERSION__);
+  let vw = $state(1100);
+  // The mascot stays in the gutter right of the release column (56px page padding + 768px column), never over the cards.
+  const gutter = $derived(Math.min(360, Math.max(110, vw - 56 - 768 - 56 - 18)));
+  const KINDS = [['new', 'New'], ['improved', 'Improved'], ['fix', 'Fix']];
+  const LABEL = Object.fromEntries(KINDS);
+  // Authored 24px stroke icons, one per kind: sparkle, rising arrow, wrench.
+  const ICON = { new: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16v4M17 18h4', improved: 'M7 17L17 7M9 7h8v8', fix: 'M14.7 6.3a4 4 0 0 0-5 5L4 17l3 3 5.7-5.7a4 4 0 0 0 5-5l-2.4 2.4-2.6-.6-.6-2.6z' };
+  const sorted = (items) => KINDS.flatMap(([k]) => items.filter((n) => n.kind === k));
+  const releases = history(__APP_VERSION__);
+  const installed = releases.find((r) => r.version === __APP_VERSION__);
+  const earlier = releases.filter((r) => r !== installed);
   const nextNotes = $derived(upd && upd !== 'checking' && upd.newer ? parse(upd.notes) : []);
   let marks = $state([]);
   let reqSeq = 0; // drop replies that arrive after a newer query
@@ -252,14 +261,16 @@
   const sites = (name) => st.cfg.mappings.filter((m) => m.profile === name).length;
 </script>
 
+<svelte:window bind:innerWidth={vw} />
 <div class="panel">
-  {#if st}<Mascot incognito={st.incognito} roam={newtab || view === 'settings' || view === 'history'} side={view === 'settings'} tabs={st.tabs} />{/if}
-  {#snippet noteList(items)}
-    <ul class="notes">
-      {#each items as n}
-        <li><span class="tag {n.kind}">{LABEL[n.kind]}</span><span>{n.text}</span></li>
-      {/each}
-    </ul>
+  {#if st}<Mascot incognito={st.incognito} roam={newtab || view === 'settings' || view === 'history' || whatsnew} side={view === 'settings' || whatsnew} sideWidth={whatsnew ? gutter : 360} tabs={st.tabs} />{/if}
+  {#snippet rows(items, animate)}
+    {#each sorted(items) as n, i}
+      <div class="note" class:anim={animate} style="--i:{i}">
+        <span class="ntile {n.kind}" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d={ICON[n.kind]} /></svg></span>
+        <span class="txt"><span class="sr">{LABEL[n.kind]}: </span>{n.text}</span>
+      </div>
+    {/each}
   {/snippet}
   {#if whatsnew}
     <div class="lib" style="grid-template-columns: minmax(0, 1fr)">
@@ -270,17 +281,36 @@
           <button class="x" onclick={closeTab} aria-label="Close">✕</button>
         </header>
         <div class="list">
-          {#if nextNotes.length}
-            <div class="release next">
-              <div class="rhead"><b>Aditus {upd.latest}</b><span class="chip">Available</span></div>
-              {@render noteList(nextNotes)}
-              {#if upd.can_install}<button class="solid" onclick={installUpdate} disabled={updMsg === 'Downloading…'}>Install and restart</button>{/if}
-              {#if updMsg}<p class="meta">{updMsg}</p>{/if}
-            </div>
-          {/if}
-          <div class="release">
-            <div class="rhead"><b>Aditus {__APP_VERSION__}</b><span class="chip">Installed</span></div>
-            {#if nowNotes.length}{@render noteList(nowNotes)}{:else}<p class="meta">No notes for this version.</p>{/if}
+          <div class="col">
+            {#if nextNotes.length}
+              <article class="card rel next">
+                <div class="rhead">
+                  <b class="ver">{upd.latest}</b><span class="chip">Update available</span><span class="grow"></span>
+                  {#if upd.can_install}<button class="solid" onclick={installUpdate} disabled={updMsg === 'Downloading…'}>Install and restart</button>{/if}
+                </div>
+                {#if updMsg}<p class="meta pad">{updMsg}</p>{/if}
+                <div class="notes">{@render rows(nextNotes, true)}</div>
+              </article>
+            {/if}
+            {#if installed}
+              <article class="card rel">
+                <div class="rhead"><b class="ver">{installed.version}</b><span class="chip">Installed</span></div>
+                <div class="notes">{@render rows(installed.items, !nextNotes.length)}</div>
+              </article>
+            {/if}
+            {#if earlier.length}
+              <h2>Earlier versions</h2>
+              {#each earlier as r}
+                <details class="card old">
+                  <summary>
+                    <b>{r.version}</b><span class="meta">{r.items.length} {r.items.length === 1 ? 'change' : 'changes'}</span><span class="grow"></span>
+                    <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+                  </summary>
+                  <div class="notes">{@render rows(r.items, false)}</div>
+                </details>
+              {/each}
+            {/if}
+            {#if !releases.length && !nextNotes.length}<p class="meta">No release notes yet.</p>{/if}
           </div>
         </div>
       </section>
@@ -771,19 +801,32 @@
   .chips button.on { background: var(--accent); border-color: var(--accent); color: #111114; font-weight: 600; }
   .chips i, .who i { width: 8px; height: 8px; border-radius: 50%; display: block; }
   .list { flex: 1; overflow-y: auto; }
-  .wn .list { display: flex; flex-direction: column; gap: 18px; max-width: 720px; }
-  .release { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
-  .release.next { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
-  .rhead { display: flex; align-items: center; gap: 12px; }
-  .rhead b { font: 800 22px 'Bricolage Grotesque Variable', system-ui, sans-serif; letter-spacing: -.02em; }
-  .chip { font: 500 10.5px ui-monospace, 'SF Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); border: 1px solid var(--line); border-radius: 99px; padding: 3px 9px; }
-  .next .chip { color: #111114; background: var(--accent); border-color: var(--accent); }
-  ul.notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; width: 100%; }
-  ul.notes li { display: flex; align-items: baseline; gap: 12px; line-height: 1.45; font-size: 14px; user-select: text; -webkit-user-select: text; }
-  .tag { flex: none; width: 74px; text-align: center; font: 600 10.5px ui-monospace, 'SF Mono', monospace; letter-spacing: .08em; text-transform: uppercase; border-radius: 6px; padding: 3px 0; }
-  .tag.new { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
-  .tag.improved { color: #6ea8ff; background: color-mix(in srgb, #6ea8ff 16%, transparent); }
-  .tag.fix { color: #5fd38d; background: color-mix(in srgb, #5fd38d 16%, transparent); }
+  .wn .list { mask-image: linear-gradient(to bottom, transparent, #000 18px); } /* content fades out under the title instead of a hard edge */
+  .hist.wn { padding-bottom: 0; } /* the list scrolls to the window edge instead of being cut above it */
+  .col { max-width: 768px; display: flex; flex-direction: column; gap: 14px; padding-bottom: 120px; }
+  .col h2 { margin: 14px 0 0; }
+  .rel { overflow: hidden; }
+  .rel.next { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
+  .rhead { display: flex; align-items: center; gap: 12px; padding: 20px 20px 16px; }
+  .ver { font: 800 40px/1 'Bricolage Grotesque Variable', system-ui, sans-serif; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+  .chip { font-size: 12px; font-weight: 600; color: var(--dim); background: var(--bg3); border-radius: 99px; padding: 4px 11px; }
+  .next .chip { color: #111114; background: var(--accent); }
+  .pad { padding: 0 20px 12px; }
+  .note { display: flex; align-items: flex-start; gap: 14px; padding: 14px 20px; border-top: 1px solid var(--line); }
+  .ntile { flex: none; width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; --kc: var(--accent); color: color-mix(in srgb, var(--kc) 72%, var(--fg)); background: color-mix(in srgb, var(--kc) 16%, transparent); }
+  .ntile.improved { --kc: #6ea8ff; }
+  .ntile.fix { --kc: #5fd38d; }
+  .txt { font-size: 15px; line-height: 1.55; padding-top: 2px; max-width: 62ch; text-wrap: pretty; user-select: text; -webkit-user-select: text; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .old summary { display: flex; align-items: center; gap: 12px; padding: 14px 20px; cursor: pointer; list-style: none; }
+  .old summary::-webkit-details-marker { display: none; }
+  .old summary b { font: 800 20px 'Bricolage Grotesque Variable', system-ui, sans-serif; letter-spacing: -.02em; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .old summary:hover b { color: var(--fg); }
+  .old .chev { color: var(--dim); transition: transform .25s cubic-bezier(.16, 1, .3, 1); }
+  .old[open] .chev { transform: rotate(180deg); }
+  .old[open] summary b { color: var(--fg); }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+  @media (prefers-reduced-motion: no-preference) { .note.anim { animation: rise .6s cubic-bezier(.16, 1, .3, 1) both; animation-delay: calc(var(--i) * 60ms + 80ms); } }
   .day { padding: 16px 0 8px; color: var(--dim); font: 500 10.5px ui-monospace, 'SF Mono', monospace; letter-spacing: .1em; text-transform: uppercase; }
   .hrow { display: flex; align-items: center; gap: 14px; width: 100%; height: 52px; border-radius: 0; border-bottom: 1px solid var(--line); text-align: left; padding: 0 6px; }
   .hrow:hover { background: var(--bg2); }
