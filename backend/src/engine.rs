@@ -87,7 +87,9 @@ thread_local! {
     static HOST: RefCell<HashMap<String, Panel>> = RefCell::new(HashMap::new());
     /// Window -> the page last placed in its host.
     static SHOWN: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
-    /// Page label -> size its host should give it.
+    /// Overlay label -> its own panel, for the same reason as `HOST`: the panel is what gets stretched and placed.
+    static BOX: RefCell<HashMap<String, Panel>> = RefCell::new(HashMap::new());
+    /// Page or overlay label -> size its host panel should give it.
     static PREF: RefCell<HashMap<String, (i32, i32)>> = RefCell::new(HashMap::new());
     static REG: RefCell<Reg> = RefCell::new(Reg::default());
 }
@@ -128,6 +130,36 @@ fn place_view(v: &View, b: Bounds) {
     let cur = v.bounds();
     if (cur.x, cur.y, cur.width, cur.height) != (want.x, want.y, want.width, want.height) {
         v.set_bounds(Some(&want));
+    }
+}
+
+/// A panel whose box layout gives its child exactly its `PREF` size (see `HOST`).
+fn container() -> Option<Panel> {
+    let p = panel_create(Some(&mut HostDelegate::new()))?;
+    let settings = BoxLayoutSettings { horizontal: 1, main_axis_alignment: AxisAlignment::START, cross_axis_alignment: AxisAlignment::START, ..Default::default() };
+    p.set_to_box_layout(Some(&settings));
+    Some(p)
+}
+
+/// Places `bv` by moving and sizing the panel `host` holding it. `moved`: re-attach the native view even if
+/// the panel did not move.
+fn place_in(host: &Panel, bv: &BrowserView, label: &str, b: Bounds, moved: bool) {
+    let size = (b.2.round() as i32, b.3.round() as i32);
+    if PREF.with(|p| p.borrow_mut().insert(label.to_string(), size)) != Some(size) {
+        View::from(bv).invalidate_layout();
+    }
+    let host_v = View::from(host);
+    let moved = moved || {
+        let c = host_v.bounds();
+        (c.x, c.y) != (b.0.round() as i32, b.1.round() as i32)
+    };
+    place_view(&host_v, b);
+    // The native view of a browser does not follow its host moving; a nudge makes it re-attach.
+    // Kept: the views delegate has no callback for the native view re-attaching (on_layout_changed
+    // fires for the host, which is exactly what did not propagate).
+    if moved {
+        place_view(&View::from(bv), (1.0, 0.0, b.2, b.3));
+        place_view(&View::from(bv), (0.0, 0.0, b.2, b.3));
     }
 }
 
@@ -418,10 +450,19 @@ fn mount(spec: &Spec, win: &Window, bv: &BrowserView, bounds: Bounds, visible: b
             PREF.with(|p| p.borrow_mut().insert(spec.label.clone(), (w.round() as i32, h.round() as i32)));
             host.add_child_view(Some(&mut v));
         }
-        None => {
-            win.add_child_view(Some(&mut v));
-            bv.set_bounds(Some(&rect(bounds)));
-        }
+        None => match container().filter(|_| spec.kind == Kind::Overlay) {
+            Some(c) => {
+                c.add_child_view(Some(&mut v));
+                win.add_child_view(Some(&mut View::from(&c)));
+                c.set_visible(visible as i32);
+                place_in(&c, bv, &spec.label, bounds, true);
+                BOX.with(|b| b.borrow_mut().insert(spec.label.clone(), c));
+            }
+            None => {
+                win.add_child_view(Some(&mut v));
+                bv.set_bounds(Some(&rect(bounds)));
+            }
+        },
     }
     bv.set_visible(visible as i32);
     if spec.kind == Kind::Page && visible {
@@ -523,9 +564,11 @@ pub fn place_window_buttons(win: &str) {
 /// Overlays (palette, suggestions, panels) must stay above pages created after them.
 pub fn raise_overlays(win: &str) {
     let Some(w) = window(win) else { return };
-    let overlays: Vec<BrowserView> = reg(|r| r.views.values().filter(|v| v.win == win && v.kind == Kind::Overlay).map(|v| v.bv.clone()).collect());
-    for bv in overlays {
-        w.reorder_child_view(Some(&mut View::from(&bv)), -1);
+    let overlays: Vec<String> = reg(|r| r.views.iter().filter(|(_, v)| v.win == win && v.kind == Kind::Overlay).map(|(l, _)| l.clone()).collect());
+    for l in overlays {
+        if let Some(c) = BOX.with(|b| b.borrow().get(&l).cloned()) {
+            w.reorder_child_view(Some(&mut View::from(&c)), -1);
+        }
     }
 }
 
@@ -534,33 +577,23 @@ pub fn set_bounds(label: &str, b: Bounds) {
     if let Some((bv, win)) = reg(|r| r.views.get(label).filter(|v| v.kind == Kind::Page).map(|v| (v.bv.clone(), v.win.clone()))) {
         reg(|r| r.views.get_mut(label).map(|v| v.bounds = b));
         if let Some(host) = HOST.with(|h| h.borrow().get(&win).cloned()) {
-            let size = (b.2.round() as i32, b.3.round() as i32);
-            let old = PREF.with(|p| p.borrow_mut().insert(label.to_string(), size));
-            let host_v = View::from(&host);
-            if old != Some(size) {
-                View::from(&bv).invalidate_layout();
-            }
             let switched = SHOWN.with(|s| s.borrow_mut().insert(win.clone(), label.to_string())).as_deref() != Some(label);
-            let moved = switched || {
-                let c = host_v.bounds();
-                (c.x, c.y) != (b.0.round() as i32, b.1.round() as i32)
-            };
-            place_view(&host_v, b);
-            // The native view of a page does not follow its host moving; a nudge makes it re-attach.
-            // Kept: the views delegate has no callback for the native view re-attaching (on_layout_changed
-            // fires for the host, which is exactly what did not propagate).
-            if moved {
-                place_view(&View::from(&bv), (1.0, 0.0, b.2, b.3));
-                place_view(&View::from(&bv), (0.0, 0.0, b.2, b.3));
-            }
+            place_in(&host, &bv, label, b, switched);
         }
         return;
     }
     let pending = reg(|r| r.pending.get_mut(label).map(|p| p.0 = b).is_some());
     if !pending {
         if let Some(bv) = view(label) {
-            place(&bv, b);
+            // Same place again (the suggestion list on every keystroke): re-placing re-lays out the whole window, which flashes the page behind.
+            if reg(|r| r.views.get(label).is_some_and(|v| v.bounds == b)) {
+                return;
+            }
             reg(|r| r.views.get_mut(label).map(|v| v.bounds = b));
+            match BOX.with(|c| c.borrow().get(label).cloned()) {
+                Some(c) => place_in(&c, &bv, label, b, false),
+                None => place(&bv, b),
+            }
         }
     }
 }
@@ -569,7 +602,15 @@ pub fn set_visible(label: &str, visible: bool) {
     let pending = reg(|r| r.pending.get_mut(label).map(|p| p.1 = visible).is_some());
     if !pending {
         if let Some(bv) = view(label) {
+            // An overlay's panel goes with it (show the panel first, hide the view first).
+            let c = BOX.with(|c| c.borrow().get(label).cloned());
+            if let Some(c) = c.as_ref().filter(|_| visible) {
+                c.set_visible(1);
+            }
             bv.set_visible(visible as i32);
+            if let Some(c) = c.as_ref().filter(|_| !visible) {
+                c.set_visible(0);
+            }
         }
     }
 }
@@ -633,7 +674,7 @@ pub fn close(label: &str) {
     rec.bv.set_visible(0);
     let host = rec.bv.browser().and_then(|b| b.host());
     let (bv, win, kind) = (rec.bv.clone(), rec.win.clone(), rec.kind);
-    detach(&bv, &win, kind);
+    detach(label, &bv, &win, kind);
     if let Some((dwin, dbv, _)) = docked {
         // DevTools goes first (Chrome's DevToolsWindow does the same when its page closes): ask CEF to close it,
         // take its view out of the window, and only close the page once CEF reports the DevTools gone.
@@ -654,8 +695,15 @@ pub fn close(label: &str) {
 }
 
 /// Takes a page view out of the window (or its host container).
-fn detach(bv: &BrowserView, win: &str, kind: Kind) {
+fn detach(label: &str, bv: &BrowserView, win: &str, kind: Kind) {
     let host = HOST.with(|h| h.borrow().get(win).cloned()).filter(|_| kind == Kind::Page);
+    if let Some(c) = BOX.with(|b| b.borrow_mut().remove(label)) {
+        c.remove_child_view(Some(&mut View::from(bv)));
+        if let Some(w) = window(win) {
+            w.remove_child_view(Some(&mut View::from(&c)));
+        }
+        return;
+    }
     match (host, window(win)) {
         (Some(h), _) => h.remove_child_view(Some(&mut View::from(bv))),
         (None, Some(w)) => w.remove_child_view(Some(&mut View::from(bv))),
@@ -1010,9 +1058,12 @@ pub fn relayout(win: &str) {
     }
     tabs::apply_layout(&tabs::AppHandle);
     // The layout pass stretches every child view; overlays are not part of apply_layout.
-    let others: Vec<(BrowserView, Bounds)> = reg(|r| r.views.values().filter(|v| v.win == win && v.kind == Kind::Overlay).map(|v| (v.bv.clone(), v.bounds)).collect());
-    for (bv, b) in others {
-        place(&bv, b);
+    let others: Vec<(String, BrowserView, Bounds)> = reg(|r| r.views.iter().filter(|(_, v)| v.win == win && v.kind == Kind::Overlay).map(|(l, v)| (l.clone(), v.bv.clone(), v.bounds)).collect());
+    for (l, bv, b) in others {
+        match BOX.with(|c| c.borrow().get(&l).cloned()) {
+            Some(c) => place_in(&c, &bv, &l, b, false),
+            None => place(&bv, b),
+        }
     }
 }
 
@@ -1046,9 +1097,7 @@ wrap_window_delegate! {
             window.add_child_view(Some(&mut v));
             let sz = window.size();
             self.ui.set_bounds(Some(&Rect { x: 0, y: 0, width: sz.width, height: sz.height }));
-            if let Some(host) = panel_create(Some(&mut HostDelegate::new())) {
-                let settings = BoxLayoutSettings { horizontal: 1, main_axis_alignment: AxisAlignment::START, cross_axis_alignment: AxisAlignment::START, ..Default::default() };
-                host.set_to_box_layout(Some(&settings));
+            if let Some(host) = container() {
                 window.add_child_view(Some(&mut View::from(&host)));
                 HOST.with(|h| h.borrow_mut().insert(self.label.clone(), host));
             }
@@ -1064,6 +1113,7 @@ wrap_window_delegate! {
                 let gone: Vec<String> = r.views.iter().filter(|(_, v)| v.win == self.label).map(|(l, _)| l.clone()).collect();
                 for l in &gone {
                     r.views.remove(l);
+                    BOX.with(|b| b.borrow_mut().remove(l));
                 }
                 r.pending.retain(|l, _| !gone.contains(l));
                 gone

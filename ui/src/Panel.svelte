@@ -12,7 +12,7 @@
   import { call, on, onState, color, applyTheme, setProfileColors, ACCENT_NAMES } from './lib/api.js';
 
   let { view } = $props();
-  let st = $state(null);
+  let st = $state.raw(null);
   let q = $state('');
   let only = $state(null); // history profile filter
   let rows = $state([]);
@@ -100,10 +100,10 @@
   const earlier = releases.filter((r) => r !== installed);
   const nextNotes = $derived(upd && upd !== 'checking' && upd.newer ? parse(upd.notes) : []);
   let marks = $state([]);
-  let reqSeq = 0; // drop replies that arrive after a newer query
+  let reqSeq = 0, markSeq = 0; // drop replies that arrive after a newer query (separate counters: they load together)
   async function loadMarks() {
-    const n = ++reqSeq, r = await call('bookmark_search', { q });
-    if (n === reqSeq) marks = r;
+    const n = ++markSeq, r = await call('bookmark_search', { q });
+    if (n === markSeq) marks = r;
   }
 
   async function loadHistory() {
@@ -409,9 +409,9 @@
       </div>
       {#if !st.incognito && topSites.length}
         <div class="sites">
-          {#each topSites as s}
+          {#each topSites as s (s.url)}
             <button class="site" onclick={() => { call('new_tab', { url: s.url }); call('hide_panel'); }}>
-              <span class="ico"><b>{s.host[0].toUpperCase()}</b><img src="https://{s.host}/favicon.ico" alt="" onerror={(e) => (e.currentTarget.style.display = 'none')} /><i style="background:{color(s.profile)}"></i></span>
+              <span class="ico"><b>{s.host[0].toUpperCase()}</b><img src="https://{s.host}/favicon.ico" alt="" onload={(e) => (e.currentTarget.style.display = '')} onerror={(e) => (e.currentTarget.style.display = 'none')} /><i style="background:{color(s.profile)}"></i></span>
               <span class="hn">{s.host}</span>
             </button>
           {/each}

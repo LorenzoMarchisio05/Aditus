@@ -1390,7 +1390,6 @@ pub fn prewake(app: &AppHandle, id: u32) {
             let wake = t.discarded && t.opener.is_none();
             if wake {
                 t.discarded = false;
-                t.loading = true;
                 t.restore = true;
                 t.last_active = Instant::now();
             }

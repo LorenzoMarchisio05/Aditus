@@ -1,7 +1,7 @@
 import { call } from './api.js';
 
 const bare = (u) => u.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
-const urlish = (q) => /^(\w+:\/\/|[\w-]+(\.[\w-]+)+(:\d+)?(\/|$))/.test(q);
+const urlish = (q) => /^(\w+:\/\/|localhost(:\d+)?(\/|$)|[\w-]+(\.[\w-]+)+(:\d+)?(\/|$))/.test(q);
 
 /**
  * Autocomplete list under an address input. The list lives in its own overlay webview (page webviews
@@ -21,13 +21,14 @@ export function createSuggest({ anchor = () => ({ x: 0, y: 0, w: 0 }), palette =
     call('suggest_hide');
   }
 
-  async function input(q) {
+  /** Refreshes the list; resolves to the history address that completes `q` inline (when `inline`), else null. */
+  async function input(q, inline = false) {
     typed = q;
     sel = -1;
     const mine = ++seq;
-    if (!q.trim()) return hide();
+    if (!q.trim()) return void hide();
     const [found, marks] = await Promise.all([call('history_search', { q }), call('bookmark_search', { q }).catch(() => [])]);
-    if (mine !== seq) return;
+    if (mine !== seq) return null;
     const lq = q.toLowerCase(), byUrl = new Map();
     // rows come newest first; how often a page shows up is a cheap stand-in for how much it is used
     for (const r of found) {
@@ -40,8 +41,10 @@ export function createSuggest({ anchor = () => ({ x: 0, y: 0, w: 0 }), palette =
     // bookmarks lead, and a bookmarked page isn't listed twice
     const bm = marks.slice(0, 2).map((m) => ({ kind: 'bm', url: m.url, title: m.title }));
     const starred = new Set(bm.map((b) => bare(b.url)));
-    const hist = [...bm, ...[...byUrl.values()].filter((h) => bare(h.url).toLowerCase() !== lq && !starred.has(bare(h.url))).sort((a, b) => a.score - b.score || b.n - a.n)];
-    const head = { kind: urlish(q) ? 'go' : 'search', url: q, title: q };
+    // the completion the input is about to show (best history address that starts with what was typed); it leads the list
+    const best = inline && !lq.includes(' ') ? found.map((r) => ({ r, k: bare(r.url) })).find(({ k }) => k.toLowerCase().startsWith(lq) && k.length > lq.length) : null;
+    const hist = [...bm, ...[...byUrl.values()].filter((h) => bare(h.url).toLowerCase() !== lq && bare(h.url) !== best?.k && !starred.has(bare(h.url))).sort((a, b) => a.score - b.score || b.n - a.n)];
+    const head = best ? { kind: 'go', url: best.r.url, title: best.k } : { kind: urlish(q) ? 'go' : 'search', url: q, title: q };
     rows = [head, ...hist.slice(0, 3)];
     push();
     // the engine's completions arrive a moment later and slot in under the history matches
@@ -53,6 +56,7 @@ export function createSuggest({ anchor = () => ({ x: 0, y: 0, w: 0 }), palette =
       rows = [head, ...hist.slice(0, 3), ...more];
       push();
     }, 120);
+    return best?.k ?? null;
   }
 
   /** Arrow keys move the highlight and fill the input; Escape closes. True when the key was used. */

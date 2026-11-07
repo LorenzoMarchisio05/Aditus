@@ -11,7 +11,7 @@
   const TOP = 52;
   const FIND = 40;
 
-  let st = $state({ tabs: [], active: 0, cfg: null, prompt: null, toast: null, adblock_site: true });
+  let st = $state.raw({ tabs: [], active: 0, cfg: null, prompt: null, toast: null, adblock_site: true });
   let width = $state(250);
   let resizing = false;
   let urlText = $state('');
@@ -45,7 +45,7 @@
   });
   // Swing sits on the footer line while a page is open and watches the pointer over it.
   let look = $state(null), poke = $state(0), perch = $state(null);
-  const perched = $derived(!!tab && !blank && !internal && !collapsed && !guest);
+  const perched = $derived(!!tab && !blank && !internal && !collapsed);
   function placePerch() {
     const r = document.querySelector('.foot')?.getBoundingClientRect();
     perch = r ? { x: r.right - 62, y: r.top - 30 } : null;
@@ -62,7 +62,7 @@
   const hoverTab = (e, t) => {
     clearTimeout(wakeTimer);
     clearTimeout(tipTimer);
-    if (t.discarded) wakeTimer = setTimeout(() => call('prewake_tab', { id: t.id }), 150);
+    if (t.discarded) wakeTimer = setTimeout(() => call('prewake_tab', { id: t.id }), 450);
     // Browser pages (new tab, settings, history...) have no renderer worth measuring.
     if (!t.url || t.url.startsWith('aditus:')) return;
     const r = e.currentTarget.getBoundingClientRect();
@@ -87,11 +87,11 @@
     tabQuery === null || `${t.title} ${t.url} ${t.group ?? ''} ${t.profile}`.toLowerCase().includes(tabQuery.toLowerCase());
   const pinned = $derived(st.tabs.filter((t) => t.pinned && matches(t)));
   let folded = $state(new Set());
-  const loose = $derived(st.tabs.filter((t) => !t.pinned && !t.group && matches(t)));
+  const loose = $derived(st.tabs.filter((t) => !t.pinned && !t.group && matches(t)).reverse()); // newest first, like a queue
   const groups = $derived(
     [...new Set(st.tabs.filter((t) => !t.pinned && t.group && matches(t)).map((t) => t.group))].map((g) => ({
       name: g,
-      tabs: st.tabs.filter((t) => !t.pinned && t.group === g && matches(t)),
+      tabs: st.tabs.filter((t) => !t.pinned && t.group === g && matches(t)).reverse(),
     })),
   );
   const groupNames = $derived([...new Set(st.tabs.map((t) => t.group).filter(Boolean))]);
@@ -104,9 +104,11 @@
     folded = new Set(folded);
   }
 
+  let appliedW;
   $effect(() => {
     applyTheme(cfg?.settings);
-    if (cfg && !resizing) width = cfg.settings.sidebar_width;
+    const w = cfg?.settings.sidebar_width;
+    if (cfg && !resizing && w !== appliedW) width = appliedW = w; // only a real saved change, not a stale push
   });
 
   // Brand theme; profile colour only tints the profile chip.
@@ -138,11 +140,13 @@
   });
 
   // Picking a suggestion navigates from the overlay; leave edit mode so the bar shows the real URL.
-  let lastUrl;
+  // Same tab and host (a single-page site's pushState) must not wipe what is being typed.
+  let lastUrl, lastKey;
   $effect(() => {
-    const u = tab?.url;
-    if (editing && lastUrl !== undefined && u !== lastUrl) addrEl?.blur();
+    const u = tab?.url, k = `${tab?.id}|${tab?.host}`;
+    if (editing && lastUrl !== undefined && u !== lastUrl && k !== lastKey) addrEl?.blur();
     lastUrl = u;
+    lastKey = k;
   });
 
   $effect(() => {
@@ -231,16 +235,19 @@
   // inline completion from history: fill the rest of the most recent matching URL, selected so Backspace drops it
   async function complete(e) {
     const el = e.currentTarget, typed = el.value;
-    sg.input(typed);
-    if (e.inputType?.startsWith('delete') || !typed || typed.includes(' ')) return;
-    const rows = await call('history_search', { q: typed });
-    if (el.value !== typed || el.selectionStart !== typed.length) return;
-    const bare = (u) => u.replace(/^https?:\/\/(www\.)?/, '');
-    const hit = rows.map((r) => bare(r.url)).find((u) => u.toLowerCase().startsWith(typed.toLowerCase()));
-    if (!hit || hit.length === typed.length) return;
+    // one history lookup serves both the list and the inline completion; the list's top row shows the same address
+    const hit = await sg.input(typed, !e.inputType?.startsWith('delete'));
+    if (!hit || el.value !== typed || el.selectionStart !== typed.length) return;
     urlText = typed + hit.slice(typed.length);
     await tick();
     el.setSelectionRange(typed.length, urlText.length);
+  }
+
+  // Escape: first closes the list, then puts the page's address back, then leaves the bar.
+  function addressKey(e) {
+    if (sg.key(e) || e.key !== 'Escape') return;
+    const url = tab?.url ?? '';
+    if (urlText !== url) { urlText = url; addrEl.select(); } else addrEl.blur();
   }
 
   // Cmd+T / Cmd+Shift+N open the text selected here (menu.rs); tell Rust whenever it changes.
@@ -287,7 +294,7 @@
   }
 
   function favicon(t) {
-    return t.host && !st.incognito && !t.discarded ? `https://${t.host}/favicon.ico` : '';
+    return t.host && !st.incognito ? `https://${t.host}/favicon.ico` : '';
   }
 
   const ctx = (e, t) => { e.preventDefault(); call('tab_menu', { id: t.id }); };
@@ -356,7 +363,7 @@
     oncontextmenu={(e) => ctx(e, t)}
   >
     <span class="fav">
-      {#if t.loading}<span class="spin"></span>{:else}{(t.host || t.title || '·')[0].toUpperCase()}{#if favicon(t)}<img class="fi" src={favicon(t)} alt="" onerror={(e) => (e.currentTarget.style.display = 'none')} />{/if}{/if}
+      {(t.host || t.title || '·')[0].toUpperCase()}{#if favicon(t)}<img class="fi" src={favicon(t)} alt="" onerror={(e) => (e.currentTarget.style.display = 'none')} />{/if}{#if t.loading}<span class="spin"></span>{/if}
     </span>
     {#if !collapsed}
       <span class="title">{t.title}</span>
@@ -380,7 +387,7 @@
   </div>
 {/if}
 
-{#if perched && perch}<Mascot {perch} {look} pulse={poke} groove={!!tab?.audible && !tab?.muted} watching={tab && !tab.discarded ? { url: tab.url, title: tab.title } : null} incognito={st.incognito} />{/if}
+{#if perched && perch}<div style:display={guest ? 'none' : null}><Mascot {perch} {look} pulse={poke} groove={!!tab?.audible && !tab?.muted} watching={tab && !tab.discarded ? { url: tab.url, title: tab.title } : null} incognito={st.incognito} /></div>{/if}
 {#if guest}<Mascot {guest} incognito={st.incognito} onbeat={(p) => (guest.phase = p)} ondone={() => (guest = null)} />{/if}
 
 <aside class="side" class:compact={cfg?.settings.compact_tabs} style="width:{sidebarW}px; padding-top:{mac ? 38 : 0}px">
@@ -393,6 +400,12 @@
   {/if}
   {#if collapsed}
     <button class="cbtn" onclick={() => settings({ sidebar_collapsed: false })} title="Expand sidebar" aria-label="Expand sidebar">☰</button>
+  {/if}
+
+  {#if !collapsed}
+      <button class="newtab first" onclick={() => call('new_tab', {})}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New tab<span class="grow"></span><kbd>⌘T</kbd>
+      </button>
   {/if}
 
   {#if tabQuery !== null && !collapsed}
@@ -424,11 +437,6 @@
   {/if}
 
   <div class="foot" class:perched>
-    {#if !collapsed}
-      <button class="newtab" onclick={() => call('new_tab', {})}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New tab<span class="grow"></span><kbd>⌘T</kbd>
-      </button>
-    {/if}
     <button class="sq" onclick={() => call('show_panel', { view: 'bookmarks' })} title="Bookmarks" aria-label="Bookmarks">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h12v17l-6-4-6 4z"/></svg>
     </button>
@@ -464,7 +472,7 @@
             oninput={complete}
             placeholder="Search or enter address"
             onfocus={(e) => { editing = true; e.currentTarget.select(); }}
-            onkeydown={sg.key}
+            onkeydown={addressKey}
             onselect={reportSel}
             onkeyup={reportSel}
             onmouseup={reportSel}
@@ -560,6 +568,7 @@
   .title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
   .x { padding: 0 6px; opacity: 0; line-height: 1.2; color: var(--dim); }
   .tab:hover .x { opacity: 1; }
+  .fav > .spin { position: absolute; inset: 0; margin: auto; background: var(--bg2); box-shadow: 0 0 0 4px var(--bg2); }
   .spin { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s .7s linear infinite; }
   @keyframes s { to { transform: rotate(360deg); } }
   hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
@@ -568,11 +577,11 @@
   .group span { flex: 1; }
   .group em { font-style: normal; }
   .card { margin: 6px 10px; padding: 8px 8px 8px 14px; background: var(--bg3); border-radius: 12px; display: flex; flex-direction: column; gap: 6px; }
-  .foot.perched { margin-top: 28px; } /* room for the mascot that sits on this line, so cards above never hide behind it */
-  .foot { display: flex; gap: 6px; padding: 10px 10px 6px; margin: 0 0 0; border-top: 1px solid var(--line); }
+  .foot { display: flex; gap: 6px; padding: 10px 10px 6px; margin: 28px 0 0; /* room for the mascot that sits on this line; always there so nothing jumps when it comes and goes */ border-top: 1px solid var(--line); }
   .newtab { flex: 1; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--bg2); border-radius: 10px; font-weight: 500; color: var(--dim); }
+  .newtab.first { flex: none; margin: 4px 10px 6px; }
   .newtab:hover { color: var(--fg); }
-  .sq { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; color: var(--dim); border-radius: 10px; }
+  .sq { flex: 1; width: auto; min-width: 36px; height: 36px; padding: 0; display: grid; place-items: center; color: var(--dim); border-radius: 10px; }
   kbd { font: 11px ui-monospace, 'SF Mono', monospace; color: var(--dim); background: var(--bg3); border-radius: 6px; padding: 2px 6px; }
   .grow { flex: 1; }
   .cbtn { margin: 8px auto 4px; }

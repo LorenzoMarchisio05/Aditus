@@ -173,6 +173,8 @@
   }
   $effect(() => {
     if (!floorEl) return;
+    const g = guest; // the only trigger: perch, mood and position changes must not restart the action mid-way
+    return untrack(() => {
     let alive = true, timer;
     const wait = (ms) => new Promise((r) => { wake = r; timer = setTimeout(r, ms); });
     const doing = async (m, ms, rest = true) => { mode = m; await wait(ms); mode = 'idle'; if (rest) { resting = true; await wait(roam ? 500 + Math.random() * 1200 : 6000 + Math.random() * 8000); resting = false; } };
@@ -213,6 +215,7 @@
       }
     })();
     return () => { alive = false; clearTimeout(timer); };
+    });
   });
 </script>
 

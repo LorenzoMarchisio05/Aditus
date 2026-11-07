@@ -106,7 +106,7 @@ fn default_theme() -> String {
 }
 
 fn default_sidebar() -> u32 {
-    290
+    250
 }
 
 impl Default for Settings {

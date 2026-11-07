@@ -474,8 +474,8 @@ pub fn dispatch(ctx: &Ctx, cmd: &str, a: Value, reply: Reply) {
                 let bounds = tabs::content_rect(&APP, win);
                 if engine::has_view(&label) {
                     engine::set_bounds(&label, bounds);
+                    engine::emit_to(&label, "panel-open", "null"); // refresh first, so the old frame isn't what shows
                     engine::set_visible(&label, true);
-                    engine::emit_to(&label, "panel-open", "null");
                 } else {
                     engine::create(overlay(&label, win, &view, bounds));
                 }
