@@ -3,6 +3,11 @@
 One section per release, newest first. Each bullet starts with a bold tag: **New**, **Improved** or **Fix**.
 The release workflow publishes the matching section as the GitHub release notes, and the app shows it.
 
+## 0.1.18
+- **Fix** Cmd/Ctrl+click and middle click on a link now open it in a new tab.
+- **Improved** Search suggestions appear as soon as you type, without the extra wait.
+- **Fix** Links opened from other apps with Aditus as the default browser are received more reliably.
+
 ## 0.1.17
 - **New** The New tab button is now always at the top of the sidebar, and tabs are listed newest first.
 - **Improved** The address bar autocompletes like other browsers: the top suggestion matches the completed address, Escape restores the page's address, and localhost shows as an address.

@@ -122,11 +122,17 @@ pub fn setup_application() {
     assert!(NSApp(MainThreadMarker::new().expect("main thread")).isKindOfClass(Application::class()));
 }
 
-pub fn setup_delegate() -> Retained<AppDelegate> {
+thread_local! {
+    static DELEGATE: std::cell::RefCell<Option<Retained<AppDelegate>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Installs our delegate (it receives the links opened with Aditus as default browser). `NSApp` keeps only a
+/// weak reference, so it is held here; CEF may install its own during start-up, so this runs again once the
+/// context is up (see `engine::start`).
+pub fn setup_delegate() {
     let mtm = MainThreadMarker::new().expect("main thread");
-    let delegate = AppDelegate::new(mtm);
-    NSApp(mtm).setDelegate(Some(&ProtocolObject::<dyn NSApplicationDelegate>::from_retained(delegate.clone())));
-    delegate
+    let delegate = DELEGATE.with(|d| d.borrow_mut().get_or_insert_with(|| AppDelegate::new(mtm)).clone());
+    NSApp(mtm).setDelegate(Some(&ProtocolObject::<dyn NSApplicationDelegate>::from_retained(delegate)));
 }
 
 /// A dev run is a bare binary, so macOS names the app menu after it ("aditus").

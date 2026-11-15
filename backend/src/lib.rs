@@ -166,7 +166,7 @@ pub fn run_browser() -> Result<(), String> {
         return Err("CEF failed to initialise (another Aditus running?)".into());
     }
     #[cfg(target_os = "macos")]
-    let _delegate = mac::setup_delegate();
+    mac::setup_delegate();
 
     run_message_loop();
     shutdown();

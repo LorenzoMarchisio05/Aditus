@@ -9,12 +9,11 @@ const urlish = (q) => /^(\w+:\/\/|localhost(:\d+)?(\/|$)|[\w-]+(\.[\w-]+)+(:\d+)
  * `anchor()` gives the input's {x, y, w} in window coordinates; `fill(text)` puts text in the input.
  */
 export function createSuggest({ anchor = () => ({ x: 0, y: 0, w: 0 }), palette = false, fill }) {
-  let rows = [], sel = -1, typed = '', seq = 0, timer;
+  let rows = [], sel = -1, typed = '', seq = 0;
   const push = () => call('suggest_show', { payload: { rows, sel, q: typed }, palette, ...anchor() });
 
   function hide() {
     seq++;
-    clearTimeout(timer);
     rows = [];
     sel = -1;
     typed = '';
@@ -27,6 +26,7 @@ export function createSuggest({ anchor = () => ({ x: 0, y: 0, w: 0 }), palette =
     sel = -1;
     const mine = ++seq;
     if (!q.trim()) return void hide();
+    const sug = call('search_suggest', { q }).catch(() => []); // started now, in parallel with the local lookups
     const [found, marks] = await Promise.all([call('history_search', { q }), call('bookmark_search', { q }).catch(() => [])]);
     if (mine !== seq) return null;
     const lq = q.toLowerCase(), byUrl = new Map();
@@ -47,15 +47,13 @@ export function createSuggest({ anchor = () => ({ x: 0, y: 0, w: 0 }), palette =
     const head = best ? { kind: 'go', url: best.r.url, title: best.k } : { kind: urlish(q) ? 'go' : 'search', url: q, title: q };
     rows = [head, ...hist.slice(0, 3)];
     push();
-    // the engine's completions arrive a moment later and slot in under the history matches
-    clearTimeout(timer);
-    timer = setTimeout(async () => {
-      const words = await call('search_suggest', { q }).catch(() => []);
+    // the engine's completions slot in under the history matches as soon as they land
+    sug.then((words) => {
       if (mine !== seq || sel >= 0 || !words.length) return;
       const more = words.filter((w) => w.toLowerCase() !== lq).slice(0, 4).map((w) => ({ kind: 'search', url: w, title: w }));
       rows = [head, ...hist.slice(0, 3), ...more];
       push();
-    }, 120);
+    });
     return best?.k ?? null;
   }
 

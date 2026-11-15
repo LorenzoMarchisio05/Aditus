@@ -244,6 +244,8 @@ pub fn defer_after(ms: i64, f: impl FnOnce() + 'static) {
 
 /// CEF is initialised: build the first window and restore the session.
 pub fn start() {
+    #[cfg(target_os = "macos")]
+    crate::mac::setup_delegate();
     scheme::register(None);
     tabs::startup(&tabs::AppHandle);
 }
@@ -1474,6 +1476,24 @@ wrap_request_handler! {
             }
             ipc::router().on_before_browse(browser.cloned(), frame.cloned());
             0
+        }
+
+        // Cmd/Ctrl+click and middle click: Chrome's own tab strip is not ours, so the link becomes a tab here.
+        fn on_open_urlfrom_tab(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            target_url: Option<&CefString>,
+            target_disposition: WindowOpenDisposition,
+            user_gesture: i32,
+        ) -> i32 {
+            let new_tab = matches!(target_disposition, WindowOpenDisposition::NEW_BACKGROUND_TAB | WindowOpenDisposition::NEW_FOREGROUND_TAB | WindowOpenDisposition::NEW_WINDOW);
+            if !new_tab || user_gesture == 0 {
+                return 0;
+            }
+            let (url, label) = (target_url.map(|u| u.to_string()).unwrap_or_default(), self.label.clone());
+            defer(move || tabs::on_popup(&tabs::AppHandle, &label, &url));
+            1
         }
 
         fn resource_request_handler(
